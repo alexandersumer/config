@@ -4,7 +4,33 @@ parse_git_branch() {
 
 export PS1="\[\e]0;\w\a\]\n\[\e[32m\]\u\[\e[0;90m\]:\[\e[1;33m\]\w\[\e[31m\]\[\e[0;90m\]\[\e[0m\]\[\e[32m\]\$(parse_git_branch)\[\e[0;90m\]\n\[\033[33m\] $ \[\033[00m\]"
 export USER='aj'
-export PATH="/usr/local/opt/ruby/bin:$PATH"
+
+alias q='exit'
+alias c='clear'
+alias h='history'
+alias lsa='ls -a'
+alias lsl='ls -l'
+alias null='/dev/null'
+
+alias home='cd ~'
+alias root='cd /'
+alias dtop='cd ~/Desktop'
+alias gdrive='cd ~/Google\ Drive'
+alias opensource='cd ~/Google\ Drive/open-source/'
+
+alias ..='cd ..'
+alias ...='cd ..; cd ..'
+alias ....='cd ..; cd ..; cd ..'
+
+alias g='git'
+alias status='git status'
+alias commit='git commit -m'
+alias clone='git clone'
+alias stash='git stash'
+alias log='git log'
+alias rlog='git reflog'
+alias addu='git add -u'
+alias adda='git add .'
 
 case $- in
     *i*) ;;
@@ -58,10 +84,6 @@ if [ -x /usr/bin/dircolors ]; then
     alias fgrep='fgrep --color=auto'
     alias egrep='egrep --color=auto'
 fi
-
-alias ll='ls -alF'
-alias la='ls -A'
-alias l='ls -CF'
 
 alias alert='notify-send --urgency=low -i "$([ $? = 0 ] && echo terminal || echo error)" "$(history|tail -n1|sed -e '\''s/^\s*[0-9]\+\s*//;s/[;&|]\s*alert$//'\'')"'
 
