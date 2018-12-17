@@ -29,8 +29,10 @@ alias clone='git clone'
 alias stash='git stash'
 alias log='git log'
 alias rlog='git reflog'
-alias addu='git add -u'
-alias adda='git add .'
+alias add='git add .'
+alias push='git push'
+alias qcommit='git add . && git commit -m "update"'
+alias pulldev='git checkout develop && git fetch && git reset --hard origin/develop'
 
 case $- in
     *i*) ;;
