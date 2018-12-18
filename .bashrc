@@ -22,7 +22,6 @@ alias ..='cd ..'
 alias ...='cd ..; cd ..'
 alias ....='cd ..; cd ..; cd ..'
 
-alias g='git'
 alias status='git status'
 alias commit='git commit -m'
 alias clone='git clone'
@@ -30,9 +29,11 @@ alias stash='git stash'
 alias log='git log'
 alias rlog='git reflog'
 alias add='git add .'
-alias push='git push'
-alias qcommit='git add . && git commit -m "update"'
+alias qc='git add . && git commit -m "update"'
 alias pulldev='git checkout develop && git fetch && git reset --hard origin/develop'
+alias fetch='git fetch'
+alias rh='git reset --hard origin/develop'
+alias cred='git config credential.helper store'
 
 case $- in
     *i*) ;;
