@@ -4,8 +4,6 @@ parse_git_branch() {
 
 export PS1="\[\e]0;\w\a\]\n\[\e[32m\]\u\[\e[0;90m\]:\[\e[1;33m\]\w\[\e[31m\]\[\e[0;90m\]\[\e[0m\]\[\e[32m\]\$(parse_git_branch)\[\e[0;90m\]\n\[\033[33m\] $ \[\033[00m\]"
 
- USER='alexander.jones'
-
  alias c='clear'
  alias ..='cd ..'
  alias ...='cd ..; cd ..'
