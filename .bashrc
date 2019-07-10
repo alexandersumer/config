@@ -29,10 +29,6 @@ alias cre='git config credential.helper store'
 #!/bin/bash
 iatest=$(expr index "$-" i)
 
-#######################################################
-# SOURCED ALIAS'S AND SCRIPTS BY zachbrowne.me
-#######################################################
-
 # Source global definitions
 if [ -f /etc/bashrc ]; then
 	 . /etc/bashrc
