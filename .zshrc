@@ -24,3 +24,5 @@ alias bra='git branch'
 alias new='git checkout -b'
 alias rhd='git checkout develop && git fetch && git reset --hard origin/develop'
 alias rhm='git checkout master && git fetch && git reset --hard origin/master'
+
+alias upVim='cd ~/.vim_runtime && git pull --rebase && cd -'
