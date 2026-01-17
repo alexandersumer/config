@@ -1,0 +1,5 @@
+---
+description: Resolve merge conflicts preserving branch intent
+---
+
+Analyze the conflict markers and the intent of both the current branch and the incoming branch. Resolve the merge conflicts in a logical and complete manner that preserves the core intent of the current branch while incorporating necessary updates from the incoming branch.
