@@ -1,0 +1,25 @@
+prompts:
+  # === Branch & PR Workflows ===
+  - name: fix-failures
+    description: "Run build/test, identify failures, and resolve with clean architectural solutions"
+    content_file: templates/branch-and-pr-workflows/fix-failures.md
+
+  - name: describe-branch
+    description: "Generate a PR description (3 sentences + summary line)"
+    content_file: templates/branch-and-pr-workflows/describe-branch.md
+
+  - name: describe-diff
+    description: "Generate a <10 word phrase summarizing working changes"
+    content_file: templates/branch-and-pr-workflows/describe-diff.md
+
+  - name: review-branch
+    description: "Strict Senior Engineer review for bugs/security (no style nits)"
+    content_file: templates/branch-and-pr-workflows/review-branch.md
+
+  - name: apply-changes
+    description: "Implement requested changes with surgical precision"
+    content_file: templates/branch-and-pr-workflows/apply-changes.md
+
+  - name: resolve-conflict
+    description: "Resolve merge conflicts preserving branch intent"
+    content_file: templates/branch-and-pr-workflows/resolve-conflict.md
