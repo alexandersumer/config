@@ -13,7 +13,7 @@ prompts:
     content_file: templates/branch-and-pr-workflows/describe-diff.md
 
   - name: review-branch
-    description: "Strict Senior Engineer review for bugs/security (no style nits)"
+    description: "Strict Senior Engineer review for bugs/security/inelegant design (no style nits)"
     content_file: templates/branch-and-pr-workflows/review-branch.md
 
   - name: apply-changes
