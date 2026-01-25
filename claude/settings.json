@@ -473,6 +473,21 @@
       "Bash(git commit*)",
       "Bash(git push*)",
 
+      "Bash(git merge --abort*)",
+      "Bash(git merge --quit*)",
+      "Bash(git merge --continue*)",
+      "Bash(git rebase --abort*)",
+      "Bash(git rebase --quit*)",
+      "Bash(git rebase --continue*)",
+      "Bash(git cherry-pick --abort*)",
+      "Bash(git cherry-pick --quit*)",
+      "Bash(git cherry-pick --continue*)"
+    ],
+
+    "ask": [
+      "Bash(git commit*)",
+      "Bash(git push*)",
+
       "Bash(git merge *)",
       "Bash(git rebase*)",
       "Bash(git cherry-pick*)",
@@ -645,7 +660,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "FILE=$(echo \"$ARGUMENTS\" | jq -r '.file_path'); if [ -f \"$FILE\" ]; then (npx prettier --write \"$FILE\" 2>/dev/null || npx eslint --fix \"$FILE\" 2>/dev/null || true); fi"
+            "command": "FILE=$(echo \"$ARGUMENTS\" | jq -r '.file_path'); if [ -f \"$FILE\" ]; then prettier --write \"$FILE\" 2>/dev/null; eslint --fix \"$FILE\" 2>/dev/null; fi"
           }
         ]
       }
