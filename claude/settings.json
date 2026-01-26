@@ -466,7 +466,9 @@
       "Bash(gh workflow list*)",
 
       "Bash(gh auth status*)",
-      "Bash(gh status*)"
+      "Bash(gh status*)",
+
+      "Bash(atlas *)"
     ],
 
     "ask": [
