@@ -439,6 +439,8 @@
       "Bash(git stash push*)",
       "Bash(git stash save*)",
 
+      "Bash(git commit*)",
+
       "Bash(gh pr view*)",
       "Bash(gh pr list*)",
       "Bash(gh pr status*)",
@@ -472,22 +474,6 @@
     ],
 
     "ask": [
-      "Bash(git commit*)",
-      "Bash(git push*)",
-
-      "Bash(git merge --abort*)",
-      "Bash(git merge --quit*)",
-      "Bash(git merge --continue*)",
-      "Bash(git rebase --abort*)",
-      "Bash(git rebase --quit*)",
-      "Bash(git rebase --continue*)",
-      "Bash(git cherry-pick --abort*)",
-      "Bash(git cherry-pick --quit*)",
-      "Bash(git cherry-pick --continue*)"
-    ],
-
-    "ask": [
-      "Bash(git commit*)",
       "Bash(git push*)",
 
       "Bash(git merge *)",
