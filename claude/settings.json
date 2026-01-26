@@ -2,6 +2,7 @@
   "model": "opus",
   "alwaysThinkingEnabled": true,
   "includeCoAuthoredBy": false,
+  "additionalDirectories": ["~/src"],
 
   "permissions": {
     "defaultMode": "acceptEdits",
