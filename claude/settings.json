@@ -904,6 +904,25 @@
       "Bash(sfm*)",
       "Bash(sfm * && *)",
       "Bash(sfm * 2>&1*)",
+      "Bash(sfm * | *)",
+
+      "Bash(script*)",
+      "Bash(script * && *)",
+      "Bash(script * | *)",
+      "Bash(script * 2>&1*)",
+
+      "Bash(rm *.tfstate*)",
+      "Bash(rm */.terraform/*.tfstate*)",
+      "Bash(rm */.terraform/terraform.tfstate*)",
+      "Bash(rm -rf */.terraform/*)",
+
+      "Bash(docker run *docker.atl-paas.net*)",
+      "Bash(docker run *atlassian/sfx*)",
+      "Bash(docker run *cmpt/sauron*)",
+      "Bash(docker run --rm*)",
+      "Bash(docker run -u*)",
+      "Bash(docker run * | *)",
+      "Bash(docker run * 2>&1*)",
 
       "Bash(claude*)",
       "Bash(claude * && *)",
