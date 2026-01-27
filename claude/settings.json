@@ -49,7 +49,6 @@
       "Bash(if *)",
       "Bash(case *)",
       "Bash({ *)",
-      "Bash(( *)",
 
       "Bash(cd*)",
       "Bash(pushd*)",
