@@ -771,7 +771,9 @@
       "Bash(memory_pressure*)",
 
       "Bash(git -C *)",
+      "Bash(git -C * && *)",
       "Bash(git -c *)",
+      "Bash(git -c * && *)",
       "Bash(git --git-dir=*)",
       "Bash(git --work-tree=*)",
       "Bash(git --no-pager *)",
