@@ -901,6 +901,10 @@
 
       "Bash(atlas *)",
 
+      "Bash(sfm*)",
+      "Bash(sfm * && *)",
+      "Bash(sfm * 2>&1*)",
+
       "Bash(claude*)",
       "Bash(claude * && *)",
       "Bash(claude * || *)"
