@@ -821,6 +821,8 @@
 
       "Bash(git add *)",
       "Bash(git add * && *)",
+      "Bash(git add -A && git commit*)",
+      "Bash(git add . && git commit*)",
       "Bash(git add -p*)",
       "Bash(git stash)",
       "Bash(git stash && *)",
