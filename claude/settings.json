@@ -668,6 +668,13 @@
       "Bash(vm_stat*)",
       "Bash(memory_pressure*)",
 
+      "Bash(git -C *)",
+      "Bash(git -c *)",
+      "Bash(git --git-dir=*)",
+      "Bash(git --work-tree=*)",
+      "Bash(git --no-pager *)",
+      "Bash(git --paginate *)",
+
       "Bash(git status*)",
       "Bash(git diff*)",
       "Bash(git diff $(*))",
