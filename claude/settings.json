@@ -124,6 +124,7 @@
       "Bash(tldr*)",
 
       "Bash(ls*)",
+      "Bash(ls * ~/src/*)",
       "Bash(pwd*)",
       "Bash(which*)",
       "Bash(whereis*)",

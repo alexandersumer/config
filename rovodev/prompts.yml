@@ -23,3 +23,15 @@ prompts:
   - name: resolve-conflict
     description: "Resolve merge conflicts preserving branch intent"
     content_file: templates/branch-and-pr-workflows/resolve-conflict.md
+
+  # === Feature Management ===
+  - name: clean-feature-flag
+    description: "Remove a fully rolled out feature flag and verify checks pass"
+    content_file: templates/feature-flags-and-experiments/clean-feature-flag.md
+    inputs:
+      - name: feature_flag_key
+        label: Feature flag key
+        description: The flag key or enum constant to remove (e.g., my-feature-flag or FeatureFlags.MY_FLAG)
+        type: string
+        required: true
+        placeholder: my-feature-flag
