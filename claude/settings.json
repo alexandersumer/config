@@ -43,6 +43,14 @@
       "Bash(false*)",
       "Bash(exit*)",
 
+      "Bash(for *)",
+      "Bash(while *)",
+      "Bash(until *)",
+      "Bash(if *)",
+      "Bash(case *)",
+      "Bash({ *)",
+      "Bash(( *)",
+
       "Bash(cd*)",
       "Bash(pushd*)",
       "Bash(popd*)",
@@ -246,6 +254,7 @@
       "Bash(java*)",
       "Bash(javac*)",
       "Bash(gradle*)",
+      "Bash(./gradlew*)",
       "Bash(mvn*)",
       "Bash(ant*)",
       "Bash(sbt*)",
