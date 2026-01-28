@@ -24,6 +24,14 @@ prompts:
     description: "Resolve merge conflicts preserving branch intent"
     content_file: templates/branch-and-pr-workflows/resolve-conflict.md
 
+  - name: git-commit
+    description: "Stage all changes and commit with auto-generated message"
+    content_file: templates/branch-and-pr-workflows/git-commit.md
+
+  - name: git-commit-push
+    description: "Stage all changes, commit with auto-generated message, and push"
+    content_file: templates/branch-and-pr-workflows/git-commit-push.md
+
   # === Feature Management ===
   - name: clean-feature-flag
     description: "Remove a fully rolled out feature flag and verify checks pass"

@@ -1,0 +1,15 @@
+---
+description: Stage all changes, commit with auto-generated message, and push
+---
+
+Check if the working tree is clean first. Stop if there are no changes to commit.
+
+Stage all changes (`git add -A`) and commit.
+
+After the commit succeeds, push. Use `git push -u origin HEAD` if no upstream is set.
+
+Commit message rules:
+- Single sentence, sentence case
+- No trailing punctuation
+- No emojis
+- No conventional commit prefixes (feat, fix, chore, etc.)
