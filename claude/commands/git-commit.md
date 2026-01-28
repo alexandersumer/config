@@ -2,7 +2,9 @@
 description: Stage all changes and commit with auto-generated message
 ---
 
-Stage all changes (`git add -A`) and commit. Stop if working tree is clean.
+Check if the working tree is clean first. Stop if there are no changes to commit.
+
+Stage all changes (`git add -A`) and commit.
 
 Commit message rules:
 - Single sentence, sentence case

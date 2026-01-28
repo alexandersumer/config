@@ -2,9 +2,11 @@
 description: Stage all changes, commit with auto-generated message, and push
 ---
 
-Stage all changes (`git add -A`), commit, and push. Stop if working tree is clean.
+Check if the working tree is clean first. Stop if there are no changes to commit.
 
-Use `git push -u origin HEAD` if no upstream is set.
+Stage all changes (`git add -A`) and commit.
+
+After the commit succeeds, push. Use `git push -u origin HEAD` if no upstream is set.
 
 Commit message rules:
 - Single sentence, sentence case
