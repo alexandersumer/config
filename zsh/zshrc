@@ -101,6 +101,17 @@ alias checkfix="$HOME/src/scripts/checkfix.sh"
 alias zap="$HOME/src/scripts/zap.sh"
 
 ########################################
+# Functions
+########################################
+
+# Git helpers
+if [[ -r "$HOME/.zsh/git-functions.zsh" ]]; then
+  source "$HOME/.zsh/git-functions.zsh"
+else
+  printf '\033[33mwarning: git helper functions file missing: %s\033[0m\n' "$HOME/.zsh/git-functions.zsh" >&2
+fi
+
+########################################
 # Tool initialization (lazy loading)
 ########################################
 
