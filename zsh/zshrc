@@ -1,11 +1,4 @@
 ########################################
-# Startup profiling (if enabled)
-########################################
-if [[ -n "$ZSH_STARTUP_PROFILING" ]]; then
-  zmodload zsh/zprof
-fi
-
-########################################
 # Environment variables
 ########################################
 export EDITOR=nvim
@@ -166,11 +159,4 @@ fi
 ########################################
 if [[ -r "$HOME/.local/bin/env" ]]; then
   . "$HOME/.local/bin/env"
-fi
-
-########################################
-# Startup profiling output
-########################################
-if [[ -n "$ZSH_STARTUP_PROFILING" ]]; then
-  zprof
 fi
