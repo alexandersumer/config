@@ -908,6 +908,15 @@
       "Bash(sfm * 2>&1*)",
       "Bash(sfm * | *)",
 
+      "Bash(./bin/*)",
+      "Bash(./bin/* && *)",
+      "Bash(./bin/* | *)",
+      "Bash(./bin/* 2>&1*)",
+      "Bash(./scripts/*)",
+      "Bash(./scripts/* && *)",
+      "Bash(./scripts/* | *)",
+      "Bash(./scripts/* 2>&1*)",
+
       "Bash(script*)",
       "Bash(script * && *)",
       "Bash(script * | *)",
