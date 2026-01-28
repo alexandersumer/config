@@ -96,9 +96,8 @@ alias stratus1="cd $HOME/src/stratus-1"
 alias stratus2="cd $HOME/src/stratus-2"
 alias vim="nvim"
 alias vi="nvim"
+alias rovodev="acli rovodev run"
 alias clear="echo 'The clear command is disabled.'"
-alias checkfix="$HOME/src/scripts/checkfix.sh"
-alias zap="$HOME/src/scripts/zap.sh"
 
 ########################################
 # Functions
