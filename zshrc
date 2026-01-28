@@ -19,7 +19,7 @@ export PURE_PROMPT_SYMBOL="$"
 export PURE_PROMPT_VICMD_SYMBOL="$"
 
 # Project-specific
-export TF_VAR_signalfx_auth_token="orAFA364vIojJCcdphPqMA"
+export TF_VAR_signalfx_auth_token="hVXGJsI3YPYJGBaTjPdRQQ"
 
 # Cache setup
 DISABLE_LS_COLORS=true
