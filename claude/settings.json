@@ -1054,7 +1054,7 @@
       "Bash(export * && *)",
       "Bash(export * && * && *)",
       "Bash(export *=$(*) && *)",
-      "Bash(export *=\"$(*\" && *)",
+      "Bash(export *=\"$(*)\" && *)",
       "Bash(PATH=* *)",
       "Bash(PATH=* && *)",
       "Bash(GOPATH=* *)",
