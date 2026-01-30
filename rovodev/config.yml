@@ -98,17 +98,6 @@ mcp:
 toolPermissions:
   # Default permission for tools not explicitly listed
   default: allow
-  # Permission settings for specific tools
-  tools:
-    create_file: ask
-    delete_file: ask
-    move_file: allow
-    find_and_replace_code: allow
-    open_files: allow
-    expand_code_chunks: allow
-    expand_folder: allow
-    grep: allow
-    dac_search: allow
   bash:
     # Default permission for bash commands not explicitly listed
     default: allow
