@@ -33,9 +33,9 @@ prompts:
     content_file: templates/branch-and-pr-workflows/git-commit-push.md
 
   # === Feature Management ===
-  - name: clean-feature-flag
+  - name: clean-up-feature-flag
     description: "Remove a fully rolled out feature flag and verify checks pass"
-    content_file: templates/feature-flags-and-experiments/clean-feature-flag.md
+    content_file: templates/feature-flags-and-experiments/clean-up-feature-flag.md
     inputs:
       - name: feature_flag_key
         label: Feature flag key
