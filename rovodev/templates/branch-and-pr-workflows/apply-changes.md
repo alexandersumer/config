@@ -1,1 +1,1 @@
-Apply the requested improvements with surgical precision, completeness, and deep checking. Do not over-engineer. Keep the changes robust and ensure no negative side effects on surrounding code. Ensure consistency with existing patterns. Avoid unnecessary comments.
+Apply the requested changes with surgical precision. Do not over-engineer. Keep changes robust with no negative side effects on surrounding code. Ensure consistency with existing patterns. Avoid unnecessary comments.

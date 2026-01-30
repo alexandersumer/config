@@ -6,7 +6,7 @@ Check if the working tree is clean first. Stop if there are no changes to commit
 
 Stage all changes (`git add -A`) and commit.
 
-After the commit succeeds, push. Use `git push -u origin HEAD` if no upstream is set.
+After the commit succeeds, push.
 
 Commit message rules:
 - Single sentence, sentence case

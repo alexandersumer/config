@@ -1,1 +1,1 @@
-Analyze the current working changes (staged and unstaged) and output a clear, concise overview phrase of the primary modification. Strictly limit the response to a maximum of 10 words and use absolutely no punctuation.
+Analyze the current working changes (staged and unstaged) and output a concise overview phrase of the primary modification. Maximum 10 words, no punctuation.
