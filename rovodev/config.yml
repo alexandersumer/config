@@ -35,9 +35,9 @@ sessions:
 atlassianConnections:
   # Global jira projects user is part of
   jiraProjects:
-  - url: https://hello.atlassian.net/browse/GAPF
-    key: GAPF
-    id: '48831'
+    - url: https://hello.atlassian.net/browse/GAPF
+      key: GAPF
+      id: "48831"
   # Directory where any local overrides are stored
   localOverridePath: .rovodev/atlassian_connections.json
   # Whether atlassian integration is enabled
@@ -97,7 +97,7 @@ mcp:
 # Tool and command permission settings
 toolPermissions:
   # Default permission for tools not explicitly listed
-  default: ask
+  default: allow
   # Permission settings for specific tools
   tools:
     create_file: ask
@@ -108,19 +108,10 @@ toolPermissions:
     expand_code_chunks: allow
     expand_folder: allow
     grep: allow
+    dac_search: allow
   bash:
     # Default permission for bash commands not explicitly listed
     default: allow
-    # List of specific bash commands with their permission settings
-    commands:
-    - command: ls(\s.*)?
-      permission: allow
-    - command: cat(\s.*)?
-      permission: allow
-    - command: echo(\s.*)?
-      permission: allow
-    - command: pwd
-      permission: allow
     # Run bash commands in a sandboxed environment - currently available for
     # MacOS and Linux only. Enabling this option for Windows will prevent the
     # agent from running powershell commands.
@@ -143,7 +134,7 @@ announcementTracking:
 sessionFeedback:
   permanentlyDisabled: false
   # ISO timestamp of the last provided feedback
-  lastFeedbackAsked: '2026-01-29T04:07:05.911041+00:00'
+  lastFeedbackAsked: "2026-01-29T04:07:05.911041+00:00"
 
 atlassianBillingSite: null
 
@@ -152,7 +143,7 @@ smartTasks:
   enabled: true
   # List of task discovery sources
   sources:
-  - filesystem
+    - filesystem
 
 # Event Hooks configuration. See /hooks command to list available events.
 eventHooks:
