@@ -2,12 +2,6 @@
 description: Stage all changes and commit with auto-generated message
 ---
 
-Check if the working tree is clean first. Stop if there are no changes to commit.
+Stop if the working tree is clean. Stage all changes and commit.
 
-Stage all changes (`git add -A`) and commit.
-
-Commit message rules:
-- Single sentence, sentence case
-- No trailing punctuation
-- No emojis
-- No conventional commit prefixes (feat, fix, chore, etc.)
+Commit message: single sentence, sentence case, no punctuation, no emojis, no conventional commit prefixes.
