@@ -1,7 +1,7 @@
 prompts:
   # === Branch & PR Workflows ===
   - name: fix-failures
-    description: "Run build/test, identify failures, and resolve with clean architectural solutions"
+    description: "Run build/test, fix failures without workarounds or suppressing errors"
     content_file: templates/branch-and-pr-workflows/fix-failures.md
 
   - name: describe-branch
@@ -13,7 +13,7 @@ prompts:
     content_file: templates/branch-and-pr-workflows/describe-diff.md
 
   - name: review-branch
-    description: "Strict Senior Engineer review for bugs/security/inelegant design (no style nits)"
+    description: "Review for bugs, security, architecture, and test coverage (no style nits)"
     content_file: templates/branch-and-pr-workflows/review-branch.md
 
   - name: apply-changes

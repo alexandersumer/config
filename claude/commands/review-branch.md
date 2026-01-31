@@ -1,5 +1,5 @@
 ---
-description: Strict Senior Engineer review for bugs/security (no style nits)
+description: Review for bugs, security, architecture, and test coverage (no style nits)
 ---
 
-Analyze the cumulative diff of this branch against its base branch. Scrutinize for critical bugs, security vulnerabilities, architectural flaws, inelegant design, and missing test coverage. Ignore style nits. Only flag problems with high certainty. Output findings as a list in the format `filename:line_number problem_description problem_fix`.
+Analyze the cumulative diff of this branch against its base branch. Scrutinize for critical bugs, security vulnerabilities, architectural flaws, inelegant design, and missing test coverage. Ignore style nits. Only flag problems with high certainty. Output findings as a list in the format `filename:line_number problem_description problem_fix`. If no issues are found, say so briefly.
