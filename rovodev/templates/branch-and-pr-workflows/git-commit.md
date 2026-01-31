@@ -1,3 +1,3 @@
-Stop if the working tree is clean. Stage all changes and commit. Exclude secrets, build artifacts, and files unrelated to the current work.
+Stop if the working tree is clean. Stage all changes and commit.
 
 Commit message: single sentence, sentence case, no punctuation, no emojis, no conventional commit prefixes.
