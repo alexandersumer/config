@@ -15,6 +15,12 @@ prompts:
   - name: review-branch
     description: "Review for bugs, security, architecture, and test coverage (no style nits)"
     content_file: templates/branch-and-pr-workflows/review-branch.md
+    inputs:
+      - name: focus_area
+        label: Focus area
+        description: Optional text to narrow the review scope. Leave empty to review the entire branch.
+        type: string
+        required: false
 
   - name: apply-changes
     description: "Implement requested changes with surgical precision"
