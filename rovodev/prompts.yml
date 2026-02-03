@@ -3,6 +3,12 @@ prompts:
   - name: fix-failures
     description: "Run build/test, fix failures without workarounds or suppressing errors"
     content_file: templates/branch-and-pr-workflows/fix-failures.md
+    inputs:
+      - name: error_output
+        label: Error output or stack trace
+        description: Paste error output or stack trace to fix. Leave empty to run the build and test suite to discover failures.
+        type: string
+        required: false
 
   - name: describe-branch
     description: "Generate a PR description (3 sentences + summary line)"
