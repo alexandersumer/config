@@ -1,6 +1,6 @@
 ---
 description: Remove a fully rolled out feature flag and verify checks pass
-argument-hint: [flag key]
+argument-hint: "[flag key]"
 ---
 
 Remove fully rolled out feature flag `$ARGUMENTS`. Keep the NEW/enabled behavior, delete OLD/disabled code paths.

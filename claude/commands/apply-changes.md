@@ -1,6 +1,6 @@
 ---
 description: Implement requested changes with surgical precision
-argument-hint: [changes to apply, or omit to use conversation context]
+argument-hint: "[optional: changes to apply]"
 ---
 
 Apply changes with surgical precision. Use the changes described below if provided; otherwise, infer what to apply from context.
