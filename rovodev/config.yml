@@ -136,9 +136,7 @@ toolPermissions:
   allowedExternalPaths: []
 
 announcementTracking:
-  announcementViewCounts:
-    dc31c62a8947373f5355d292769dd5ec: 3
-    31b723065b13a6a72a947324d8295dc2: 3
+  announcementViewCounts: {}
 
 sessionFeedback:
   permanentlyDisabled: false

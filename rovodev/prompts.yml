@@ -25,6 +25,12 @@ prompts:
   - name: apply-changes
     description: "Implement requested changes with surgical precision"
     content_file: templates/branch-and-pr-workflows/apply-changes.md
+    inputs:
+      - name: changes
+        label: Changes to apply
+        description: Describe the changes to apply. Leave empty to apply changes from conversation context.
+        type: string
+        required: false
 
   - name: resolve-conflict
     description: "Resolve merge conflicts preserving branch intent"
