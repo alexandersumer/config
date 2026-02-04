@@ -9,7 +9,7 @@ agent:
   # Temperature setting for AI model responses (0.0-1.0)
   temperature: 0.3
   # Model ID to use for the agent. See /models command to list available models.
-  modelId: claude-opus-4-5@20251101
+  modelId: auto
   # Enable the deep planning tool for complex task planning
   enableDeepPlanTool: false
   # Enable/disable experimental features
@@ -34,10 +34,7 @@ sessions:
 # Atlassian product integration settings
 atlassianConnections:
   # Global jira projects user is part of
-  jiraProjects:
-  - url: https://hello.atlassian.net/browse/GAPF
-    key: GAPF
-    id: '48831'
+  jiraProjects: []
   # Directory where any local overrides are stored
   localOverridePath: .rovodev/atlassian_connections.json
   # Whether atlassian integration is enabled
@@ -46,7 +43,7 @@ atlassianConnections:
 # Console and UI behavior settings
 console:
   # Output format for console display (markdown, simple, or raw)
-  outputFormat: simple
+  outputFormat: markdown
   # Show tool execution results in the console
   showToolResults: true
   # Per-tool configuration for whether to show tool execution results in the
@@ -54,11 +51,11 @@ console:
   toolResultVisibility:
     bash: true
     powershell: true
-    open_files: false
+    open_files: true
     create_file: true
     delete_file: true
     move_file: true
-    expand_code_chunks: false
+    expand_code_chunks: true
     find_and_replace_code: true
     grep: true
     expand_folder: true
@@ -97,20 +94,20 @@ mcp:
 # Tool and command permission settings
 toolPermissions:
   # Default permission for tools not explicitly listed
-  default: allow
+  default: ask
   # Permission settings for specific tools
   tools:
-    create_file: allow
-    delete_file: allow
-    move_file: allow
-    find_and_replace_code: allow
+    create_file: ask
+    delete_file: ask
+    move_file: ask
+    find_and_replace_code: ask
     open_files: allow
     expand_code_chunks: allow
     expand_folder: allow
     grep: allow
   bash:
     # Default permission for bash commands not explicitly listed
-    default: allow
+    default: ask
     # List of specific bash commands with their permission settings
     commands:
     - command: ls(\s.*)?
@@ -141,7 +138,7 @@ announcementTracking:
 sessionFeedback:
   permanentlyDisabled: false
   # ISO timestamp of the last provided feedback
-  lastFeedbackAsked: '2026-01-29T04:07:05.911041+00:00'
+  lastFeedbackAsked: null
 
 atlassianBillingSite: null
 
