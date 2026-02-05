@@ -34,7 +34,10 @@ sessions:
 # Atlassian product integration settings
 atlassianConnections:
   # Global jira projects user is part of
-  jiraProjects: []
+  jiraProjects:
+  - url: https://hello.atlassian.net/browse/GAPF
+    key: GAPF
+    id: '48831'
   # Directory where any local overrides are stored
   localOverridePath: .rovodev/atlassian_connections.json
   # Whether atlassian integration is enabled
@@ -51,11 +54,11 @@ console:
   toolResultVisibility:
     bash: true
     powershell: true
-    open_files: true
+    open_files: false
     create_file: true
     delete_file: true
     move_file: true
-    expand_code_chunks: true
+    expand_code_chunks: false
     find_and_replace_code: true
     grep: true
     expand_folder: true
@@ -94,20 +97,20 @@ mcp:
 # Tool and command permission settings
 toolPermissions:
   # Default permission for tools not explicitly listed
-  default: ask
+  default: allow
   # Permission settings for specific tools
   tools:
-    create_file: ask
-    delete_file: ask
-    move_file: ask
-    find_and_replace_code: ask
+    create_file: allow
+    delete_file: allow
+    move_file: allow
+    find_and_replace_code: allow
     open_files: allow
     expand_code_chunks: allow
     expand_folder: allow
     grep: allow
   bash:
     # Default permission for bash commands not explicitly listed
-    default: ask
+    default: allow
     # List of specific bash commands with their permission settings
     commands:
     - command: ls(\s.*)?
