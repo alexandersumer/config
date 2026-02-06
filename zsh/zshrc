@@ -20,13 +20,9 @@ mkdir -p "$ZSH_CACHE_DIR"
 export ZSH_COMPDUMP="$ZSH_CACHE_DIR/.zcompdump-$HOST"
 
 ########################################
-# Shell configuration
-########################################
-typeset -U PATH
-
-########################################
 # PATH setup
 ########################################
+typeset -U PATH
 # Homebrew and util-linux
 for __path in /opt/homebrew/bin /usr/local/opt/util-linux/bin /opt/homebrew/opt/util-linux/bin; do
   [[ -d "$__path" ]] && path+=("$__path")
@@ -42,14 +38,10 @@ command -v pyenv >/dev/null || path=("$PYENV_ROOT/bin" $path)
 # Atlassian tools
 [[ -d /opt/atlassian/bin ]] && path=(/opt/atlassian/bin $path)
 
-# Structurizr
-if command -v brew >/dev/null 2>&1; then
-  __structurizr_prefix="$(brew --prefix structurizr-cli 2>/dev/null)"
-  if [[ -n "$__structurizr_prefix" ]]; then
-    path=("$__structurizr_prefix/libexec" $path)
-  fi
-  unset __structurizr_prefix
-fi
+# Structurizr (cached to avoid slow brew --prefix on every shell)
+__structurizr_path="/opt/homebrew/opt/structurizr-cli/libexec"
+[[ -d "$__structurizr_path" ]] && path=("$__structurizr_path" $path)
+unset __structurizr_path
 
 ########################################
 # Completion setup
@@ -111,6 +103,46 @@ else
 fi
 
 ########################################
+# Claude Code (auto-update)
+########################################
+
+# Check for updates every 4 hours. Compares local version against npm
+# registry; installs only when a newer version exists.
+__claude_update_stale() {
+  local stamp=~/.claude/.last-update-check
+  local last=0
+  if [[ -s "$stamp" ]]; then
+    last=$(cat "$stamp" 2>/dev/null)
+    [[ "$last" == <-> ]] || last=0
+  fi
+  (( EPOCHSECONDS - last > 14400 ))
+}
+
+__claude_update_run() {
+  [[ -d ~/.claude ]] || return 0
+  printf '%s' "$EPOCHSECONDS" >| ~/.claude/.last-update-check
+  local remote=$(curl -sf https://registry.npmjs.org/@anthropic-ai/claude-code/latest \
+    | grep -o '"version":"[^"]*"' | head -1 | cut -d'"' -f4)
+  local local_v=$(readlink ~/.local/bin/claude 2>/dev/null | grep -o '[0-9.]*$')
+  if [[ -n "$remote" && "$remote" != "$local_v" ]]; then
+    curl -fsSL https://claude.ai/install.sh | bash
+  fi
+}
+
+claude() {
+  # Synchronous: always run latest version
+  if __claude_update_stale; then
+    __claude_update_run
+  fi
+  command claude "$@"
+}
+
+# Background check on shell startup (don't block terminal opening)
+if __claude_update_stale; then
+  { __claude_update_run &>/dev/null } &!
+fi
+
+########################################
 # Tool initialization (lazy loading)
 ########################################
 
@@ -141,9 +173,10 @@ if [[ -s "$__SDKMAN_INIT_SCRIPT" ]]; then
   sdk() {
     if (( ! __SDKMAN_LOADED )); then
       __sdkman_lazy_load || return $?
+      unset -f sdk
+      sdk "$@"
+      return $?
     fi
-    sdk "$@"
-    return $?
   }
 
   autoload -Uz add-zsh-hook 2>/dev/null
@@ -163,6 +196,19 @@ if [[ -s "$__SDKMAN_INIT_SCRIPT" ]]; then
   add-zsh-hook chpwd __sdkman_maybe_load_for_dir
   __sdkman_maybe_load_for_dir
 fi
+
+########################################
+# Remove "command not found" from history
+########################################
+typeset -gi __hist_last_exit=0
+__hist_capture_exit() { __hist_last_exit=$? }
+__hist_remove_notfound() {
+    if (( __hist_last_exit == 127 )); then
+        [[ -f "$HISTFILE" ]] && LC_ALL=C sed -i '' '$d' "$HISTFILE" 2>/dev/null
+    fi
+    __hist_last_exit=0
+}
+precmd_functions+=(__hist_capture_exit __hist_remove_notfound)
 
 ########################################
 # External configuration
