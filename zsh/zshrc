@@ -38,11 +38,6 @@ command -v pyenv >/dev/null || path=("$PYENV_ROOT/bin" $path)
 # Atlassian tools
 [[ -d /opt/atlassian/bin ]] && path=(/opt/atlassian/bin $path)
 
-# Structurizr (cached to avoid slow brew --prefix on every shell)
-__structurizr_path="/opt/homebrew/opt/structurizr-cli/libexec"
-[[ -d "$__structurizr_path" ]] && path=("$__structurizr_path" $path)
-unset __structurizr_path
-
 ########################################
 # Completion setup
 ########################################
@@ -173,10 +168,8 @@ if [[ -s "$__SDKMAN_INIT_SCRIPT" ]]; then
   sdk() {
     if (( ! __SDKMAN_LOADED )); then
       __sdkman_lazy_load || return $?
-      unset -f sdk
-      sdk "$@"
-      return $?
     fi
+    sdk "$@"
   }
 
   autoload -Uz add-zsh-hook 2>/dev/null
