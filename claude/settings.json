@@ -1,11 +1,6 @@
 {
-  "model": "opus",
-  "alwaysThinkingEnabled": true,
   "includeCoAuthoredBy": false,
-  "additionalDirectories": ["~/src", "~/.claude", "~/.rovodev"],
-
   "permissions": {
-    "defaultMode": "acceptEdits",
     "allow": [
       "Bash",
       "Edit",
@@ -17,10 +12,11 @@
       "WebSearch",
       "Write"
     ],
+    "deny": [],
     "ask": [],
-    "deny": []
+    "defaultMode": "acceptEdits"
   },
-
+  "model": "opus",
   "hooks": {
     "PostToolUse": [
       {
@@ -33,5 +29,11 @@
         ]
       }
     ]
-  }
+  },
+  "alwaysThinkingEnabled": true,
+  "additionalDirectories": [
+    "~/src",
+    "~/.claude",
+    "~/.rovodev"
+  ]
 }
