@@ -113,15 +113,13 @@ function origin_reset_hard() {
         return 1
     fi
 
-    # Proactively clean up stale lock files and remove case-conflicting refs
+    # Remove loose remote tracking ref subdirectories before fetch. This
+    # prevents stale lock files and case-conflicting directories from blocking
+    # git fetch. Preserves flat files (e.g. HEAD) since git fetch doesn't
+    # recreate the HEAD symbolic ref. Packed refs are unaffected.
     if [[ -d ".git/refs/remotes/$remote" ]]; then
+        find ".git/refs/remotes/$remote" -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} + 2>/dev/null
         find ".git/refs/remotes/$remote" -name "*.lock" -type f -delete 2>/dev/null
-        # Remove refs that commonly conflict on case-insensitive filesystems
-        # Delete both from loose refs and packed-refs using git update-ref
-        git for-each-ref --format='%(refname)' "refs/remotes/$remote/noissue/**" "refs/remotes/$remote/noIssue/**" 2>/dev/null | \
-            while IFS= read -r ref; do
-                git update-ref -d "$ref" 2>/dev/null || true
-            done
     fi
 
     if (( branch_from_arg == 0 )) && [[ -z "$branch" ]]; then
@@ -189,21 +187,16 @@ PYDELETE
         fi
 
         for ref in "${refs_array[@]}"; do
-            local ref_path=".git/$ref.lock"
+            local ref_path=".git/$ref"
+            rm -f "${ref_path}.lock" 2>/dev/null
             if [[ -f "$ref_path" ]]; then
-                printf '\033[33mwarning: removing stale lock file %s\033[0m\n' "$ref_path"
+                printf '\033[33mwarning: removing stale ref %s\033[0m\n' "$ref"
                 rm -f "$ref_path"
-            fi
-        done
-
-        for ref in "${refs_array[@]}"; do
-            if git show-ref --verify --quiet "$ref"; then
-                printf '\033[33mwarning: deleting stale tracking ref %s\033[0m\n' "$ref"
-                if git update-ref -d "$ref"; then
-                    manual_deleted_refs+=("$ref")
-                else
-                    return $fetch_status
-                fi
+                manual_deleted_refs+=("$ref")
+            elif [[ -d "$ref_path" ]]; then
+                printf '\033[33mwarning: removing stale ref directory %s\033[0m\n' "$ref"
+                rm -rf "$ref_path"
+                manual_deleted_refs+=("$ref")
             fi
         done
 
@@ -533,7 +526,7 @@ function _stage_commit_git_impl() {
     local skip_detekt=$2
     git add .
     if git diff --cached --quiet; then
-        echo "Nothing to commit, pushing existing commits..."
+        echo "Nothing to commit."
         return 0
     fi
     if [[ "$skip_detekt" = "1" ]]; then

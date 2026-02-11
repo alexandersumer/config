@@ -83,7 +83,7 @@ alias stratus1="cd $HOME/src/stratus-1"
 alias stratus2="cd $HOME/src/stratus-2"
 alias vim="nvim"
 alias vi="nvim"
-alias rovodev="acli rovodev run"
+alias rovodev="acli rovodev run --yolo"
 alias clear="echo 'The clear command is disabled.'"
 
 ########################################
