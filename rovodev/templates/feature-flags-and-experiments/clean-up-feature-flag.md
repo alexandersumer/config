@@ -1,4 +1,4 @@
-Remove fully rolled out feature flag `{feature_flag_key}`. Keep the NEW/enabled behavior, delete OLD/disabled code paths.
+Remove fully rolled out feature flag `{{feature_flag_key}}`. Keep the NEW/enabled behavior, delete OLD/disabled code paths.
 
 Search thoroughly for ALL references: full key, enum constant, short name, and any string variants. Check test directories explicitly as they are often missed.
 
