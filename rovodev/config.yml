@@ -9,7 +9,7 @@ agent:
   # Temperature setting for AI model responses (0.0-1.0)
   temperature: 0.3
   # Model ID to use for the agent. See /models command to list available models.
-  modelId: claude-opus-4-6
+  modelId: anthropic:claude-opus-4-6
   # Enable the deep planning tool for complex task planning
   enableDeepPlanTool: false
   # Enable/disable experimental features
@@ -54,11 +54,11 @@ console:
   toolResultVisibility:
     bash: true
     powershell: true
-    open_files: false
+    open_files: true
     create_file: true
     delete_file: true
     move_file: true
-    expand_code_chunks: false
+    expand_code_chunks: true
     find_and_replace_code: true
     grep: true
     expand_folder: true
@@ -71,7 +71,7 @@ console:
   # Color theme for syntax highlighting. Options: 'dark' (Dracula), 'light',
   # 'auto' (detect system theme), or any [Pygments theme
   # name](https://pygments.org/styles/)(e.g., 'monokai', 'solarized-light')
-  theme: dark
+  theme: atom-one-dark
   # Maximum width of the console output in characters, or 'fill' to fill the
   # terminal width
   maxOutputWidth: 120
@@ -97,20 +97,22 @@ mcp:
 # Tool and command permission settings
 toolPermissions:
   # Default permission for tools not explicitly listed
-  default: allow
+  default: ask
   # Permission settings for specific tools
   tools:
-    create_file: allow
-    delete_file: allow
-    move_file: allow
-    find_and_replace_code: allow
+    create_file: ask
+    delete_file: ask
+    move_file: ask
+    find_and_replace_code: ask
     open_files: allow
     expand_code_chunks: allow
     expand_folder: allow
     grep: allow
+    get_pr_diff: allow
+    bitbucketPullRequest: allow
   bash:
     # Default permission for bash commands not explicitly listed
-    default: allow
+    default: ask
     # List of specific bash commands with their permission settings
     commands:
     - command: ls(\s.*)?
@@ -141,7 +143,7 @@ announcementTracking:
 sessionFeedback:
   permanentlyDisabled: false
   # ISO timestamp of the last provided feedback
-  lastFeedbackAsked: '2026-02-11T06:05:23.142286+00:00'
+  lastFeedbackAsked: null
 
 atlassianBillingSite:
   siteUrl: https://hello.atlassian.net

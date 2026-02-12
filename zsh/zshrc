@@ -102,8 +102,8 @@ fi
 # Claude Code (auto-update)
 ########################################
 
-# Check for updates every 4 hours. Compares local version against npm
-# registry; installs only when a newer version exists.
+zmodload zsh/datetime
+
 __claude_update_stale() {
   local stamp=~/.claude/.last-update-check
   local last=0
@@ -117,9 +117,8 @@ __claude_update_stale() {
 __claude_update_run() {
   [[ -d ~/.claude ]] || return 0
   printf '%s' "$EPOCHSECONDS" >| ~/.claude/.last-update-check
-  local remote=$(curl -sf https://registry.npmjs.org/@anthropic-ai/claude-code/latest \
-    | grep -o '"version":"[^"]*"' | head -1 | cut -d'"' -f4)
-  local local_v=$(readlink ~/.local/bin/claude 2>/dev/null | grep -o '[0-9.]*$')
+  local remote=$(curl -sf https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases/latest | tr -d '[:space:]')
+  local local_v=$(command claude --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
   if [[ -n "$remote" && "$remote" != "$local_v" ]]; then
     curl -fsSL https://claude.ai/install.sh | bash
   fi
