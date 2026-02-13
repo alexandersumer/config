@@ -1,5 +1,7 @@
-Stop if the working tree is clean. Stage all changes, commit, and push.
+Stop if working tree is clean.
 
-Commit message: single sentence, sentence case, no punctuation, no emojis, no conventional commit prefixes.
+Stage all changes, commit, push. If push to a protected branch is rejected, create a short descriptive branch from the current commit and push that instead — never ask, just do it.
 
-After pushing, unless on the default branch, output the PR URL for the current branch. If no PR exists, output the URL to create one instead.
+Commit message: single sentence, sentence case, no punctuation, no emojis, no conventional-commit prefixes.
+
+After pushing, if not on the default branch, output the existing PR URL or the create-PR URL.
