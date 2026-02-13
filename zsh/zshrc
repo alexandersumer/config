@@ -120,7 +120,9 @@ __claude_update_run() {
   local remote=$(curl -sf https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases/latest | tr -d '[:space:]')
   local local_v=$(command claude --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
   if [[ -n "$remote" && "$remote" != "$local_v" ]]; then
-    curl -fsSL https://claude.ai/install.sh | bash
+    # Unset CLAUDECODE so the install script's binary doesn't refuse to run
+    # when invoked from a terminal spawned by Claude Code
+    CLAUDECODE= curl -fsSL https://claude.ai/install.sh | CLAUDECODE= bash
   fi
 }
 
