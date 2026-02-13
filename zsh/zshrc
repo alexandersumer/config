@@ -111,32 +111,42 @@ __claude_update_stale() {
     last=$(cat "$stamp" 2>/dev/null)
     [[ "$last" == <-> ]] || last=0
   fi
-  (( EPOCHSECONDS - last > 14400 ))
+  (( EPOCHSECONDS - last > 3600 ))
 }
 
 __claude_update_run() {
   [[ -d ~/.claude ]] || return 0
-  printf '%s' "$EPOCHSECONDS" >| ~/.claude/.last-update-check
-  local remote=$(curl -sf https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases/latest | tr -d '[:space:]')
-  local local_v=$(command claude --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
-  if [[ -n "$remote" && "$remote" != "$local_v" ]]; then
-    # Unset CLAUDECODE so the install script's binary doesn't refuse to run
-    # when invoked from a terminal spawned by Claude Code
-    CLAUDECODE= curl -fsSL https://claude.ai/install.sh | CLAUDECODE= bash
+  local remote
+  remote=$(curl -sf --connect-timeout 3 --max-time 5 \
+    https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases/latest \
+    | tr -d '[:space:]')
+  [[ -n "$remote" ]] || return 0
+  local local_v
+  local_v=$(command claude --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+  if [[ "$remote" = "$local_v" ]]; then
+    # Already current — record successful check so we don't re-curl
+    printf '%s' "$EPOCHSECONDS" >| ~/.claude/.last-update-check
+    return 0
   fi
-}
-
-claude() {
-  # Synchronous: always run latest version
-  if __claude_update_stale; then
-    __claude_update_run
+  # Version differs — attempt install (clear CLAUDECODE so the binary doesn't
+  # refuse to run when invoked from a terminal spawned by Claude Code)
+  if CLAUDECODE= curl -fsSL https://claude.ai/install.sh | CLAUDECODE= bash &>/dev/null; then
+    printf '%s' "$EPOCHSECONDS" >| ~/.claude/.last-update-check
+    # Prune old versions, keep only the two most recent
+    local versions_dir=~/.local/share/claude/versions
+    if [[ -d "$versions_dir" ]]; then
+      local old
+      for old in "$versions_dir"/*(Nom[3,-1]); do
+        rm -f "$old"
+      done
+    fi
   fi
-  command claude "$@"
+  # On failure: stamp is NOT written → next shell retries immediately
 }
 
 # Background check on shell startup (don't block terminal opening)
 if __claude_update_stale; then
-  { __claude_update_run &>/dev/null } &!
+  { __claude_update_run } &!
 fi
 
 ########################################
