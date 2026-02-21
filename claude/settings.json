@@ -16,6 +16,7 @@
     "ask": [],
     "defaultMode": "acceptEdits"
   },
+  "model": "sonnet",
   "hooks": {
     "PostToolUse": [
       {

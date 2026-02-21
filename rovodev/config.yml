@@ -113,6 +113,9 @@ toolPermissions:
     get_pr_diff: allow
     bitbucketPullRequest: allow
     bitbucketRepoContent: allow
+    bitbucketWorkspace: allow
+    bitbucketRepository: allow
+    bitbucketPipeline: allow
   bash:
     # Default permission for bash commands not explicitly listed
     default: ask

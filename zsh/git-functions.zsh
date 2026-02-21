@@ -1,7 +1,7 @@
 # shellcheck shell=zsh
 # Git helper functions used across interactive shells.
 
-function _get_main_branch() {
+function _get_default_branch() {
     local remote="${1:-origin}"
     local remote_head_ref
     local branch_candidate
@@ -272,7 +272,8 @@ PYDELETE
     fi
 }
 
-function rebase_on_main() {
+function rebase_on_origin() {
+    local remote="origin"
     local main_branch
     local current_branch
     local git_status
@@ -293,7 +294,7 @@ function rebase_on_main() {
         return 1
     fi
 
-    main_branch=$(_get_main_branch)
+    main_branch=$(_get_default_branch "$remote")
     if [[ -z "$main_branch" ]]; then
         echo -e "\033[31merror: could not detect main branch (tried main, master)\033[0m"
         return 1
@@ -326,22 +327,22 @@ function rebase_on_main() {
     fi
 
     echo -e "\033[33mcurrent branch:\033[0m $current_branch"
-    echo -e "\033[33mrebasing onto:\033[0m origin/$main_branch"
-    echo -e "fetching and rebasing: \033[32mgit fetch origin $main_branch && git rebase origin/$main_branch\033[0m"
+    echo -e "\033[33mrebasing onto:\033[0m $remote/$main_branch"
+    echo -e "fetching and rebasing: \033[32mgit fetch $remote $main_branch && git rebase $remote/$main_branch\033[0m"
 
-    if ! git fetch origin "$main_branch" 2>&1; then
-        echo -e "\033[31m✗ failed to fetch origin/$main_branch\033[0m"
+    if ! git fetch "$remote" "$main_branch" 2>&1; then
+        echo -e "\033[31m✗ failed to fetch $remote/$main_branch\033[0m"
         echo -e "\033[33mcheck your network connection and remote configuration\033[0m"
         return 1
     fi
 
     echo -e "\033[32m✓ fetched latest $main_branch\033[0m"
 
-    rebase_output=$(git rebase "origin/$main_branch" 2>&1)
+    rebase_output=$(git rebase "$remote/$main_branch" 2>&1)
     local rebase_exit_code=$?
 
     if [[ $rebase_exit_code -eq 0 ]]; then
-        echo -e "\033[32m✓ successfully rebased $current_branch onto origin/$main_branch\033[0m"
+        echo -e "\033[32m✓ successfully rebased $current_branch onto $remote/$main_branch\033[0m"
         return 0
     fi
 
@@ -371,7 +372,7 @@ function rebase_on_main() {
     return 1
 }
 
-function restore_from_main() {
+function restore_from_origin() {
     if [ $# -eq 0 ]; then
         echo -e "\033[31merror: no file path provided\033[0m"
         return 1
@@ -382,8 +383,9 @@ function restore_from_main() {
         return 1
     fi
 
+    local remote="origin"
     local main_branch
-    main_branch=$(_get_main_branch)
+    main_branch=$(_get_default_branch "$remote")
     if [[ -z "$main_branch" ]]; then
         echo -e "\033[31merror: could not detect main branch (tried main, master)\033[0m"
         return 1
@@ -391,8 +393,8 @@ function restore_from_main() {
 
     local file_path_from_repository_root=$*
     local full_filename=$(basename "$file_path_from_repository_root")
-    if git restore --source "origin/$main_branch" "${file_path_from_repository_root}"; then
-        echo -e "\033[32m✓ restored '${full_filename}' from origin/${main_branch}\033[0m"
+    if git restore --source "$remote/$main_branch" "${file_path_from_repository_root}"; then
+        echo -e "\033[32m✓ restored '${full_filename}' from $remote/${main_branch}\033[0m"
     else
         echo -e "\033[31m✗ failed to restore '${full_filename}'\033[0m"
         return 1
@@ -410,8 +412,9 @@ function branch_create() {
     git checkout -b "${branch_name}"
 }
 
-function prune_branch_all_except_main() {
+function prune_all_except_origin() {
     local keep_branch="$1"
+    local remote="origin"
     local current_branch
     local -a branches_to_delete=()
 
@@ -422,7 +425,7 @@ function prune_branch_all_except_main() {
 
     # Auto-detect main branch if not specified
     if [[ -z "$keep_branch" ]]; then
-        keep_branch=$(_get_main_branch)
+        keep_branch=$(_get_default_branch "$remote")
         if [[ -z "$keep_branch" ]]; then
             echo -e "\033[31merror: could not detect main branch (tried main, master)\033[0m"
             return 1
@@ -431,7 +434,7 @@ function prune_branch_all_except_main() {
 
     if ! git show-ref --verify --quiet "refs/heads/$keep_branch"; then
         echo -e "\033[31merror: local branch '${keep_branch}' not found\033[0m"
-        echo -e "\033[33mtry:\033[0m \033[32mgit fetch origin ${keep_branch}:${keep_branch}\033[0m"
+        echo -e "\033[33mtry:\033[0m \033[32mgit fetch $remote ${keep_branch}:${keep_branch}\033[0m"
         return 1
     fi
 
@@ -661,14 +664,15 @@ function hard_reset_head() {
     git reset --hard
 }
 
-function soft_reset_main() {
+function soft_reset_origin() {
     if ! git rev-parse --git-dir > /dev/null 2>&1; then
         echo -e "\033[31merror: not in a git repository\033[0m"
         return 1
     fi
 
+    local remote="origin"
     local main_branch
-    main_branch=$(_get_main_branch)
+    main_branch=$(_get_default_branch "$remote")
     if [[ -z "$main_branch" ]]; then
         echo -e "\033[31merror: could not detect main branch (tried main, master)\033[0m"
         return 1
@@ -676,7 +680,7 @@ function soft_reset_main() {
 
     if ! git show-ref --verify --quiet "refs/heads/$main_branch"; then
         echo -e "\033[31merror: local '${main_branch}' branch not found\033[0m"
-        echo -e "\033[33mtry:\033[0m \033[32mgit fetch origin ${main_branch}:${main_branch}\033[0m"
+        echo -e "\033[33mtry:\033[0m \033[32mgit fetch $remote ${main_branch}:${main_branch}\033[0m"
         return 1
     fi
     echo -e "soft reset onto ${main_branch}: \033[32mgit reset --soft ${main_branch}\033[0m"
