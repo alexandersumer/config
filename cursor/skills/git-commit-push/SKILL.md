@@ -1,1 +1,0 @@
-../../../commands/git-commit-push.md

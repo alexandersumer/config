@@ -85,7 +85,6 @@ alias stratus1="cd $HOME/src/stratus-1"
 alias stratus2="cd $HOME/src/stratus-2"
 alias vim="nvim"
 alias vi="nvim"
-alias rovodev="acli rovodev tui --yolo"
 alias opencode="atlas opencode"
 alias clear="echo 'The clear command is disabled.'"
 

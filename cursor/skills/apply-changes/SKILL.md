@@ -1,1 +1,0 @@
-../../../commands/apply-changes.md
