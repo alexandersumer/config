@@ -1,4 +1,5 @@
 ---
+name: resolve-conflict
 description: Resolve merge conflicts preserving branch intent
 ---
 

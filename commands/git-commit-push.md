@@ -1,4 +1,5 @@
 ---
+name: git-commit-push
 description: Stage all changes, commit with auto-generated message, and push
 ---
 

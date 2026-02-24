@@ -1,4 +1,5 @@
 ---
+name: fix-failures
 description: Run build/test, fix failures without workarounds or suppressing errors
 argument-hint: "[optional: error output or stack trace]"
 ---

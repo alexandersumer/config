@@ -1,4 +1,5 @@
 ---
+name: apply-changes
 description: Implement requested changes with surgical precision
 argument-hint: "[optional: changes to apply]"
 ---

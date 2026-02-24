@@ -1,4 +1,5 @@
 ---
+name: git-commit
 description: Stage all changes and commit with auto-generated message
 ---
 

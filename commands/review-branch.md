@@ -1,4 +1,5 @@
 ---
+name: review-branch
 description: Review for bugs, security, architecture, and test coverage (no style nits)
 argument-hint: "[optional: focus area]"
 ---

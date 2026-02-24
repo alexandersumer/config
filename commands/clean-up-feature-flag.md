@@ -1,4 +1,5 @@
 ---
+name: clean-up-feature-flag
 description: Remove a fully rolled out feature flag and verify checks pass
 argument-hint: "[flag key]"
 ---

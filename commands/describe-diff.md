@@ -1,4 +1,5 @@
 ---
+name: describe-diff
 description: Generate a <10 word phrase summarizing working changes
 ---
 

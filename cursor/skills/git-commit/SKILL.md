@@ -1,0 +1,1 @@
+../../../commands/git-commit.md

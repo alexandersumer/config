@@ -1,4 +1,5 @@
 ---
+name: describe-branch
 description: Generate a PR description (3 sentences + summary line)
 ---
 
