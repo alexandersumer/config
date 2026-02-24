@@ -1,6 +1,0 @@
----
-name: describe-branch
-description: Generate a PR description (3 sentences + summary line)
----
-
-Analyze the cumulative diff of this branch against its base branch. Write a direct, concise PR description of what changed and why. Limit to 3 sentences. Mention only the primary components modified, not internal implementation details. Do not use bullet points or lists. End with a summary line under 10 words with no punctuation.
