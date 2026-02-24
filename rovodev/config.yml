@@ -79,6 +79,9 @@ console:
   maxOutputWidth: 120
   # Enable or disable animated startup loading screen
   enableStartupAnimations: true
+  # Automatically copy selected text to clipboard when text is selected in the
+  # chat
+  copyOnSelect: true
 
 # Logging and prompt collection settings
 logging:
