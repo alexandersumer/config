@@ -4,7 +4,7 @@ description: Review for bugs, security, architecture, and test coverage (no styl
 argument-hint: "[optional: focus area]"
 ---
 
-Analyze the cumulative diff of this branch against its base branch.
+Determine the base branch and get the cumulative branch diff using three-dot syntax (`git diff base...HEAD`). Do not use two-dot diff as it includes unrelated changes from the base branch.
 
 If `$ARGUMENTS` is provided, narrow the review to only the parts of the diff relevant to that input. Otherwise, review the entire diff.
 

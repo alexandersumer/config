@@ -11,8 +11,10 @@ Shared coding commands (slash commands / skills) for the Gen AI Platform team.
 | `describe-diff` | Summarize working changes in <10 words |
 | `apply-changes` | Implement changes with surgical precision |
 | `fix-failures` | Run build/test and fix failures properly |
+| `sync-main` | Fetch latest main and merge it into the current branch |
 | `resolve-conflict` | Resolve merge conflicts preserving branch intent |
 | `clean-up-feature-flag` | Remove a fully rolled-out feature flag |
+| `regenerate-detekt-baseline` | Regenerate detekt baselines for Main and Test source sets |
 
 ## Setup
 

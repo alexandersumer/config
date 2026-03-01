@@ -4,7 +4,7 @@ description: Implement requested changes with surgical precision
 argument-hint: "[optional: changes to apply]"
 ---
 
-Apply changes with surgical precision. Use the changes described below if provided; otherwise, infer what to apply from context.
+Read the relevant code to understand existing patterns and context. Apply changes with surgical precision. Use the changes described below if provided; otherwise, infer what to apply from context.
 
 $ARGUMENTS
 
