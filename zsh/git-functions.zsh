@@ -655,6 +655,30 @@ function fast_gscp() {
     fi
 }
 
+function merge_from_origin() {
+    local remote="origin"
+    local main_branch
+
+    main_branch=$(_get_default_branch "$remote")
+    if [[ -z "$main_branch" ]]; then
+        echo -e "\033[31merror: could not detect main branch (tried main, master)\033[0m"
+        return 1
+    fi
+
+    echo -e "fetching and merging: \033[32mgit fetch $remote $main_branch && git merge $remote/$main_branch\033[0m"
+    git fetch "$remote" "$main_branch" && git merge "$remote/$main_branch"
+}
+
+function quit_merge() {
+    echo -e "quitting merge: \033[32mgit merge --quit\033[0m"
+    git merge --quit
+}
+
+function abort_merge() {
+    echo -e "aborting merge: \033[32mgit merge --abort\033[0m"
+    git merge --abort
+}
+
 function hard_reset_head() {
     if ! git rev-parse --git-dir > /dev/null 2>&1; then
         echo -e "\033[31merror: not in a git repository\033[0m"
