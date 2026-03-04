@@ -1,7 +1,6 @@
 # Font
 font-family = JetBrains Mono
 font-size = 15
-font-thicken = true
 font-feature = calt
 
 # Theme (follows macOS dark mode)
