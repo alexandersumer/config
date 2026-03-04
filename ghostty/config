@@ -1,10 +1,8 @@
 # Font
 font-family = JetBrains Mono
-font-size = 14
+font-size = 15
 font-thicken = true
-font-thicken-strength = 100
 font-feature = calt
-font-feature = liga
 
 # Theme (follows macOS dark mode)
 theme = light:Catppuccin Latte,dark:Catppuccin Mocha
@@ -14,6 +12,7 @@ window-padding-x = 16
 window-padding-y = 16
 window-padding-balance = true
 macos-titlebar-style = tabs
+window-new-tab-position = end
 
 # macOS
 macos-option-as-alt = left
