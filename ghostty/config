@@ -2,9 +2,12 @@
 font-family = JetBrains Mono
 font-size = 14
 font-thicken = true
+font-thicken-strength = 100
+font-feature = calt
+font-feature = liga
 
 # Theme (follows macOS dark mode)
-theme = light:catppuccin-latte,dark:catppuccin-mocha
+theme = light:Catppuccin Latte,dark:Catppuccin Mocha
 
 # Window
 window-padding-x = 16
