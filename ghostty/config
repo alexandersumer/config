@@ -1,0 +1,26 @@
+# Font
+font-family = JetBrains Mono
+font-size = 14
+font-thicken = true
+
+# Theme (follows macOS dark mode)
+theme = light:catppuccin-latte,dark:catppuccin-mocha
+
+# Window
+window-padding-x = 16
+window-padding-y = 16
+window-padding-balance = true
+macos-titlebar-style = tabs
+
+# macOS
+macos-option-as-alt = left
+
+# Shell
+working-directory = home
+window-inherit-working-directory = false
+shell-integration = detect
+shell-integration-features = cursor,sudo,title
+
+# Clipboard
+copy-on-select = true
+clipboard-paste-protection = true
