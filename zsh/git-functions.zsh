@@ -510,20 +510,24 @@ function prune_branch() {
         return 0
     fi
 
-    # Remove worktrees that use any of the target branches before deleting
-    local worktree_path worktree_branch wt_line
+    # Remove worktrees that use any of the target branches before deleting.
+    # Parse porcelain output line-by-line to handle paths with spaces.
+    local wt_path="" wt_line
     while IFS= read -r wt_line; do
-        [[ -z "$wt_line" ]] && continue
-        worktree_path="${wt_line%% *}"
-        worktree_branch="${wt_line##* }"
-        for branch in "${targets[@]}"; do
-            if [[ "$worktree_branch" == "$branch" ]]; then
-                printf '\033[33mremoving worktree using branch %s: %s\033[0m\n' "$branch" "$worktree_path"
-                git worktree remove --force "$worktree_path" 2>/dev/null
-                break
-            fi
-        done
-    done < <(git worktree list --porcelain | awk '/^worktree /{wt=$2} /^branch refs\/heads\//{print wt " " substr($2, 12)}')
+        if [[ "$wt_line" == worktree\ * ]]; then
+            wt_path="${wt_line#worktree }"
+        elif [[ "$wt_line" == branch\ refs/heads/* ]]; then
+            local wt_branch="${wt_line#branch refs/heads/}"
+            for branch in "${targets[@]}"; do
+                if [[ "$wt_branch" == "$branch" ]]; then
+                    printf '\033[33mremoving worktree using branch %s: %s\033[0m\n' "$branch" "$wt_path"
+                    git worktree remove --force "$wt_path" 2>/dev/null
+                    break
+                fi
+            done
+            wt_path=""
+        fi
+    done < <(git worktree list --porcelain 2>/dev/null)
 
     # Prune stale worktree metadata
     git worktree prune 2>/dev/null
