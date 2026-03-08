@@ -52,7 +52,6 @@ function _build_commit_message() {
 function origin_reset_hard() {
     local remote="origin"
     local branch=""
-    local clean_requested=0
     local arg
     local -a positional_args=()
     local fetch_output
@@ -73,14 +72,8 @@ function origin_reset_hard() {
 
     for arg in "$@"; do
         case "$arg" in
-            --clean)
-                clean_requested=1
-                ;;
-            --no-clean)
-                ;;
             --help|-h)
-                printf 'usage: origin_reset_hard [remote] [branch] [--clean]\n'
-                printf '  --clean     (deprecated) ignored; run git clean manually if desired\n'
+                printf 'usage: origin_reset_hard [remote] [branch]\n'
                 return 0
                 ;;
             *)
@@ -103,7 +96,9 @@ function origin_reset_hard() {
         branch_from_arg=1
     fi
 
-    if ! git rev-parse --git-dir >/dev/null 2>&1; then
+    local git_dir
+    git_dir=$(git rev-parse --git-dir 2>/dev/null)
+    if [[ -z "$git_dir" ]]; then
         printf '\033[31merror: not in a git repository\033[0m\n' >&2
         return 1
     fi
@@ -117,9 +112,9 @@ function origin_reset_hard() {
     # prevents stale lock files and case-conflicting directories from blocking
     # git fetch. Preserves flat files (e.g. HEAD) since git fetch doesn't
     # recreate the HEAD symbolic ref. Packed refs are unaffected.
-    if [[ -d ".git/refs/remotes/$remote" ]]; then
-        find ".git/refs/remotes/$remote" -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} + 2>/dev/null
-        find ".git/refs/remotes/$remote" -name "*.lock" -type f -delete 2>/dev/null
+    if [[ -d "$git_dir/refs/remotes/$remote" ]]; then
+        find "$git_dir/refs/remotes/$remote" -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} + 2>/dev/null
+        find "$git_dir/refs/remotes/$remote" -name "*.lock" -type f -delete 2>/dev/null
     fi
 
     if (( branch_from_arg == 0 )) && [[ -z "$branch" ]]; then
@@ -187,7 +182,7 @@ PYDELETE
         fi
 
         for ref in "${refs_array[@]}"; do
-            local ref_path=".git/$ref"
+            local ref_path="$git_dir/$ref"
             rm -f "${ref_path}.lock" 2>/dev/null
             if [[ -f "$ref_path" ]]; then
                 printf '\033[33mwarning: removing stale ref %s\033[0m\n' "$ref"
@@ -266,10 +261,6 @@ PYDELETE
     fi
 
     git reset --hard "$remote/$branch" || return $?
-
-    if (( clean_requested )); then
-        printf '\033[33mnote: --clean flag is ignored; run git clean manually if you really want to remove untracked files\033[0m\n'
-    fi
 }
 
 function rebase_on_origin() {
@@ -311,11 +302,11 @@ function rebase_on_origin() {
 
     git_status=$(git status --porcelain 2>/dev/null)
     if [[ -n "$git_status" ]]; then
+        local file_count=${#${(f)git_status}}
         echo -e "\033[31m✗ cannot rebase: you have uncommitted changes\033[0m"
         echo -e "\033[33mmodified files:\033[0m"
-        git status --short | head -20
-        local file_count=$(git status --short | wc -l | tr -d ' ')
-        if [[ $file_count -gt 20 ]]; then
+        printf '%s\n' "${(f)git_status}" | head -20
+        if (( file_count > 20 )); then
             echo -e "\033[33m... and $((file_count - 20)) more files\033[0m"
         fi
         echo ""
