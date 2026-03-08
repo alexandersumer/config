@@ -510,6 +510,24 @@ function prune_branch() {
         return 0
     fi
 
+    # Remove worktrees that use any of the target branches before deleting
+    local worktree_path worktree_branch wt_line
+    while IFS= read -r wt_line; do
+        [[ -z "$wt_line" ]] && continue
+        worktree_path="${wt_line%% *}"
+        worktree_branch="${wt_line##* }"
+        for branch in "${targets[@]}"; do
+            if [[ "$worktree_branch" == "$branch" ]]; then
+                printf '\033[33mremoving worktree using branch %s: %s\033[0m\n' "$branch" "$worktree_path"
+                git worktree remove --force "$worktree_path" 2>/dev/null
+                break
+            fi
+        done
+    done < <(git worktree list --porcelain | awk '/^worktree /{wt=$2} /^branch refs\/heads\//{print wt " " substr($2, 12)}')
+
+    # Prune stale worktree metadata
+    git worktree prune 2>/dev/null
+
     echo -e "pruning local branches: \033[32m${(j: :)targets}\033[0m"
     if git branch -D "${targets[@]}"; then
         return 0
