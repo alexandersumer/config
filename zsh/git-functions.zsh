@@ -271,12 +271,12 @@ function rebase_on_origin() {
     local git_dir
     local rebase_output
 
-    if ! git rev-parse --git-dir > /dev/null 2>&1; then
+    git_dir=$(git rev-parse --git-dir 2>/dev/null)
+    if [[ -z "$git_dir" ]]; then
         echo -e "\033[31merror: not in a git repository\033[0m"
         return 1
     fi
 
-    git_dir=$(git rev-parse --git-dir)
     current_branch=$(git rev-parse --abbrev-ref HEAD)
 
     if [[ "$current_branch" == "HEAD" ]]; then
@@ -398,9 +398,9 @@ function branch_create() {
         return 1
     fi
 
-    local branch_name=$(echo "$@" | tr ' ' '-')
+    local branch_name=${@// /-}
     echo -e "creating branch: \033[32m${branch_name}\033[0m"
-    git checkout -b "${branch_name}"
+    git switch -c "${branch_name}"
 }
 
 function prune_all_except_origin() {
@@ -552,76 +552,41 @@ function _stage_commit_git_impl() {
     fi
 }
 
-function gsc() {
+function _gsc_impl() {
+    local skip_detekt=$1
+    local do_push=$2
+    shift 2
+
     if [ $# -eq 0 ]; then
         echo -e "\033[31merror: please provide a commit message\033[0m"
         return 1
     fi
+
     local message
     message=$(_build_commit_message "$@")
-    echo -e "staging and committing: \033[32m\"$message\"\033[0m"
 
-    _stage_commit_git_impl "$message" 0
+    local label="staging and committing"
+    (( skip_detekt )) && label+=" (skip detekt)"
+    (( do_push )) && label="${label/and committing/committing and pushing}"
+    echo -e "${label}: \033[32m\"$message\"\033[0m"
+
+    _stage_commit_git_impl "$message" "$skip_detekt"
     local commit_status=$?
 
     if [[ $commit_status -ne 0 ]]; then
         if ! git diff --quiet || ! git diff --cached --quiet; then
             echo -e "\033[33mHooks modified files, staging changes and retrying commit...\033[0m"
             git add -u
-            _stage_commit_git_impl "$message" 0
+            _stage_commit_git_impl "$message" "$skip_detekt"
             commit_status=$?
         fi
     fi
-
-    return $commit_status
-}
-
-function fast_gsc() {
-    if [ $# -eq 0 ]; then
-        echo -e "\033[31merror: please provide a commit message\033[0m"
-        return 1
-    fi
-    local message
-    message=$(_build_commit_message "$@")
-    echo -e "staging and committing (skip detekt): \033[32m\"$message\"\033[0m"
-
-    _stage_commit_git_impl "$message" 1
-    local commit_status=$?
 
     if [[ $commit_status -ne 0 ]]; then
-        if ! git diff --quiet || ! git diff --cached --quiet; then
-            echo -e "\033[33mHooks modified files, staging changes and retrying commit...\033[0m"
-            git add -u
-            _stage_commit_git_impl "$message" 1
-            commit_status=$?
-        fi
+        return $commit_status
     fi
 
-    return $commit_status
-}
-
-function gscp() {
-    if [ $# -eq 0 ]; then
-        echo -e "\033[31merror: please provide a commit message\033[0m"
-        return 1
-    fi
-    local message
-    message=$(_build_commit_message "$@")
-    echo -e "staging, committing and pushing: \033[32m\"$message\"\033[0m"
-
-    _stage_commit_git_impl "$message" 0
-    local commit_status=$?
-
-    if [[ $commit_status -ne 0 ]]; then
-        if ! git diff --quiet || ! git diff --cached --quiet; then
-            echo -e "\033[33mHooks modified files, staging changes and retrying commit...\033[0m"
-            git add -u
-            _stage_commit_git_impl "$message" 0
-            commit_status=$?
-        fi
-    fi
-
-    if [[ $commit_status -eq 0 ]]; then
+    if (( do_push )); then
         if ! git push; then
             echo -e "\033[31m✗ push failed\033[0m"
             echo -e "\033[33moptions:\033[0m"
@@ -629,44 +594,13 @@ function gscp() {
             echo -e "  2. force push:      \033[32mforce_push\033[0m (use with caution)"
             return 1
         fi
-    else
-        return $commit_status
     fi
 }
 
-function fast_gscp() {
-    if [ $# -eq 0 ]; then
-        echo -e "\033[31merror: please provide a commit message\033[0m"
-        return 1
-    fi
-    local message
-    message=$(_build_commit_message "$@")
-    echo -e "staging, committing (skip detekt) and pushing: \033[32m\"$message\"\033[0m"
-
-    _stage_commit_git_impl "$message" 1
-    local commit_status=$?
-
-    if [[ $commit_status -ne 0 ]]; then
-        if ! git diff --quiet || ! git diff --cached --quiet; then
-            echo -e "\033[33mHooks modified files, staging changes and retrying commit...\033[0m"
-            git add -u
-            _stage_commit_git_impl "$message" 1
-            commit_status=$?
-        fi
-    fi
-
-    if [[ $commit_status -eq 0 ]]; then
-        if ! git push; then
-            echo -e "\033[31m✗ push failed\033[0m"
-            echo -e "\033[33moptions:\033[0m"
-            echo -e "  1. pull and retry:  \033[32mgit pull --rebase && git push\033[0m"
-            echo -e "  2. force push:      \033[32mforce_push\033[0m (use with caution)"
-            return 1
-        fi
-    else
-        return $commit_status
-    fi
-}
+function gsc()       { _gsc_impl 0 0 "$@"; }
+function fast_gsc()  { _gsc_impl 1 0 "$@"; }
+function gscp()      { _gsc_impl 0 1 "$@"; }
+function fast_gscp() { _gsc_impl 1 1 "$@"; }
 
 function merge_from_origin() {
     local remote="origin"
