@@ -225,7 +225,3 @@ if [[ -r "$HOME/.local/bin/env" ]]; then
   . "$HOME/.local/bin/env"
 fi
 
-########################################
-# Zed editor CLI
-########################################
-zed() { /Applications/Zed.app/Contents/MacOS/cli "$@" }
