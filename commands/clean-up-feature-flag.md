@@ -2,6 +2,12 @@
 name: clean-up-feature-flag
 description: Remove a fully rolled out feature flag and verify checks pass
 argument-hint: "[flag key]"
+inputs:
+  - name: flag_key
+    label: Flag key
+    description: The feature flag key to remove.
+    type: string
+    required: true
 ---
 
 Remove fully rolled out feature flag `$ARGUMENTS`. Keep the NEW/enabled behavior, delete OLD/disabled code paths.

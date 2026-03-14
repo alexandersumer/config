@@ -2,6 +2,12 @@
 name: review-branch
 description: Review for bugs, security, architecture, and test coverage (no style nits)
 argument-hint: "[optional: focus area]"
+inputs:
+  - name: focus_area
+    label: Focus area
+    description: Optional text to narrow the review scope. Leave empty to review the entire branch.
+    type: string
+    required: false
 ---
 
 Determine the base branch and get the cumulative branch diff using three-dot syntax (`git diff base...HEAD`). Do not use two-dot diff as it includes unrelated changes from the base branch.
