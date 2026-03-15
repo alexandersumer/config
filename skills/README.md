@@ -1,8 +1,8 @@
-# gap-commands
+# gap-skills
 
-Shared coding commands (slash commands / skills) for the Gen AI Platform team.
+Shared coding skills for the Gen AI Platform team.
 
-| Command | Description |
+| Skill | Description |
 |---|---|
 | `git-commit` | Stage all changes and commit |
 | `git-commit-push` | Stage, commit, push (auto-branches if protected) |
@@ -18,26 +18,26 @@ Shared coding commands (slash commands / skills) for the Gen AI Platform team.
 
 ## Setup
 
-**Cursor** — for each command, create a skill directory with a symlink:
+**Cursor** — for each skill, create a skill directory with a symlink:
 
 ```sh
 mkdir -p ~/.cursor/skills-cursor/git-commit
-ln -s /path/to/gap-commands/git-commit.md ~/.cursor/skills-cursor/git-commit/SKILL.md
+ln -s /path/to/gap-skills/git-commit.md ~/.cursor/skills-cursor/git-commit/SKILL.md
 ```
 
 **OpenCode** — symlink the repo into your OpenCode config:
 
 ```sh
-ln -s /path/to/gap-commands opencode/commands
+ln -s /path/to/gap-skills opencode/skills
 ```
 
-## Adding a command
+## Adding a skill
 
 Create a `.md` file at the repo root:
 
 ```
 ---
-name: my-command
+name: my-skill
 description: What it does
 ---
 Instructions for the agent.
