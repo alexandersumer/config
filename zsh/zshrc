@@ -224,3 +224,6 @@ if [[ -r "$HOME/.local/bin/env" ]]; then
   . "$HOME/.local/bin/env"
 fi
 
+
+# Blog
+alias blog="cd ~/src/alexandersumer.com"
