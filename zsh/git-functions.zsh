@@ -117,6 +117,12 @@ function origin_reset_hard() {
         find "$git_dir/refs/remotes/$remote" -name "*.lock" -type f -delete 2>/dev/null
     fi
 
+    # Same cleanup for reflogs — D/F conflicts here also block git fetch.
+    if [[ -d "$git_dir/logs/refs/remotes/$remote" ]]; then
+        find "$git_dir/logs/refs/remotes/$remote" -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} + 2>/dev/null
+        find "$git_dir/logs/refs/remotes/$remote" -name "*.lock" -type f -delete 2>/dev/null
+    fi
+
     if (( branch_from_arg == 0 )) && [[ -z "$branch" ]]; then
         remote_head_ref=$(git symbolic-ref --quiet "refs/remotes/$remote/HEAD" 2>/dev/null)
         if [[ -n "$remote_head_ref" ]]; then
@@ -160,6 +166,7 @@ text = os.environ["FETCH_OUTPUT"]
 remote = re.escape(os.environ["REMOTE_NAME"])
 patterns = [
     r"cannot lock ref '(refs/remotes/%s/[^']+)'",
+    r"cannot update the ref '(refs/remotes/%s/[^']+)'",
     r"removing stale tracking ref (refs/remotes/%s/[^\s\"']+)",
 ]
 seen = []
@@ -183,6 +190,7 @@ PYDELETE
 
         for ref in "${refs_array[@]}"; do
             local ref_path="$git_dir/$ref"
+            local log_path="$git_dir/logs/$ref"
             rm -f "${ref_path}.lock" 2>/dev/null
             if [[ -f "$ref_path" ]]; then
                 printf '\033[33mwarning: removing stale ref %s\033[0m\n' "$ref"
@@ -193,6 +201,25 @@ PYDELETE
                 rm -rf "$ref_path"
                 manual_deleted_refs+=("$ref")
             fi
+            # Clean corresponding reflog entry
+            rm -f "${log_path}.lock" "$log_path" 2>/dev/null
+            [[ -d "$log_path" ]] && rm -rf "$log_path"
+            # Resolve D/F conflicts: a parent of the failing ref may
+            # exist as a file (old branch) when a child path (new
+            # branch) needs it to be a directory.
+            local _p _dir _stop
+            for _p in "$ref_path" "$log_path"; do
+                _dir="${_p%/*}"
+                _stop="$git_dir/refs/remotes/$remote"
+                [[ "$_p" == "$log_path" ]] && _stop="$git_dir/logs/refs/remotes/$remote"
+                while [[ "$_dir" != "$_stop" && "$_dir" == "${_stop}/"* ]]; do
+                    if [[ -f "$_dir" ]]; then
+                        printf '\033[33mwarning: removing file blocking directory %s\033[0m\n' "${_dir#$git_dir/}"
+                        rm -f "$_dir"
+                    fi
+                    _dir="${_dir%/*}"
+                done
+            done
         done
 
         (( fetch_attempt++ ))
