@@ -28,3 +28,8 @@ shell-integration-features = cursor,sudo,title,path
 # Clipboard
 copy-on-select = true
 clipboard-paste-protection = true
+
+# Keyboard
+# Force Ctrl+W to send the classic ^W control character so shells/apps
+# handle it as backward-kill-word even if enhanced key protocols misbehave.
+keybind = ctrl+w=text:\x17

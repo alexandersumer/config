@@ -229,4 +229,4 @@ fi
 alias blog="cd ~/src/alexandersumer.com"
 
 # Atlassian Secure Sandbox Platform
-alias assp="cd ~/src/atlassian-secure-sandbox-platform"
+alias assp="cd ~/src/assp"
