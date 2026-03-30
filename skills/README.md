@@ -1,44 +1,52 @@
-# gap-skills
+# gap-coding-skills
 
-Shared coding skills for the Gen AI Platform team.
-
-| Skill | Description |
-|---|---|
-| `git-commit` | Stage all changes and commit |
-| `git-commit-push` | Stage, commit, push (auto-branches if protected) |
-| `review-branch` | Review diff for bugs, security, architecture |
-| `describe-branch` | Generate PR description (3 sentences + summary) |
-| `describe-diff` | Summarize working changes in <10 words |
-| `apply-changes` | Implement changes with surgical precision |
-| `fix-failures` | Run build/test and fix failures properly |
-| `sync-main` | Fetch latest main and merge it into the current branch |
-| `resolve-conflict` | Resolve merge conflicts preserving branch intent |
-| `clean-up-feature-flag` | Remove a fully rolled-out feature flag |
-| `regenerate-detekt-baseline` | Regenerate detekt baselines for Main and Test source sets |
+Shared coding skills for the Gen AI Platform team. Each skill is a `.md` file at the repo root with YAML front-matter (`name`, `description`). Browse the files to see what's available.
 
 ## Setup
 
-**Cursor** — for each skill, create a skill directory with a symlink:
+**Claude Code** — import individual skills in your project's `CLAUDE.md`:
+
+```
+/import-skill path/to/gap-coding-skills/<skill>.md
+```
+
+**Cursor** — symlink each skill:
 
 ```sh
 mkdir -p ~/.cursor/skills-cursor/git-commit
-ln -s /path/to/gap-skills/git-commit.md ~/.cursor/skills-cursor/git-commit/SKILL.md
+ln -s /path/to/gap-coding-skills/git-commit.md ~/.cursor/skills-cursor/git-commit/SKILL.md
 ```
 
-**OpenCode** — symlink the repo into your OpenCode config:
+**Rovo Dev CLI** — register all skills globally:
 
 ```sh
-ln -s /path/to/gap-skills opencode/skills
+./setup-rovodev.sh
 ```
 
 ## Adding a skill
 
-Create a `.md` file at the repo root:
+First-time setup — enable the pre-commit hook so `rovodev/prompts.yml` stays in sync automatically:
 
+```sh
+git config core.hooksPath hooks
 ```
+
+Then:
+
+1. Create the `.md` file with front-matter:
+
+```markdown
 ---
 name: my-skill
 description: What it does
 ---
 Instructions for the agent.
 ```
+
+2. Symlink it for Rovo Dev:
+
+```sh
+ln -s ../../my-skill.md rovodev/templates/my-skill.md
+```
+
+The pre-commit hook regenerates `rovodev/prompts.yml` on commit. To regenerate manually: `./generate-rovodev-prompts-yml`.
