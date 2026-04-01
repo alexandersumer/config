@@ -133,9 +133,9 @@ function origin_reset_hard() {
 
         if (( fetch_status == 0 )); then
             # Collect any refs that git fetch itself pruned (informational).
-            stale_output=$(FETCH_OUTPUT="$fetch_output" REMOTE_NAME="$remote" python3 - <<'PYFETCH'
-import os, re
-text = os.environ["FETCH_OUTPUT"]
+            stale_output=$(printf '%s' "$fetch_output" | REMOTE_NAME="$remote" python3 - <<'PYFETCH'
+import os, re, sys
+text = sys.stdin.read()
 remote = re.escape(os.environ["REMOTE_NAME"])
 seen = []
 for ref in re.findall(r"removing stale tracking ref (refs/remotes/%s/[^\s\"']+)" % remote, text):
@@ -160,9 +160,9 @@ PYFETCH
         printf '%s\n' "$fetch_output" >&2
 
         # Extract problematic refs from the error output.
-        refs_to_delete=$(FETCH_OUTPUT="$fetch_output" REMOTE_NAME="$remote" python3 - <<'PYDELETE'
-import os, re
-text = os.environ["FETCH_OUTPUT"]
+        refs_to_delete=$(printf '%s' "$fetch_output" | REMOTE_NAME="$remote" python3 - <<'PYDELETE'
+import os, re, sys
+text = sys.stdin.read()
 remote = re.escape(os.environ["REMOTE_NAME"])
 patterns = [
     r"cannot lock ref '(refs/remotes/%s/[^']+)'" % remote,
