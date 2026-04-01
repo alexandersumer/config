@@ -111,7 +111,7 @@ function origin_reset_hard() {
     # Remove loose remote tracking ref subdirectories before fetch. This
     # prevents stale lock files and case-conflicting directories from blocking
     # git fetch. Preserves flat files (e.g. HEAD) since git fetch doesn't
-    # recreate the HEAD symbolic ref. Packed refs are unaffected.
+    # recreate the HEAD symbolic ref.
     if [[ -d "$git_dir/refs/remotes/$remote" ]]; then
         find "$git_dir/refs/remotes/$remote" -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} + 2>/dev/null
         find "$git_dir/refs/remotes/$remote" -name "*.lock" -delete 2>/dev/null
@@ -121,6 +121,15 @@ function origin_reset_hard() {
     if [[ -d "$git_dir/logs/refs/remotes/$remote" ]]; then
         find "$git_dir/logs/refs/remotes/$remote" -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} + 2>/dev/null
         find "$git_dir/logs/refs/remotes/$remote" -name "*.lock" -delete 2>/dev/null
+    fi
+
+    # Purge packed-refs entries for this remote. Stale packed entries
+    # with outdated hashes cause "is at X but expected Y" errors that
+    # persist across fetches. git fetch --prune will recreate only the
+    # entries that still exist on the remote.
+    if [[ -f "$git_dir/packed-refs" ]]; then
+        sed -i.bak "/ refs\/remotes\/${remote}\//d" "$git_dir/packed-refs"
+        rm -f "$git_dir/packed-refs.bak"
     fi
 
     if (( branch_from_arg == 0 )) && [[ -z "$branch" ]]; then
