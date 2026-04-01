@@ -66,8 +66,8 @@ function origin_reset_hard() {
     local -a manual_deleted_refs=()
     local -a refs_array=()
     local -a branch_candidates=()
-    local -i fetch_attempt=0
-    local -i fetch_max_attempts=2
+    local -i cleanup_rounds=0
+    local -i max_cleanup_rounds=3
     local -i branch_from_arg=0
 
     for arg in "$@"; do
@@ -130,7 +130,7 @@ function origin_reset_hard() {
         fi
     fi
 
-    while (( fetch_attempt < fetch_max_attempts )); do
+    while true; do
         fetch_output=$(git fetch --prune "$remote" 2>&1)
         fetch_status=$?
 
@@ -153,6 +153,12 @@ PYFETCH
             if [[ -n "$stale_output" ]]; then
                 stale_fetch_refs=(${(f)stale_output})
             fi
+            break
+        fi
+
+        # Fetch failed — bail out if we've exhausted cleanup attempts.
+        if (( cleanup_rounds >= max_cleanup_rounds )); then
+            printf '%s\n' "$fetch_output" >&2
             break
         fi
 
@@ -180,12 +186,12 @@ if seen:
 PYDELETE
 )
         if [[ -z "$refs_to_delete" ]]; then
-            return $fetch_status
+            break
         fi
 
         refs_array=(${(f)refs_to_delete})
         if (( ${#refs_array[@]} == 0 )); then
-            return $fetch_status
+            break
         fi
 
         for ref in "${refs_array[@]}"; do
@@ -222,7 +228,7 @@ PYDELETE
             done
         done
 
-        (( fetch_attempt++ ))
+        (( cleanup_rounds++ ))
     done
 
     if (( fetch_status != 0 )); then
