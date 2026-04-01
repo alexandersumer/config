@@ -133,18 +133,10 @@ function origin_reset_hard() {
 
         if (( fetch_status == 0 )); then
             # Collect any refs that git fetch itself pruned (informational).
-            stale_output=$(printf '%s' "$fetch_output" | REMOTE_NAME="$remote" python3 - <<'PYFETCH'
-import os, re, sys
-text = sys.stdin.read()
-remote = re.escape(os.environ["REMOTE_NAME"])
-seen = []
-for ref in re.findall(r"removing stale tracking ref (refs/remotes/%s/[^\s\"']+)" % remote, text):
-    if ref not in seen:
-        seen.append(ref)
-if seen:
-    print("\n".join(seen))
-PYFETCH
-)
+            stale_output=$(printf '%s\n' "$fetch_output" \
+                | grep "removing stale tracking ref" \
+                | grep -oE "refs/remotes/${remote}/[^'[:space:]\":]+"\
+                | awk '!seen[$0]++')
             if [[ -n "$stale_output" ]]; then
                 stale_fetch_refs=(${(f)stale_output})
             fi
@@ -160,26 +152,10 @@ PYFETCH
         printf '%s\n' "$fetch_output" >&2
 
         # Extract problematic refs from the error output.
-        refs_to_delete=$(printf '%s' "$fetch_output" | REMOTE_NAME="$remote" python3 - <<'PYDELETE'
-import os, re, sys
-text = sys.stdin.read()
-remote = re.escape(os.environ["REMOTE_NAME"])
-patterns = [
-    r"cannot lock ref '(refs/remotes/%s/[^']+)'" % remote,
-    r"cannot update the ref '(refs/remotes/%s/[^']+)'" % remote,
-    r"removing stale tracking ref (refs/remotes/%s/[^\s\"']+)" % remote,
-    r"error: cannot lock ref '(refs/remotes/%s/[^']+)'" % remote,
-    r"(refs/remotes/%s/[^\s']+): is at [0-9a-f]+ but expected [0-9a-f]+" % remote,
-]
-seen = []
-for pat in patterns:
-    for ref in re.findall(pat, text):
-        if ref not in seen:
-            seen.append(ref)
-if seen:
-    print("\n".join(seen))
-PYDELETE
-)
+        refs_to_delete=$(printf '%s\n' "$fetch_output" \
+            | grep -E "(cannot lock ref|cannot update the ref|removing stale tracking ref|is at [0-9a-f]+ but expected)" \
+            | grep -oE "refs/remotes/${remote}/[^'[:space:]\":]+" \
+            | awk '!seen[$0]++')
         if [[ -z "$refs_to_delete" ]]; then
             break
         fi
