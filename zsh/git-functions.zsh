@@ -208,6 +208,15 @@ PYDELETE
                 rm -rf "$ref_path"
                 manual_deleted_refs+=("$ref")
             fi
+            # Remove from packed-refs if present — stale entries here
+            # cause "is at X but expected Y" errors that loose ref
+            # cleanup alone cannot fix.
+            if [[ -f "$git_dir/packed-refs" ]] && grep -q " ${ref}$" "$git_dir/packed-refs" 2>/dev/null; then
+                printf '\033[33mwarning: removing stale packed ref %s\033[0m\n' "$ref"
+                sed -i.bak "/ ${ref//\//\\/}$/d" "$git_dir/packed-refs"
+                rm -f "$git_dir/packed-refs.bak"
+                manual_deleted_refs+=("$ref")
+            fi
             # Clean corresponding reflog entry
             rm -f "${log_path}.lock" "$log_path" 2>/dev/null
             [[ -d "$log_path" ]] && rm -rf "$log_path"
