@@ -54,14 +54,9 @@ function origin_reset_hard() {
     local branch=""
     local arg
     local -a positional_args=()
-    local fetch_output
-    local fetch_status=0
-    local refs_to_delete
-    local stale_output
-    local ref
-    local remote_head_ref
-    local branch_candidate
-    local upstream_ref
+    local fetch_output fetch_status=0 refs_to_delete stale_output
+    local ref ref_path log_path remote_head_ref branch_candidate upstream_ref
+    local _p _dir _stop
     local -a stale_fetch_refs=()
     local -a manual_deleted_refs=()
     local -a refs_array=()
@@ -108,16 +103,15 @@ function origin_reset_hard() {
         return 1
     fi
 
-    # Remove loose remote tracking ref subdirectories before fetch. This
-    # prevents stale lock files and case-conflicting directories from blocking
-    # git fetch. Preserves flat files (e.g. HEAD) since git fetch doesn't
-    # recreate the HEAD symbolic ref.
+    # ── Pre-fetch cleanup ──────────────────────────────────────────────
+    # Nuke all loose remote tracking refs (subdirectories only — preserves
+    # the HEAD symref file) and any stale .lock files at any depth.
     if [[ -d "$git_dir/refs/remotes/$remote" ]]; then
         find "$git_dir/refs/remotes/$remote" -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} + 2>/dev/null
         find "$git_dir/refs/remotes/$remote" -name "*.lock" -delete 2>/dev/null
     fi
 
-    # Same cleanup for reflogs — D/F conflicts here also block git fetch.
+    # Same for reflogs — D/F conflicts here also block git fetch.
     if [[ -d "$git_dir/logs/refs/remotes/$remote" ]]; then
         find "$git_dir/logs/refs/remotes/$remote" -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} + 2>/dev/null
         find "$git_dir/logs/refs/remotes/$remote" -name "*.lock" -delete 2>/dev/null
@@ -125,34 +119,26 @@ function origin_reset_hard() {
 
     # Purge packed-refs entries for this remote. Stale packed entries
     # with outdated hashes cause "is at X but expected Y" errors that
-    # persist across fetches. git fetch --prune will recreate only the
-    # entries that still exist on the remote.
+    # persist across fetches because git recreates loose refs from the
+    # packed state before attempting the update. git fetch --prune will
+    # repopulate only the refs that still exist on the remote.
     if [[ -f "$git_dir/packed-refs" ]]; then
-        sed -i.bak "/ refs\/remotes\/${remote}\//d" "$git_dir/packed-refs"
-        rm -f "$git_dir/packed-refs.bak"
+        sed -i '' "/ refs\/remotes\/${remote}\//d" "$git_dir/packed-refs"
     fi
 
-    if (( branch_from_arg == 0 )) && [[ -z "$branch" ]]; then
-        remote_head_ref=$(git symbolic-ref --quiet "refs/remotes/$remote/HEAD" 2>/dev/null)
-        if [[ -n "$remote_head_ref" ]]; then
-            branch=${remote_head_ref##*/}
-        fi
-    fi
-
+    # ── Fetch with retry ───────────────────────────────────────────────
     while true; do
         fetch_output=$(git fetch --prune "$remote" 2>&1)
         fetch_status=$?
 
         if (( fetch_status == 0 )); then
+            # Collect any refs that git fetch itself pruned (informational).
             stale_output=$(FETCH_OUTPUT="$fetch_output" REMOTE_NAME="$remote" python3 - <<'PYFETCH'
-import os
-import re
-
+import os, re
 text = os.environ["FETCH_OUTPUT"]
 remote = re.escape(os.environ["REMOTE_NAME"])
-pattern = re.compile(r"removing stale tracking ref (refs/remotes/%s/[^\s\"']+)" % remote)
 seen = []
-for ref in pattern.findall(text):
+for ref in re.findall(r"removing stale tracking ref (refs/remotes/%s/[^\s\"']+)" % remote, text):
     if ref not in seen:
         seen.append(ref)
 if seen:
@@ -173,22 +159,21 @@ PYFETCH
 
         printf '%s\n' "$fetch_output" >&2
 
+        # Extract problematic refs from the error output.
         refs_to_delete=$(FETCH_OUTPUT="$fetch_output" REMOTE_NAME="$remote" python3 - <<'PYDELETE'
-import os
-import re
-
+import os, re
 text = os.environ["FETCH_OUTPUT"]
 remote = re.escape(os.environ["REMOTE_NAME"])
 patterns = [
-    r"cannot lock ref '(refs/remotes/%s/[^']+)'",
-    r"cannot update the ref '(refs/remotes/%s/[^']+)'",
-    r"removing stale tracking ref (refs/remotes/%s/[^\s\"']+)",
-    r"(refs/remotes/%s/[^\s']+): is at [0-9a-f]+ but expected [0-9a-f]+",
+    r"cannot lock ref '(refs/remotes/%s/[^']+)'" % remote,
+    r"cannot update the ref '(refs/remotes/%s/[^']+)'" % remote,
+    r"removing stale tracking ref (refs/remotes/%s/[^\s\"']+)" % remote,
+    r"error: cannot lock ref '(refs/remotes/%s/[^']+)'" % remote,
+    r"(refs/remotes/%s/[^\s']+): is at [0-9a-f]+ but expected [0-9a-f]+" % remote,
 ]
 seen = []
-for raw in patterns:
-    pattern = re.compile(raw % remote)
-    for ref in pattern.findall(text):
+for pat in patterns:
+    for ref in re.findall(pat, text):
         if ref not in seen:
             seen.append(ref)
 if seen:
@@ -205,9 +190,13 @@ PYDELETE
         fi
 
         for ref in "${refs_array[@]}"; do
-            local ref_path="$git_dir/$ref"
-            local log_path="$git_dir/logs/$ref"
+            ref_path="$git_dir/$ref"
+            log_path="$git_dir/logs/$ref"
+
+            # Remove lock files
             rm -f "${ref_path}.lock" 2>/dev/null
+
+            # Remove loose ref (file or directory)
             if [[ -f "$ref_path" ]]; then
                 printf '\033[33mwarning: removing stale ref %s\033[0m\n' "$ref"
                 rm -f "$ref_path"
@@ -217,22 +206,24 @@ PYDELETE
                 rm -rf "$ref_path"
                 manual_deleted_refs+=("$ref")
             fi
-            # Remove from packed-refs if present — stale entries here
-            # cause "is at X but expected Y" errors that loose ref
-            # cleanup alone cannot fix.
+
+            # Remove from packed-refs if present
             if [[ -f "$git_dir/packed-refs" ]] && grep -q " ${ref}$" "$git_dir/packed-refs" 2>/dev/null; then
                 printf '\033[33mwarning: removing stale packed ref %s\033[0m\n' "$ref"
-                sed -i.bak "/ ${ref//\//\\/}$/d" "$git_dir/packed-refs"
-                rm -f "$git_dir/packed-refs.bak"
-                manual_deleted_refs+=("$ref")
+                sed -i '' "\| ${ref}$|d" "$git_dir/packed-refs"
+                # Only record once — skip if already recorded from loose cleanup
+                if [[ "${manual_deleted_refs[-1]:-}" != "$ref" ]]; then
+                    manual_deleted_refs+=("$ref")
+                fi
             fi
+
             # Clean corresponding reflog entry
             rm -f "${log_path}.lock" "$log_path" 2>/dev/null
             [[ -d "$log_path" ]] && rm -rf "$log_path"
+
             # Resolve D/F conflicts: a parent of the failing ref may
             # exist as a file (old branch) when a child path (new
             # branch) needs it to be a directory.
-            local _p _dir _stop
             for _p in "$ref_path" "$log_path"; do
                 _dir="${_p%/*}"
                 _stop="$git_dir/refs/remotes/$remote"
@@ -255,6 +246,7 @@ PYDELETE
         return $fetch_status
     fi
 
+    # ── Resolve target branch ──────────────────────────────────────────
     if (( branch_from_arg == 0 )); then
         remote_head_ref=$(git symbolic-ref --quiet "refs/remotes/$remote/HEAD" 2>/dev/null)
         if [[ -n "$remote_head_ref" ]]; then
@@ -282,11 +274,11 @@ PYDELETE
         return 1
     fi
 
-    printf 'resetting to %s/%s: \033[32mgit fetch --prune %s && git switch --force %s && git reset --hard %s/%s\033[0m\n' \
-        "$remote" "$branch" "$remote" "$branch" "$remote" "$branch"
+    # ── Reset to remote branch ─────────────────────────────────────────
+    printf 'resetting to \033[32m%s/%s\033[0m\n' "$remote" "$branch"
 
     if (( ${#manual_deleted_refs[@]} > 0 )); then
-        printf '\033[33mmanually removed stale tracking refs:\033[0m\n'
+        printf '\033[33mcleaned up stale tracking refs:\033[0m\n'
         for ref in "${manual_deleted_refs[@]}"; do
             printf '  %s\n' "$ref"
         done
@@ -299,7 +291,7 @@ PYDELETE
         done
     fi
 
-    if git rev-parse --verify --quiet "refs/heads/$branch"; then
+    if git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null 2>&1; then
         git switch --force "$branch" || return $?
     else
         git switch --force-create "$branch" "$remote/$branch" || return $?
