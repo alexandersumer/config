@@ -114,13 +114,13 @@ function origin_reset_hard() {
     # recreate the HEAD symbolic ref. Packed refs are unaffected.
     if [[ -d "$git_dir/refs/remotes/$remote" ]]; then
         find "$git_dir/refs/remotes/$remote" -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} + 2>/dev/null
-        find "$git_dir/refs/remotes/$remote" -name "*.lock" -type f -delete 2>/dev/null
+        find "$git_dir/refs/remotes/$remote" -name "*.lock" -delete 2>/dev/null
     fi
 
     # Same cleanup for reflogs — D/F conflicts here also block git fetch.
     if [[ -d "$git_dir/logs/refs/remotes/$remote" ]]; then
         find "$git_dir/logs/refs/remotes/$remote" -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} + 2>/dev/null
-        find "$git_dir/logs/refs/remotes/$remote" -name "*.lock" -type f -delete 2>/dev/null
+        find "$git_dir/logs/refs/remotes/$remote" -name "*.lock" -delete 2>/dev/null
     fi
 
     if (( branch_from_arg == 0 )) && [[ -z "$branch" ]]; then
@@ -174,6 +174,7 @@ patterns = [
     r"cannot lock ref '(refs/remotes/%s/[^']+)'",
     r"cannot update the ref '(refs/remotes/%s/[^']+)'",
     r"removing stale tracking ref (refs/remotes/%s/[^\s\"']+)",
+    r"(refs/remotes/%s/[^\s']+): is at [0-9a-f]+ but expected [0-9a-f]+",
 ]
 seen = []
 for raw in patterns:
