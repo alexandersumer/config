@@ -105,17 +105,13 @@ function origin_reset_hard() {
 
     # ── Pre-fetch cleanup ──────────────────────────────────────────────
     # Nuke all loose remote tracking refs (subdirectories only — preserves
-    # the HEAD symref file) and any stale .lock files at any depth.
-    if [[ -d "$git_dir/refs/remotes/$remote" ]]; then
-        find "$git_dir/refs/remotes/$remote" -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} + 2>/dev/null
-        find "$git_dir/refs/remotes/$remote" -name "*.lock" -delete 2>/dev/null
-    fi
-
-    # Same for reflogs — D/F conflicts here also block git fetch.
-    if [[ -d "$git_dir/logs/refs/remotes/$remote" ]]; then
-        find "$git_dir/logs/refs/remotes/$remote" -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} + 2>/dev/null
-        find "$git_dir/logs/refs/remotes/$remote" -name "*.lock" -delete 2>/dev/null
-    fi
+    # the HEAD symref file), stale .lock files, and reflogs in one pass
+    # per directory tree.
+    local _cleanup_dir
+    for _cleanup_dir in "$git_dir/refs/remotes/$remote" "$git_dir/logs/refs/remotes/$remote"; do
+        [[ -d "$_cleanup_dir" ]] || continue
+        find "$_cleanup_dir" \( -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} + \) -o \( -name "*.lock" -delete \) 2>/dev/null
+    done
 
     # Purge packed-refs entries for this remote. Stale packed entries
     # with outdated hashes cause "is at X but expected Y" errors that
@@ -476,11 +472,55 @@ function prune_all_except_origin() {
 
 function nuke() {
     origin_reset_hard "$@" || return $?
-    # origin_reset_hard already switched to the default branch — pass it
-    # directly so prune_all_except_origin skips branch re-detection.
+
+    # origin_reset_hard already: verified the repo, fetched, switched to the
+    # default branch, and reset.  Inline the prune here so we don't repeat
+    # any of those checks or git calls.
     local keep_branch
     keep_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
-    prune_all_except_origin "$keep_branch"
+
+    local -a branches_to_delete=()
+    local branch
+    while IFS= read -r branch; do
+        [[ "$branch" == "$keep_branch" ]] && continue
+        branches_to_delete+=("$branch")
+    done < <(git for-each-ref --format='%(refname:short)' refs/heads)
+
+    if (( ${#branches_to_delete[@]} == 0 )); then
+        echo -e "\033[33mno local branches to delete\033[0m"
+        return 0
+    fi
+
+    # Clean up worktrees only if there are extra ones beyond the main checkout.
+    local -i wt_count
+    wt_count=$(git worktree list --porcelain 2>/dev/null | grep -c '^worktree ')
+    if (( wt_count > 1 )); then
+        local wt_path="" wt_line
+        while IFS= read -r wt_line; do
+            if [[ "$wt_line" == worktree\ * ]]; then
+                wt_path="${wt_line#worktree }"
+            elif [[ "$wt_line" == branch\ refs/heads/* ]]; then
+                local wt_branch="${wt_line#branch refs/heads/}"
+                for branch in "${branches_to_delete[@]}"; do
+                    if [[ "$wt_branch" == "$branch" ]]; then
+                        printf '\033[33mremoving worktree using branch %s: %s\033[0m\n' "$branch" "$wt_path"
+                        git worktree remove --force "$wt_path" 2>/dev/null
+                        break
+                    fi
+                done
+                wt_path=""
+            fi
+        done < <(git worktree list --porcelain 2>/dev/null)
+        git worktree prune 2>/dev/null
+    fi
+
+    echo -e "pruning local branches: \033[32m${(j: :)branches_to_delete}\033[0m"
+    if git branch -D "${branches_to_delete[@]}"; then
+        return 0
+    fi
+
+    echo -e "\033[31merror: failed to prune one or more branches\033[0m"
+    return 1
 }
 
 function prune_branch() {
@@ -551,26 +591,28 @@ function prune_branch() {
     fi
 
     # Remove worktrees that use any of the target branches before deleting.
-    # Parse porcelain output line-by-line to handle paths with spaces.
-    local wt_path="" wt_line
-    while IFS= read -r wt_line; do
-        if [[ "$wt_line" == worktree\ * ]]; then
-            wt_path="${wt_line#worktree }"
-        elif [[ "$wt_line" == branch\ refs/heads/* ]]; then
-            local wt_branch="${wt_line#branch refs/heads/}"
-            for branch in "${targets[@]}"; do
-                if [[ "$wt_branch" == "$branch" ]]; then
-                    printf '\033[33mremoving worktree using branch %s: %s\033[0m\n' "$branch" "$wt_path"
-                    git worktree remove --force "$wt_path" 2>/dev/null
-                    break
-                fi
-            done
-            wt_path=""
-        fi
-    done < <(git worktree list --porcelain 2>/dev/null)
-
-    # Prune stale worktree metadata
-    git worktree prune 2>/dev/null
+    # Skip the scan entirely when there's only the main worktree.
+    local -i wt_count
+    wt_count=$(git worktree list --porcelain 2>/dev/null | grep -c '^worktree ')
+    if (( wt_count > 1 )); then
+        local wt_path="" wt_line
+        while IFS= read -r wt_line; do
+            if [[ "$wt_line" == worktree\ * ]]; then
+                wt_path="${wt_line#worktree }"
+            elif [[ "$wt_line" == branch\ refs/heads/* ]]; then
+                local wt_branch="${wt_line#branch refs/heads/}"
+                for branch in "${targets[@]}"; do
+                    if [[ "$wt_branch" == "$branch" ]]; then
+                        printf '\033[33mremoving worktree using branch %s: %s\033[0m\n' "$branch" "$wt_path"
+                        git worktree remove --force "$wt_path" 2>/dev/null
+                        break
+                    fi
+                done
+                wt_path=""
+            fi
+        done < <(git worktree list --porcelain 2>/dev/null)
+        git worktree prune 2>/dev/null
+    fi
 
     echo -e "pruning local branches: \033[32m${(j: :)targets}\033[0m"
     if git branch -D "${targets[@]}"; then
