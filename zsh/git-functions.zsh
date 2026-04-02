@@ -104,9 +104,9 @@ function origin_reset_hard() {
     fi
 
     # ── Pre-fetch cleanup ──────────────────────────────────────────────
-    # Nuke all loose remote tracking refs (subdirectories only — preserves
-    # the HEAD symref file), stale .lock files, and reflogs in one pass
-    # per directory tree.
+    # Remove subdirectories (source of D/F conflicts) and stale .lock
+    # files under refs and reflogs.  Top-level loose ref files stay so
+    # git fetch can do an incremental update.
     local _cleanup_dir
     for _cleanup_dir in "$git_dir/refs/remotes/$remote" "$git_dir/logs/refs/remotes/$remote"; do
         [[ -d "$_cleanup_dir" ]] || continue
