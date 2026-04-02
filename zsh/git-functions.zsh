@@ -434,7 +434,6 @@ function prune_all_except_origin() {
         return 1
     fi
 
-    # Auto-detect main branch if not specified
     if [[ -z "$keep_branch" ]]; then
         keep_branch=$(_get_default_branch "$remote")
         if [[ -z "$keep_branch" ]]; then
@@ -470,12 +469,34 @@ function prune_all_except_origin() {
         return 0
     fi
 
-    prune_branch "${branches_to_delete[@]}"
+    # Branches came from git for-each-ref — known to exist, safe to skip checks.
+    prune_branch --force "${branches_to_delete[@]}"
     return $?
 }
 
+function nuke() {
+    origin_reset_hard "$@" || return $?
+    # origin_reset_hard already switched to the default branch — pass it
+    # directly so prune_all_except_origin skips branch re-detection.
+    local keep_branch
+    keep_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+    prune_all_except_origin "$keep_branch"
+}
+
 function prune_branch() {
-    if (( $# == 0 )); then
+    local -i force=0
+    local -a raw_args=()
+    local arg
+
+    for arg in "$@"; do
+        if [[ "$arg" == "--force" ]]; then
+            force=1
+        else
+            raw_args+=("$arg")
+        fi
+    done
+
+    if (( ${#raw_args[@]} == 0 )); then
         echo -e "\033[31merror: provide at least one branch to prune\033[0m"
         return 1
     fi
@@ -491,30 +512,38 @@ function prune_branch() {
 
     current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
 
-    for branch in "$@"; do
-        if [[ -z "$branch" ]]; then
-            echo -e "\033[31merror: branch name cannot be empty\033[0m"
-            return 1
-        fi
+    if (( force )); then
+        # Caller already validated branches — skip per-branch checks.
+        for branch in "${raw_args[@]}"; do
+            [[ "$branch" == "$current_branch" ]] && continue
+            targets+=("$branch")
+        done
+    else
+        for branch in "${raw_args[@]}"; do
+            if [[ -z "$branch" ]]; then
+                echo -e "\033[31merror: branch name cannot be empty\033[0m"
+                return 1
+            fi
 
-        if [[ "$branch" == "main" || "$branch" == "master" ]]; then
-            echo -e "\033[31merror: refusing to prune protected branch '${branch}'\033[0m"
-            return 1
-        fi
+            if [[ "$branch" == "main" || "$branch" == "master" ]]; then
+                echo -e "\033[31merror: refusing to prune protected branch '${branch}'\033[0m"
+                return 1
+            fi
 
-        if [[ "$branch" == "$current_branch" ]]; then
-            echo -e "\033[31merror: cannot prune the current branch '${branch}'\033[0m"
-            echo -e "\033[33mswitch to another branch first\033[0m"
-            return 1
-        fi
+            if [[ "$branch" == "$current_branch" ]]; then
+                echo -e "\033[31merror: cannot prune the current branch '${branch}'\033[0m"
+                echo -e "\033[33mswitch to another branch first\033[0m"
+                return 1
+            fi
 
-        if ! git show-ref --verify --quiet "refs/heads/$branch"; then
-            echo -e "\033[31merror: local branch '${branch}' not found\033[0m"
-            return 1
-        fi
+            if ! git show-ref --verify --quiet "refs/heads/$branch"; then
+                echo -e "\033[31merror: local branch '${branch}' not found\033[0m"
+                return 1
+            fi
 
-        targets+=("$branch")
-    done
+            targets+=("$branch")
+        done
+    fi
 
     if (( ${#targets[@]} == 0 )); then
         echo -e "\033[33mnothing to prune\033[0m"
