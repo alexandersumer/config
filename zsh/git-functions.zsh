@@ -49,6 +49,31 @@ function _build_commit_message() {
     fi
 }
 
+function _remove_worktrees_for_branches() {
+    local -a branches=("$@")
+    local -i wt_count
+    wt_count=$(git worktree list --porcelain 2>/dev/null | grep -c '^worktree ')
+    (( wt_count > 1 )) || return 0
+
+    local wt_path="" wt_line branch
+    while IFS= read -r wt_line; do
+        if [[ "$wt_line" == worktree\ * ]]; then
+            wt_path="${wt_line#worktree }"
+        elif [[ "$wt_line" == branch\ refs/heads/* ]]; then
+            local wt_branch="${wt_line#branch refs/heads/}"
+            for branch in "${branches[@]}"; do
+                if [[ "$wt_branch" == "$branch" ]]; then
+                    printf '\033[33mremoving worktree using branch %s: %s\033[0m\n' "$branch" "$wt_path"
+                    git worktree remove --force "$wt_path" 2>/dev/null
+                    break
+                fi
+            done
+            wt_path=""
+        fi
+    done < <(git worktree list --porcelain 2>/dev/null)
+    git worktree prune 2>/dev/null
+}
+
 function origin_reset_hard() {
     local remote="origin"
     local branch=""
@@ -308,91 +333,91 @@ function rebase_on_origin() {
 
     git_dir=$(git rev-parse --git-dir 2>/dev/null)
     if [[ -z "$git_dir" ]]; then
-        echo -e "\033[31merror: not in a git repository\033[0m"
+        printf '\033[31merror: not in a git repository\033[0m\n'
         return 1
     fi
 
     current_branch=$(git rev-parse --abbrev-ref HEAD)
 
     if [[ "$current_branch" == "HEAD" ]]; then
-        echo -e "\033[31merror: you are in a detached HEAD state\033[0m"
-        echo -e "\033[33mcheckout a branch first:\033[0m \033[32mgit checkout -b <branch-name>\033[0m"
+        printf '\033[31merror: you are in a detached HEAD state\033[0m\n'
+        printf '\033[33mcheckout a branch first:\033[0m \033[32mgit checkout -b <branch-name>\033[0m\n'
         return 1
     fi
 
     main_branch=$(_get_default_branch "$remote")
     if [[ -z "$main_branch" ]]; then
-        echo -e "\033[31merror: could not detect main branch (tried main, master)\033[0m"
+        printf '\033[31merror: could not detect main branch (tried main, master)\033[0m\n'
         return 1
     fi
 
     if [[ -d "$git_dir/rebase-merge" ]] || [[ -d "$git_dir/rebase-apply" ]]; then
-        echo -e "\033[31m✗ a rebase is already in progress\033[0m"
-        echo -e "\033[33moptions:\033[0m"
-        echo -e "  1. continue rebase: \033[32mgit rebase --continue\033[0m"
-        echo -e "  2. skip this patch: \033[32mgit rebase --skip\033[0m"
-        echo -e "  3. abort rebase:    \033[32mgit rebase --abort\033[0m"
+        printf '\033[31m✗ a rebase is already in progress\033[0m\n'
+        printf '\033[33moptions:\033[0m\n'
+        printf '  1. continue rebase: \033[32mgit rebase --continue\033[0m\n'
+        printf '  2. skip this patch: \033[32mgit rebase --skip\033[0m\n'
+        printf '  3. abort rebase:    \033[32mgit rebase --abort\033[0m\n'
         return 1
     fi
 
     git_status=$(git status --porcelain 2>/dev/null)
     if [[ -n "$git_status" ]]; then
         local file_count=${#${(f)git_status}}
-        echo -e "\033[31m✗ cannot rebase: you have uncommitted changes\033[0m"
-        echo -e "\033[33mmodified files:\033[0m"
+        printf '\033[31m✗ cannot rebase: you have uncommitted changes\033[0m\n'
+        printf '\033[33mmodified files:\033[0m\n'
         printf '%s\n' "${(f)git_status}" | head -20
         if (( file_count > 20 )); then
-            echo -e "\033[33m... and $((file_count - 20)) more files\033[0m"
+            printf '\033[33m... and %s more files\033[0m\n' "$((file_count - 20))"
         fi
         echo ""
-        echo -e "\033[33moptions:\033[0m"
-        echo -e "  1. commit your changes: \033[32mgit add -A && git commit -m 'your message'\033[0m"
-        echo -e "  2. stash your changes:  \033[32mgit stash\033[0m"
-        echo -e "  3. discard changes:     \033[32mgit reset --hard\033[0m (warning: this will lose changes)"
+        printf '\033[33moptions:\033[0m\n'
+        printf '  1. commit your changes: \033[32mgit add -A && git commit -m '\''your message'\''\033[0m\n'
+        printf '  2. stash your changes:  \033[32mgit stash\033[0m\n'
+        printf '  3. discard changes:     \033[32mgit reset --hard\033[0m (warning: this will lose changes)\n'
         return 1
     fi
 
-    echo -e "\033[33mcurrent branch:\033[0m $current_branch"
-    echo -e "\033[33mrebasing onto:\033[0m $remote/$main_branch"
-    echo -e "fetching and rebasing: \033[32mgit fetch $remote $main_branch && git rebase $remote/$main_branch\033[0m"
+    printf '\033[33mcurrent branch:\033[0m %s\n' "$current_branch"
+    printf '\033[33mrebasing onto:\033[0m %s/%s\n' "$remote" "$main_branch"
+    printf 'fetching and rebasing: \033[32mgit fetch %s %s && git rebase %s/%s\033[0m\n' "$remote" "$main_branch" "$remote" "$main_branch"
 
     if ! git fetch "$remote" "$main_branch" 2>&1; then
-        echo -e "\033[31m✗ failed to fetch $remote/$main_branch\033[0m"
-        echo -e "\033[33mcheck your network connection and remote configuration\033[0m"
+        printf '\033[31m✗ failed to fetch %s/%s\033[0m\n' "$remote" "$main_branch"
+        printf '\033[33mcheck your network connection and remote configuration\033[0m\n'
         return 1
     fi
 
-    echo -e "\033[32m✓ fetched latest $main_branch\033[0m"
+    printf '\033[32m✓ fetched latest %s\033[0m\n' "$main_branch"
 
     rebase_output=$(git rebase "$remote/$main_branch" 2>&1)
     local rebase_exit_code=$?
 
     if [[ $rebase_exit_code -eq 0 ]]; then
-        echo -e "\033[32m✓ successfully rebased $current_branch onto $remote/$main_branch\033[0m"
+        printf '\033[32m✓ successfully rebased %s onto %s/%s\033[0m\n' "$current_branch" "$remote" "$main_branch"
         return 0
     fi
 
     echo "$rebase_output"
 
     if echo "$rebase_output" | grep -q "error: cannot rebase: Your index contains uncommitted changes"; then
-        echo -e "\033[31m✗ cannot rebase: uncommitted changes detected\033[0m"
-        echo -e "\033[33mthis shouldn't happen - please report this issue\033[0m"
-        echo -e "\033[33mtry:\033[0m \033[32mgit status\033[0m to see what's wrong"
+        printf '\033[31m✗ cannot rebase: uncommitted changes detected\033[0m\n'
+        printf '\033[33mthis shouldn'\''t happen - please report this issue\033[0m\n'
+        printf '\033[33mtry:\033[0m \033[32mgit status\033[0m to see what'\''s wrong\n'
     elif echo "$rebase_output" | grep -q "CONFLICT"; then
-        echo -e "\033[31m✗ rebase encountered merge conflicts\033[0m"
-        echo -e "\033[33mresolve conflicts in the files listed above, then:\033[0m"
-        echo -e "  1. stage resolved files: \033[32mgit add <resolved-files>\033[0m"
-        echo -e "  2. continue rebase:      \033[32mgit rebase --continue\033[0m"
-        echo -e "  3. or abort rebase:      \033[32mgit rebase --abort\033[0m"
+        printf '\033[31m✗ rebase encountered merge conflicts\033[0m\n'
+        printf '\033[33mresolve conflicts in the files listed above, then:\033[0m\n'
+        printf '  1. stage resolved files: \033[32mgit add <resolved-files>\033[0m\n'
+        printf '  2. continue rebase:      \033[32mgit rebase --continue\033[0m\n'
+        printf '  3. or abort rebase:      \033[32mgit rebase --abort\033[0m\n'
     elif [[ -d "$git_dir/rebase-merge" ]] || [[ -d "$git_dir/rebase-apply" ]]; then
-        echo -e "\033[31m✗ rebase stopped (possibly due to conflicts)\033[0m"
-        echo -e "\033[33mcheck status and resolve any issues:\033[0m"
-        echo -e "  1. check status:    \033[32mgit status\033[0m"
-        echo -e "  2. continue rebase: \033[32mgit rebase --continue\033[0m"
-        echo -e "  3. or abort rebase: \033[32mgit rebase --abort\033[0m"
+        printf '\033[31m✗ rebase stopped (possibly due to conflicts)\033[0m\n'
+        printf '\033[33mcheck status and resolve any issues:\033[0m\n'
+        printf '  1. check status:    \033[32mgit status\033[0m\n'
+        printf '  2. continue rebase: \033[32mgit rebase --continue\033[0m\n'
+        printf '  3. or abort rebase: \033[32mgit rebase --abort\033[0m\n'
     else
-        echo -e "\033[31m✗ rebase failed\033[0m"
-        echo -e "\033[33mcheck the error messages above for details\033[0m"
+        printf '\033[31m✗ rebase failed\033[0m\n'
+        printf '\033[33mcheck the error messages above for details\033[0m\n'
     fi
 
     return 1
@@ -400,12 +425,12 @@ function rebase_on_origin() {
 
 function restore_from_origin() {
     if [ $# -eq 0 ]; then
-        echo -e "\033[31merror: no file path provided\033[0m"
+        printf '\033[31merror: no file path provided\033[0m\n'
         return 1
     fi
 
     if ! git rev-parse --git-dir >/dev/null 2>&1; then
-        echo -e "\033[31merror: not in a git repository\033[0m"
+        printf '\033[31merror: not in a git repository\033[0m\n'
         return 1
     fi
 
@@ -413,28 +438,31 @@ function restore_from_origin() {
     local main_branch
     main_branch=$(_get_default_branch "$remote")
     if [[ -z "$main_branch" ]]; then
-        echo -e "\033[31merror: could not detect main branch (tried main, master)\033[0m"
+        printf '\033[31merror: could not detect main branch (tried main, master)\033[0m\n'
         return 1
     fi
 
-    local file_path_from_repository_root=$*
-    local full_filename=$(basename "$file_path_from_repository_root")
-    if git restore --source "$remote/$main_branch" "${file_path_from_repository_root}"; then
-        echo -e "\033[32m✓ restored '${full_filename}' from $remote/${main_branch}\033[0m"
-    else
-        echo -e "\033[31m✗ failed to restore '${full_filename}'\033[0m"
-        return 1
-    fi
+    local file_path
+    for file_path in "$@"; do
+        local filename="$(basename "$file_path")"
+        if git restore --source "$remote/$main_branch" "$file_path"; then
+            printf '\033[32m✓ restored '\''%s'\'' from %s/%s\033[0m\n' "$filename" "$remote" "$main_branch"
+        else
+            printf '\033[31m✗ failed to restore '\''%s'\''\033[0m\n' "$filename"
+            return 1
+        fi
+    done
 }
 
 function branch_create() {
     if [ $# -eq 0 ]; then
-        echo -e "\033[31merror: please provide a branch name\033[0m"
+        printf '\033[31merror: please provide a branch name\033[0m\n'
         return 1
     fi
 
-    local branch_name=${@// /-}
-    echo -e "creating branch: \033[32m${branch_name}\033[0m"
+    local joined="$*"
+    local branch_name=${joined// /-}
+    printf 'creating branch: \033[32m%s\033[0m\n' "$branch_name"
     git switch -c "${branch_name}"
 }
 
@@ -445,21 +473,21 @@ function prune_all_except_origin() {
     local -a branches_to_delete=()
 
     if ! git rev-parse --git-dir >/dev/null 2>&1; then
-        echo -e "\033[31merror: not in a git repository\033[0m"
+        printf '\033[31merror: not in a git repository\033[0m\n'
         return 1
     fi
 
     if [[ -z "$keep_branch" ]]; then
         keep_branch=$(_get_default_branch "$remote")
         if [[ -z "$keep_branch" ]]; then
-            echo -e "\033[31merror: could not detect main branch (tried main, master)\033[0m"
+            printf '\033[31merror: could not detect main branch (tried main, master)\033[0m\n'
             return 1
         fi
     fi
 
     if ! git show-ref --verify --quiet "refs/heads/$keep_branch"; then
-        echo -e "\033[31merror: local branch '${keep_branch}' not found\033[0m"
-        echo -e "\033[33mtry:\033[0m \033[32mgit fetch $remote ${keep_branch}:${keep_branch}\033[0m"
+        printf '\033[31merror: local branch '\''%s'\'' not found\033[0m\n' "${keep_branch}"
+        printf '\033[33mtry:\033[0m \033[32mgit fetch %s %s:%s\033[0m\n' "$remote" "${keep_branch}" "${keep_branch}"
         return 1
     fi
 
@@ -467,9 +495,9 @@ function prune_all_except_origin() {
 
     if [[ "$current_branch" != "$keep_branch" ]]; then
         if git switch --quiet "$keep_branch"; then
-            echo -e "switched to keep branch: \033[32m${keep_branch}\033[0m"
+            printf 'switched to keep branch: \033[32m%s\033[0m\n' "${keep_branch}"
         else
-            echo -e "\033[31merror: unable to switch to '${keep_branch}'\033[0m"
+            printf '\033[31merror: unable to switch to '\''%s'\''\033[0m\n' "${keep_branch}"
             return 1
         fi
     fi
@@ -480,7 +508,7 @@ function prune_all_except_origin() {
     done < <(git for-each-ref --format='%(refname:short)' refs/heads)
 
     if (( ${#branches_to_delete[@]} == 0 )); then
-        echo -e "\033[33mno local branches to delete\033[0m"
+        printf '\033[33mno local branches to delete\033[0m\n'
         return 0
     fi
 
@@ -489,57 +517,17 @@ function prune_all_except_origin() {
     return $?
 }
 
-function nuke() {
+function origin_reset_clean() {
     origin_reset_hard --single-branch "$@" || return $?
-
-    # origin_reset_hard already: verified the repo, fetched, switched to the
-    # default branch, and reset.  Inline the prune here so we don't repeat
-    # any of those checks or git calls.
     local keep_branch
     keep_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+    prune_all_except_origin "$keep_branch"
 
-    local -a branches_to_delete=()
-    local branch
-    while IFS= read -r branch; do
-        [[ "$branch" == "$keep_branch" ]] && continue
-        branches_to_delete+=("$branch")
-    done < <(git for-each-ref --format='%(refname:short)' refs/heads)
-
-    if (( ${#branches_to_delete[@]} == 0 )); then
-        echo -e "\033[33mno local branches to delete\033[0m"
-        return 0
-    fi
-
-    # Clean up worktrees only if there are extra ones beyond the main checkout.
-    local -i wt_count
-    wt_count=$(git worktree list --porcelain 2>/dev/null | grep -c '^worktree ')
-    if (( wt_count > 1 )); then
-        local wt_path="" wt_line
-        while IFS= read -r wt_line; do
-            if [[ "$wt_line" == worktree\ * ]]; then
-                wt_path="${wt_line#worktree }"
-            elif [[ "$wt_line" == branch\ refs/heads/* ]]; then
-                local wt_branch="${wt_line#branch refs/heads/}"
-                for branch in "${branches_to_delete[@]}"; do
-                    if [[ "$wt_branch" == "$branch" ]]; then
-                        printf '\033[33mremoving worktree using branch %s: %s\033[0m\n' "$branch" "$wt_path"
-                        git worktree remove --force "$wt_path" 2>/dev/null
-                        break
-                    fi
-                done
-                wt_path=""
-            fi
-        done < <(git worktree list --porcelain 2>/dev/null)
-        git worktree prune 2>/dev/null
-    fi
-
-    echo -e "pruning local branches: \033[32m${(j: :)branches_to_delete}\033[0m"
-    if git branch -D "${branches_to_delete[@]}"; then
-        return 0
-    fi
-
-    echo -e "\033[31merror: failed to prune one or more branches\033[0m"
-    return 1
+    # Update all remote tracking refs in the background so that
+    # git checkout <remote-branch> works immediately after.
+    local remote="${1:-origin}"
+    git fetch --prune "$remote" &>/dev/null &
+    disown
 }
 
 function prune_branch() {
@@ -556,7 +544,7 @@ function prune_branch() {
     done
 
     if (( ${#raw_args[@]} == 0 )); then
-        echo -e "\033[31merror: provide at least one branch to prune\033[0m"
+        printf '\033[31merror: provide at least one branch to prune\033[0m\n'
         return 1
     fi
 
@@ -565,7 +553,7 @@ function prune_branch() {
     local -a targets=()
 
     if ! git rev-parse --git-dir >/dev/null 2>&1; then
-        echo -e "\033[31merror: not in a git repository\033[0m"
+        printf '\033[31merror: not in a git repository\033[0m\n'
         return 1
     fi
 
@@ -580,23 +568,23 @@ function prune_branch() {
     else
         for branch in "${raw_args[@]}"; do
             if [[ -z "$branch" ]]; then
-                echo -e "\033[31merror: branch name cannot be empty\033[0m"
+                printf '\033[31merror: branch name cannot be empty\033[0m\n'
                 return 1
             fi
 
             if [[ "$branch" == "main" || "$branch" == "master" ]]; then
-                echo -e "\033[31merror: refusing to prune protected branch '${branch}'\033[0m"
+                printf '\033[31merror: refusing to prune protected branch '\''%s'\''\033[0m\n' "${branch}"
                 return 1
             fi
 
             if [[ "$branch" == "$current_branch" ]]; then
-                echo -e "\033[31merror: cannot prune the current branch '${branch}'\033[0m"
-                echo -e "\033[33mswitch to another branch first\033[0m"
+                printf '\033[31merror: cannot prune the current branch '\''%s'\''\033[0m\n' "${branch}"
+                printf '\033[33mswitch to another branch first\033[0m\n'
                 return 1
             fi
 
             if ! git show-ref --verify --quiet "refs/heads/$branch"; then
-                echo -e "\033[31merror: local branch '${branch}' not found\033[0m"
+                printf '\033[31merror: local branch '\''%s'\'' not found\033[0m\n' "${branch}"
                 return 1
             fi
 
@@ -605,45 +593,23 @@ function prune_branch() {
     fi
 
     if (( ${#targets[@]} == 0 )); then
-        echo -e "\033[33mnothing to prune\033[0m"
+        printf '\033[33mnothing to prune\033[0m\n'
         return 0
     fi
 
-    # Remove worktrees that use any of the target branches before deleting.
-    # Skip the scan entirely when there's only the main worktree.
-    local -i wt_count
-    wt_count=$(git worktree list --porcelain 2>/dev/null | grep -c '^worktree ')
-    if (( wt_count > 1 )); then
-        local wt_path="" wt_line
-        while IFS= read -r wt_line; do
-            if [[ "$wt_line" == worktree\ * ]]; then
-                wt_path="${wt_line#worktree }"
-            elif [[ "$wt_line" == branch\ refs/heads/* ]]; then
-                local wt_branch="${wt_line#branch refs/heads/}"
-                for branch in "${targets[@]}"; do
-                    if [[ "$wt_branch" == "$branch" ]]; then
-                        printf '\033[33mremoving worktree using branch %s: %s\033[0m\n' "$branch" "$wt_path"
-                        git worktree remove --force "$wt_path" 2>/dev/null
-                        break
-                    fi
-                done
-                wt_path=""
-            fi
-        done < <(git worktree list --porcelain 2>/dev/null)
-        git worktree prune 2>/dev/null
-    fi
+    _remove_worktrees_for_branches "${targets[@]}"
 
-    echo -e "pruning local branches: \033[32m${(j: :)targets}\033[0m"
+    printf 'pruning local branches: \033[32m%s\033[0m\n' "${(j: :)targets}"
     if git branch -D "${targets[@]}"; then
         return 0
     fi
 
-    echo -e "\033[31merror: failed to prune one or more branches\033[0m"
+    printf '\033[31merror: failed to prune one or more branches\033[0m\n'
     return 1
 }
 
 function force_push() {
-    echo -e "force pushing with lease: \033[32mgit push --force-with-lease\033[0m"
+    printf 'force pushing with lease: \033[32mgit push --force-with-lease\033[0m\n'
     git push --force-with-lease
 }
 
@@ -652,8 +618,8 @@ function _stage_commit_git_impl() {
     local skip_detekt=$2
     git add .
     if git diff --cached --quiet; then
-        echo "Nothing to commit."
-        return 0
+        printf 'Nothing to commit.\n'
+        return 2
     fi
     if [[ "$skip_detekt" = "1" ]]; then
         SKIP_DETEKT=1 git commit -m "$message"
@@ -668,7 +634,7 @@ function _gsc_impl() {
     shift 2
 
     if [ $# -eq 0 ]; then
-        echo -e "\033[31merror: please provide a commit message\033[0m"
+        printf '\033[31merror: please provide a commit message\033[0m\n'
         return 1
     fi
 
@@ -678,30 +644,34 @@ function _gsc_impl() {
     local label="staging and committing"
     (( skip_detekt )) && label+=" (skip detekt)"
     (( do_push )) && label="${label/and committing/committing and pushing}"
-    echo -e "${label}: \033[32m\"$message\"\033[0m"
+    printf '%s: \033[32m\"%s\"\033[0m\n' "${label}" "$message"
 
     _stage_commit_git_impl "$message" "$skip_detekt"
     local commit_status=$?
 
-    if [[ $commit_status -ne 0 ]]; then
+    if (( commit_status == 2 )); then
+        return 0
+    fi
+
+    if (( commit_status != 0 )); then
         if ! git diff --quiet || ! git diff --cached --quiet; then
-            echo -e "\033[33mHooks modified files, staging changes and retrying commit...\033[0m"
+            printf '\033[33mHooks modified files, staging changes and retrying commit...\033[0m\n'
             git add -u
             _stage_commit_git_impl "$message" "$skip_detekt"
             commit_status=$?
         fi
     fi
 
-    if [[ $commit_status -ne 0 ]]; then
+    if (( commit_status != 0 && commit_status != 2 )); then
         return $commit_status
     fi
 
     if (( do_push )); then
         if ! git push; then
-            echo -e "\033[31m✗ push failed\033[0m"
-            echo -e "\033[33moptions:\033[0m"
-            echo -e "  1. pull and retry:  \033[32mgit pull --rebase && git push\033[0m"
-            echo -e "  2. force push:      \033[32mforce_push\033[0m (use with caution)"
+            printf '\033[31m✗ push failed\033[0m\n'
+            printf '\033[33moptions:\033[0m\n'
+            printf '  1. pull and retry:  \033[32mgit pull --rebase && git push\033[0m\n'
+            printf '  2. force push:      \033[32mforce_push\033[0m (use with caution)\n'
             return 1
         fi
     fi
@@ -718,36 +688,36 @@ function merge_from_origin() {
 
     main_branch=$(_get_default_branch "$remote")
     if [[ -z "$main_branch" ]]; then
-        echo -e "\033[31merror: could not detect main branch (tried main, master)\033[0m"
+        printf '\033[31merror: could not detect main branch (tried main, master)\033[0m\n'
         return 1
     fi
 
-    echo -e "fetching and merging: \033[32mgit fetch $remote $main_branch && git merge $remote/$main_branch\033[0m"
+    printf 'fetching and merging: \033[32mgit fetch %s %s && git merge %s/%s\033[0m\n' "$remote" "$main_branch" "$remote" "$main_branch"
     git fetch "$remote" "$main_branch" && git merge "$remote/$main_branch"
 }
 
 function quit_merge() {
-    echo -e "quitting merge: \033[32mgit merge --quit\033[0m"
+    printf 'quitting merge: \033[32mgit merge --quit\033[0m\n'
     git merge --quit
 }
 
 function abort_merge() {
-    echo -e "aborting merge: \033[32mgit merge --abort\033[0m"
+    printf 'aborting merge: \033[32mgit merge --abort\033[0m\n'
     git merge --abort
 }
 
 function hard_reset_head() {
     if ! git rev-parse --git-dir > /dev/null 2>&1; then
-        echo -e "\033[31merror: not in a git repository\033[0m"
+        printf '\033[31merror: not in a git repository\033[0m\n'
         return 1
     fi
-    echo -e "hard reset to HEAD: \033[32mgit reset --hard\033[0m"
+    printf 'hard reset to HEAD: \033[32mgit reset --hard\033[0m\n'
     git reset --hard
 }
 
 function soft_reset_origin() {
     if ! git rev-parse --git-dir > /dev/null 2>&1; then
-        echo -e "\033[31merror: not in a git repository\033[0m"
+        printf '\033[31merror: not in a git repository\033[0m\n'
         return 1
     fi
 
@@ -755,15 +725,15 @@ function soft_reset_origin() {
     local main_branch
     main_branch=$(_get_default_branch "$remote")
     if [[ -z "$main_branch" ]]; then
-        echo -e "\033[31merror: could not detect main branch (tried main, master)\033[0m"
+        printf '\033[31merror: could not detect main branch (tried main, master)\033[0m\n'
         return 1
     fi
 
     if ! git show-ref --verify --quiet "refs/heads/$main_branch"; then
-        echo -e "\033[31merror: local '${main_branch}' branch not found\033[0m"
-        echo -e "\033[33mtry:\033[0m \033[32mgit fetch $remote ${main_branch}:${main_branch}\033[0m"
+        printf '\033[31merror: local '\''%s'\'' branch not found\033[0m\n' "${main_branch}"
+        printf '\033[33mtry:\033[0m \033[32mgit fetch %s %s:%s\033[0m\n' "$remote" "${main_branch}" "${main_branch}"
         return 1
     fi
-    echo -e "soft reset onto ${main_branch}: \033[32mgit reset --soft ${main_branch}\033[0m"
+    printf 'soft reset onto %s: \033[32mgit reset --soft %s\033[0m\n' "${main_branch}" "${main_branch}"
     git reset --soft "$main_branch"
 }
