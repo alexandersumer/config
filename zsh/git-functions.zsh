@@ -523,10 +523,10 @@ function origin_reset_clean() {
     keep_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
     prune_all_except_origin "$keep_branch"
 
-    # Update all remote tracking refs in the background so that
-    # git checkout <remote-branch> works immediately after.
+    # Update remote tracking refs in the background so that
+    # git checkout <remote-branch> works after.
     local remote="${1:-origin}"
-    git fetch --prune "$remote" &>/dev/null &
+    git fetch --no-tags "$remote" &>/dev/null &
     disown
 }
 
