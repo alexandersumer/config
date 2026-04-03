@@ -51,16 +51,18 @@ function _build_commit_message() {
 
 function _remove_worktrees_for_branches() {
     local -a branches=("$@")
-    local -i wt_count
-    wt_count=$(git worktree list --porcelain 2>/dev/null | grep -c '^worktree ')
-    (( wt_count > 1 )) || return 0
+    local wt_output
+    wt_output=$(git worktree list --porcelain 2>/dev/null)
 
-    local wt_path="" wt_line branch
+    # More than one "worktree" line means linked worktrees exist.
+    (( $(echo "$wt_output" | grep -c '^worktree ') > 1 )) || return 0
+
+    local wt_path="" wt_line wt_branch branch
     while IFS= read -r wt_line; do
         if [[ "$wt_line" == worktree\ * ]]; then
             wt_path="${wt_line#worktree }"
         elif [[ "$wt_line" == branch\ refs/heads/* ]]; then
-            local wt_branch="${wt_line#branch refs/heads/}"
+            wt_branch="${wt_line#branch refs/heads/}"
             for branch in "${branches[@]}"; do
                 if [[ "$wt_branch" == "$branch" ]]; then
                     printf '\033[33mremoving worktree using branch %s: %s\033[0m\n' "$branch" "$wt_path"
@@ -70,7 +72,7 @@ function _remove_worktrees_for_branches() {
             done
             wt_path=""
         fi
-    done < <(git worktree list --porcelain 2>/dev/null)
+    done <<< "$wt_output"
     git worktree prune 2>/dev/null
 }
 
@@ -369,7 +371,7 @@ function rebase_on_origin() {
         if (( file_count > 20 )); then
             printf '\033[33m... and %s more files\033[0m\n' "$((file_count - 20))"
         fi
-        echo ""
+        printf '\n'
         printf '\033[33moptions:\033[0m\n'
         printf '  1. commit your changes: \033[32mgit add -A && git commit -m '\''your message'\''\033[0m\n'
         printf '  2. stash your changes:  \033[32mgit stash\033[0m\n'
@@ -399,11 +401,11 @@ function rebase_on_origin() {
 
     echo "$rebase_output"
 
-    if echo "$rebase_output" | grep -q "error: cannot rebase: Your index contains uncommitted changes"; then
+    if [[ "$rebase_output" == *"error: cannot rebase: Your index contains uncommitted changes"* ]]; then
         printf '\033[31m✗ cannot rebase: uncommitted changes detected\033[0m\n'
         printf '\033[33mthis shouldn'\''t happen - please report this issue\033[0m\n'
         printf '\033[33mtry:\033[0m \033[32mgit status\033[0m to see what'\''s wrong\n'
-    elif echo "$rebase_output" | grep -q "CONFLICT"; then
+    elif [[ "$rebase_output" == *CONFLICT* ]]; then
         printf '\033[31m✗ rebase encountered merge conflicts\033[0m\n'
         printf '\033[33mresolve conflicts in the files listed above, then:\033[0m\n'
         printf '  1. stage resolved files: \033[32mgit add <resolved-files>\033[0m\n'
@@ -442,9 +444,9 @@ function restore_from_origin() {
         return 1
     fi
 
-    local file_path
+    local file_path filename
     for file_path in "$@"; do
-        local filename="$(basename "$file_path")"
+        filename="$(basename "$file_path")"
         if git restore --source "$remote/$main_branch" "$file_path"; then
             printf '\033[32m✓ restored '\''%s'\'' from %s/%s\033[0m\n' "$filename" "$remote" "$main_branch"
         else
