@@ -92,27 +92,28 @@ function reset_to_origin() {
     local -i max_cleanup_rounds=3
     local -i branch_from_arg=0
     local -i sync_fetch=0
-    local -i do_prune=0
+    local -i do_prune=1
 
     for arg in "$@"; do
         case "$arg" in
             --help|-h)
-                printf 'usage: reset_to_origin [--sync] [--prune] [remote] [branch]\n'
+                printf 'usage: reset_to_origin [--sync] [--no-prune] [remote] [branch]\n'
                 printf '\n'
                 printf 'Reset to the default branch on the remote.\n'
-                printf 'By default, fetches only the target branch for a fast reset\n'
-                printf 'and updates remote tracking refs in the background.\n'
+                printf 'By default, fetches only the target branch for a fast reset,\n'
+                printf 'prunes all other local branches, and updates remote tracking\n'
+                printf 'refs in the background.\n'
                 printf '\n'
                 printf 'options:\n'
-                printf '  --sync    fetch all remote refs synchronously before resetting\n'
-                printf '  --prune   also delete all other local branches\n'
+                printf '  --sync       fetch all remote refs synchronously before resetting\n'
+                printf '  --no-prune   skip pruning other local branches\n'
                 return 0
                 ;;
             --sync)
                 sync_fetch=1
                 ;;
-            --prune)
-                do_prune=1
+            --no-prune)
+                do_prune=0
                 ;;
             *)
                 positional_args+=("$arg")
