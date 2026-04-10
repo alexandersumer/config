@@ -1,0 +1,57 @@
+#!/usr/bin/env python3
+"""Generate rovodev/prompts.yml from command .md front-matter."""
+
+import re
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+SKILLS_DIR = ROOT / "skills"
+
+
+def parse_front_matter(path):
+    text = path.read_text()
+    match = re.match(r'^---\n(.+?)\n---', text, re.DOTALL)
+    if not match:
+        return None
+
+    fm = match.group(1)
+    result = {}
+    for line in fm.split('\n'):
+        if line.startswith('name:'):
+            result['name'] = line.split(':', 1)[1].strip()
+        elif line.startswith('description:'):
+            result['description'] = line.split(':', 1)[1].strip()
+
+    inputs_match = re.search(r'(inputs:\n.+)', fm, re.DOTALL)
+    if inputs_match:
+        result['inputs_raw'] = inputs_match.group(1)
+
+    return result if 'name' in result else None
+
+
+def main():
+    commands = []
+    for md in sorted(SKILLS_DIR.glob('*.md')):
+        if md.name == 'README.md':
+            continue
+        fm = parse_front_matter(md)
+        if fm:
+            commands.append(fm)
+
+    lines = ['prompts:']
+    for cmd in commands:
+        lines.append(f'  - name: {cmd["name"]}')
+        lines.append(f'    description: "{cmd["description"]}"')
+        lines.append(f'    content_file: templates/{cmd["name"]}.md')
+        if 'inputs_raw' in cmd:
+            for input_line in cmd['inputs_raw'].split('\n'):
+                lines.append(f'    {input_line}')
+        lines.append('')
+
+    output = ROOT / 'rovodev' / 'prompts.yml'
+    output.write_text('\n'.join(lines))
+    print(f'Generated {output.relative_to(ROOT)} ({len(commands)} commands)')
+
+
+if __name__ == '__main__':
+    main()

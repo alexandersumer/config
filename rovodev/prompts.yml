@@ -1,0 +1,78 @@
+prompts:
+  - name: address-comments
+    description: "Look at PR review comments and robustly address legitimate ones, ignore noise"
+    content_file: templates/address-comments.md
+    inputs:
+      - name: pr_target
+        label: PR number or URL
+        description: PR number or URL to address comments on. Leave empty to use the current branch's PR.
+        type: string
+        required: false
+
+  - name: apply-changes
+    description: "Implement requested changes with surgical precision"
+    content_file: templates/apply-changes.md
+    inputs:
+      - name: changes
+        label: Changes to apply
+        description: Describe the changes to apply. Leave empty to apply changes from conversation context.
+        type: string
+        required: false
+
+  - name: clean-up-feature-flag
+    description: "Remove a fully rolled out feature flag and verify checks pass"
+    content_file: templates/clean-up-feature-flag.md
+    inputs:
+      - name: flag_key
+        label: Flag key
+        description: The feature flag key to remove.
+        type: string
+        required: true
+
+  - name: describe-branch
+    description: "Generate a PR description (3 sentences + summary line)"
+    content_file: templates/describe-branch.md
+
+  - name: describe-diff
+    description: "Generate a <10 word phrase summarizing working changes"
+    content_file: templates/describe-diff.md
+
+  - name: fix-failures
+    description: "Run build/test, fix failures without workarounds or suppressing errors"
+    content_file: templates/fix-failures.md
+    inputs:
+      - name: error_output
+        label: Error output or stack trace
+        description: Paste error output or stack trace to fix. Leave empty to run the build and test suite to discover failures.
+        type: string
+        required: false
+
+  - name: git-commit-push-to-origin
+    description: "Stage all changes, commit with auto-generated message, and push directly to origin"
+    content_file: templates/git-commit-push-to-origin.md
+
+  - name: git-commit-push
+    description: "Stage all changes, commit with auto-generated message, and push"
+    content_file: templates/git-commit-push.md
+
+  - name: regenerate-detekt-baseline
+    description: "Regenerate detekt baselines for Main and Test source sets"
+    content_file: templates/regenerate-detekt-baseline.md
+
+  - name: resolve-conflict
+    description: "Resolve merge conflicts preserving branch intent"
+    content_file: templates/resolve-conflict.md
+
+  - name: review-branch
+    description: "Review for bugs, security, architecture, and test coverage (no style nits)"
+    content_file: templates/review-branch.md
+    inputs:
+      - name: focus_area
+        label: Focus area
+        description: Optional text to narrow the review scope. Leave empty to review the entire branch.
+        type: string
+        required: false
+
+  - name: sync-main
+    description: "Fetch latest main and merge it into the current branch"
+    content_file: templates/sync-main.md
