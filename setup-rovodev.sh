@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Setup skills as global Rovo Dev CLI prompts.
-# Symlinks prompts.yml and templates into ~/.rovodev/ so skills
+# Symlinks prompts.yml into ~/.rovodev/ so skills
 # are available in every project.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -32,26 +32,6 @@ elif [ -f "$TARGET" ]; then
 else
   ln -s "$ROVODEV_DIR/prompts.yml" "$TARGET"
   echo "Linked prompts.yml -> $ROVODEV_DIR/prompts.yml"
-fi
-
-# --- templates directory ---
-TARGET="$GLOBAL_DIR/templates"
-if [ -L "$TARGET" ]; then
-  existing="$(readlink "$TARGET")"
-  if [ "$existing" = "$ROVODEV_DIR/templates" ]; then
-    echo "templates/ already linked correctly."
-  else
-    echo "Error: $TARGET is already a symlink to $existing"
-    echo "Remove it first if you want to replace it."
-    exit 1
-  fi
-elif [ -d "$TARGET" ]; then
-  echo "Error: $TARGET already exists as a directory."
-  echo "Back it up and remove it first, then re-run this script."
-  exit 1
-else
-  ln -s "$ROVODEV_DIR/templates" "$TARGET"
-  echo "Linked templates/ -> $ROVODEV_DIR/templates"
 fi
 
 echo ""

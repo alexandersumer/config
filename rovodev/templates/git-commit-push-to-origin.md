@@ -1,1 +1,0 @@
-../../skills/git-commit-push-to-origin.md

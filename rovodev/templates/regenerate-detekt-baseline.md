@@ -1,1 +1,0 @@
-../../skills/regenerate-detekt-baseline.md
