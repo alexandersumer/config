@@ -21,7 +21,10 @@ link_file() {
 
   if [ -L "$target" ]; then
     existing="$(readlink "$target")"
-    if [ "$existing" = "$source" ]; then
+    existing_resolved="$(python3 -c 'import os, sys; print(os.path.realpath(os.path.join(os.path.dirname(sys.argv[1]), sys.argv[2])))' "$target" "$existing")"
+    source_resolved="$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$source")"
+
+    if [ "$existing_resolved" = "$source_resolved" ]; then
       echo "$label already linked correctly."
     else
       echo "Error: $target is already a symlink to $existing"
