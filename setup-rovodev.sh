@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # Setup skills as global Rovo Dev CLI prompts.
-# Symlinks prompts.yml into ~/.rovodev/ so skills
-# are available in every project.
+# Symlinks prompts.yml and prompt content into ~/.rovodev/
+# so skills are available in every project.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROVODEV_DIR="$SCRIPT_DIR/rovodev"
@@ -14,25 +14,37 @@ if [ ! -d "$GLOBAL_DIR" ]; then
   exit 1
 fi
 
-# --- prompts.yml ---
-TARGET="$GLOBAL_DIR/prompts.yml"
-if [ -L "$TARGET" ]; then
-  existing="$(readlink "$TARGET")"
-  if [ "$existing" = "$ROVODEV_DIR/prompts.yml" ]; then
-    echo "prompts.yml already linked correctly."
-  else
-    echo "Error: $TARGET is already a symlink to $existing"
-    echo "Remove it first if you want to replace it."
+link_file() {
+  local source="$1"
+  local target="$2"
+  local label="$3"
+
+  if [ -L "$target" ]; then
+    existing="$(readlink "$target")"
+    if [ "$existing" = "$source" ]; then
+      echo "$label already linked correctly."
+    else
+      echo "Error: $target is already a symlink to $existing"
+      echo "Remove it first if you want to replace it."
+      exit 1
+    fi
+  elif [ -e "$target" ]; then
+    echo "Error: $target already exists."
+    echo "Back it up and remove it first, then re-run this script."
     exit 1
+  else
+    ln -s "$source" "$target"
+    echo "Linked $label -> $source"
   fi
-elif [ -f "$TARGET" ]; then
-  echo "Error: $TARGET already exists as a regular file."
-  echo "Back it up and remove it first, then re-run this script."
-  exit 1
-else
-  ln -s "$ROVODEV_DIR/prompts.yml" "$TARGET"
-  echo "Linked prompts.yml -> $ROVODEV_DIR/prompts.yml"
-fi
+}
+
+# --- prompts.yml ---
+link_file "$ROVODEV_DIR/prompts.yml" "$GLOBAL_DIR/prompts.yml" "prompts.yml"
+
+# Rovo Dev resolves content_file entries relative to ~/.rovodev/prompts.yml.
+# Keep prompt content under ~/.rovodev as well, instead of claiming a generic
+# ~/.agents namespace.
+link_file "$SCRIPT_DIR/.agents/prompts" "$GLOBAL_DIR/prompts" "prompts"
 
 echo ""
 echo "Done. Skills are now available globally in Rovo Dev CLI."

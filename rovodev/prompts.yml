@@ -1,7 +1,7 @@
 prompts:
   - name: address-comments
     description: "Look at PR review comments and robustly address legitimate ones, ignore noise"
-    content_file: ../.agents/prompts/address-comments/SKILL.md
+    content_file: prompts/address-comments/SKILL.md
     inputs:
       - name: pr_target
         label: PR number or URL
@@ -11,7 +11,7 @@ prompts:
 
   - name: apply-changes
     description: "Implement requested changes with surgical precision"
-    content_file: ../.agents/prompts/apply-changes/SKILL.md
+    content_file: prompts/apply-changes/SKILL.md
     inputs:
       - name: changes
         label: Changes to apply
@@ -21,7 +21,7 @@ prompts:
 
   - name: clean-up-feature-flag
     description: "Remove a fully rolled out feature flag and verify checks pass"
-    content_file: ../.agents/prompts/clean-up-feature-flag/SKILL.md
+    content_file: prompts/clean-up-feature-flag/SKILL.md
     inputs:
       - name: flag_key
         label: Flag key
@@ -31,15 +31,15 @@ prompts:
 
   - name: describe-branch
     description: "Generate a PR description (3 sentences + summary line)"
-    content_file: ../.agents/prompts/describe-branch/SKILL.md
+    content_file: prompts/describe-branch/SKILL.md
 
   - name: describe-diff
     description: "Generate a <10 word phrase summarizing working changes"
-    content_file: ../.agents/prompts/describe-diff/SKILL.md
+    content_file: prompts/describe-diff/SKILL.md
 
   - name: fix-failures
     description: "Run build/test, fix failures without workarounds or suppressing errors"
-    content_file: ../.agents/prompts/fix-failures/SKILL.md
+    content_file: prompts/fix-failures/SKILL.md
     inputs:
       - name: error_output
         label: Error output or stack trace
@@ -49,23 +49,23 @@ prompts:
 
   - name: git-commit-push-to-origin
     description: "Stage all changes, commit with auto-generated message, and push directly to origin"
-    content_file: ../.agents/prompts/git-commit-push-to-origin/SKILL.md
+    content_file: prompts/git-commit-push-to-origin/SKILL.md
 
   - name: git-commit-push
     description: "Stage all changes, commit with auto-generated message, and push"
-    content_file: ../.agents/prompts/git-commit-push/SKILL.md
+    content_file: prompts/git-commit-push/SKILL.md
 
   - name: regenerate-detekt-baseline
     description: "Regenerate detekt baselines for Main and Test source sets"
-    content_file: ../.agents/prompts/regenerate-detekt-baseline/SKILL.md
+    content_file: prompts/regenerate-detekt-baseline/SKILL.md
 
   - name: resolve-conflict
     description: "Resolve merge conflicts preserving branch intent"
-    content_file: ../.agents/prompts/resolve-conflict/SKILL.md
+    content_file: prompts/resolve-conflict/SKILL.md
 
   - name: review-branch
     description: "Review for bugs, security, architecture, and test coverage (no style nits)"
-    content_file: ../.agents/prompts/review-branch/SKILL.md
+    content_file: prompts/review-branch/SKILL.md
     inputs:
       - name: focus_area
         label: Focus area
@@ -75,4 +75,4 @@ prompts:
 
   - name: sync-main
     description: "Fetch latest main and merge it into the current branch"
-    content_file: ../.agents/prompts/sync-main/SKILL.md
+    content_file: prompts/sync-main/SKILL.md
