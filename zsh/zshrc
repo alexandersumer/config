@@ -232,4 +232,4 @@ alias blog="cd ~/src/alexandersumer.com"
 alias assp="cd ~/src/assp"
 
 # Alta Agent Core
-alias aac="cd ~/src/alta-agent-core"
+alias alta="cd ~/src/alta-agent-core"
