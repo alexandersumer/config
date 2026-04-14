@@ -230,3 +230,6 @@ alias blog="cd ~/src/alexandersumer.com"
 
 # Atlassian Secure Sandbox Platform
 alias assp="cd ~/src/assp"
+
+# Alta Agent Core
+alias aac="cd ~/src/alta-agent-core"
