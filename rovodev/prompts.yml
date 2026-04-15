@@ -59,6 +59,16 @@ prompts:
     description: "Regenerate detekt baselines for Main and Test source sets"
     content_file: prompts/regenerate-detekt-baseline/SKILL.md
 
+  - name: review-tests
+    description: "Review and strengthen tests in a branch for depth, mutation resilience, and correctness"
+    content_file: prompts/review-tests/SKILL.md
+    inputs:
+      - name: focus_area
+        label: Focus area
+        description: Optional text to narrow the review to specific tests or areas. Leave empty to review all tests in the branch.
+        type: string
+        required: false
+
   - name: resolve-conflict
     description: "Resolve merge conflicts preserving branch intent"
     content_file: prompts/resolve-conflict/SKILL.md
