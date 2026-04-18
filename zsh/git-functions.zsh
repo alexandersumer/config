@@ -751,6 +751,25 @@ function soft_reset_origin() {
     git reset --soft "$main_branch"
 }
 
+function _is_transient_git_failure() {
+    local log_file="$1"
+    [[ -s "$log_file" ]] || return 1
+    grep -q -E \
+        -e 'Permission denied \(publickey' \
+        -e 'kex_exchange_identification' \
+        -e 'Could not resolve host' \
+        -e 'Connection (timed out|reset|refused|closed)' \
+        -e 'Operation timed out' \
+        -e 'early EOF' \
+        -e 'RPC failed' \
+        -e 'unable to access .*(Couldn'\''t connect|Failed to connect|Could not resolve)' \
+        -e 'remote end hung up unexpectedly' \
+        -e 'fetch-pack: unexpected disconnect' \
+        -e 'TLS connection was non-properly terminated' \
+        -e 'HTTP/[0-9.]+ 5[0-9]{2}' \
+        -- "$log_file"
+}
+
 function reset_all_to_origin() {
     local root=""
     local arg
@@ -758,25 +777,48 @@ function reset_all_to_origin() {
     local -a positional=()
     local -a repos=()
     local -a failed_repos=()
-    local entry repo_name
-    local -i total=0 ok_count=0 fail_count=0 skipped=0 index=0 status_code=0
+    local entry repo_name log_file
+    local -i total=0 ok_count=0 fail_count=0 skipped=0 retried_count=0
+    local -i index=0 status_code=0 attempt=0 delay=0
+    local -i max_attempts=3 retry_base_delay=2
     local -i parsing=1
 
     while (( parsing && $# > 0 )); do
         arg="$1"
         case "$arg" in
             --help|-h)
-                printf 'usage: reset_all_to_origin [root] [-- reset_to_origin args...]\n'
+                printf 'usage: reset_all_to_origin [root] [--retries N] [--retry-delay SECS] [-- reset_to_origin args...]\n'
                 printf '\n'
                 printf 'Iterate every immediate subdirectory of ROOT (default: $HOME/src),\n'
                 printf 'and run reset_to_origin sequentially in each one that is a git\n'
-                printf 'repository. Non-git directories are skipped. Failures do not abort\n'
-                printf 'the run; a summary is printed at the end.\n'
+                printf 'repository. Non-git directories are skipped. Transient failures\n'
+                printf '(ssh/network) are retried with exponential backoff. Non-transient\n'
+                printf 'failures are recorded immediately. The run never aborts; a summary\n'
+                printf 'is printed at the end.\n'
                 printf '\n'
                 printf 'arguments:\n'
-                printf '  root  directory to scan (default: $HOME/src)\n'
-                printf '  --    forward remaining args to reset_to_origin\n'
+                printf '  root           directory to scan (default: $HOME/src)\n'
+                printf '  --retries N    max attempts per repo on transient failure (default: 3, min: 1)\n'
+                printf '  --retry-delay  base seconds between retries, doubled each time (default: 2)\n'
+                printf '  --             forward remaining args to reset_to_origin\n'
                 return 0
+                ;;
+            --retries)
+                if [[ -z "${2-}" || "$2" != <-> ]]; then
+                    printf '\033[31merror: --retries requires a non-negative integer\033[0m\n' >&2
+                    return 1
+                fi
+                max_attempts=$2
+                (( max_attempts < 1 )) && max_attempts=1
+                shift 2
+                ;;
+            --retry-delay)
+                if [[ -z "${2-}" || "$2" != <-> ]]; then
+                    printf '\033[31merror: --retry-delay requires a non-negative integer\033[0m\n' >&2
+                    return 1
+                fi
+                retry_base_delay=$2
+                shift 2
                 ;;
             --)
                 shift
@@ -801,7 +843,6 @@ function reset_all_to_origin() {
 
     root="${positional[1]:-$HOME/src}"
 
-    # Resolve symlinks so the displayed path is canonical.
     if [[ -d "$root" ]]; then
         root="${root:A}"
     else
@@ -809,7 +850,6 @@ function reset_all_to_origin() {
         return 1
     fi
 
-    # Collect immediate subdirectories (and symlinks to dirs) in sorted order.
     for entry in "$root"/*(N-/); do
         repos+=("$entry")
     done
@@ -820,7 +860,14 @@ function reset_all_to_origin() {
     fi
 
     total=${#repos[@]}
-    printf 'scanning \033[32m%s\033[0m (%d entries)\n' "$root" "$total"
+    printf 'scanning \033[32m%s\033[0m (%d entries, retries=%d)\n' \
+        "$root" "$total" "$max_attempts"
+
+    log_file=$(mktemp -t reset_all_to_origin.XXXXXX) || {
+        printf '\033[31merror: could not create temp log file\033[0m\n' >&2
+        return 1
+    }
+    trap 'rm -f "$log_file"; trap - INT TERM; return 130' INT TERM
 
     for entry in "${repos[@]}"; do
         (( index++ ))
@@ -836,24 +883,54 @@ function reset_all_to_origin() {
         printf '\n[%d/%d] \033[32m%s\033[0m\n' "$index" "$total" "$repo_name"
         printf -- '----------------------------------------\n'
 
-        if (( ${#reset_args[@]} > 0 )); then
-            ( cd -- "$entry" && reset_to_origin "${reset_args[@]}" )
-        else
-            ( cd -- "$entry" && reset_to_origin )
-        fi
-        status_code=$?
+        attempt=1
+        status_code=0
+        while (( attempt <= max_attempts )); do
+            : > "$log_file"
+            if (( ${#reset_args[@]} > 0 )); then
+                ( cd -- "$entry" && reset_to_origin "${reset_args[@]}" ) 2>&1 | tee "$log_file"
+                status_code=${pipestatus[1]}
+            else
+                ( cd -- "$entry" && reset_to_origin ) 2>&1 | tee "$log_file"
+                status_code=${pipestatus[1]}
+            fi
+
+            if (( status_code == 0 )); then
+                break
+            fi
+
+            if (( attempt >= max_attempts )) || ! _is_transient_git_failure "$log_file"; then
+                break
+            fi
+
+            delay=$(( retry_base_delay * (1 << (attempt - 1)) ))
+            printf '\033[33mretry attempt %d/%d in %ds\033[0m\n' \
+                "$(( attempt + 1 ))" "$max_attempts" "$delay"
+            printf -- '----------------------------------------\n'
+            sleep "$delay"
+            (( attempt++ ))
+        done
 
         if (( status_code == 0 )); then
             (( ok_count++ ))
+            if (( attempt > 1 )); then
+                (( retried_count++ ))
+                printf '\033[32mrecovered after %d attempts\033[0m\n' "$attempt"
+            fi
         else
             (( fail_count++ ))
-            failed_repos+=("$repo_name (exit $status_code)")
+            local plural=s
+            (( attempt == 1 )) && plural=
+            failed_repos+=("$repo_name (exit $status_code after $attempt attempt$plural)")
         fi
     done
 
+    rm -f "$log_file"
+    trap - INT TERM
+
     printf '\n========================================\n'
-    printf 'summary: %d total, \033[32m%d ok\033[0m, \033[31m%d failed\033[0m, \033[33m%d skipped\033[0m\n' \
-        "$total" "$ok_count" "$fail_count" "$skipped"
+    printf 'summary: %d total, \033[32m%d ok\033[0m (\033[33m%d retried\033[0m), \033[31m%d failed\033[0m, \033[33m%d skipped\033[0m\n' \
+        "$total" "$ok_count" "$retried_count" "$fail_count" "$skipped"
 
     if (( fail_count > 0 )); then
         printf '\033[31mfailed repositories:\033[0m\n'
