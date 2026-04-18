@@ -752,16 +752,18 @@ function soft_reset_origin() {
 }
 
 function reset_all_to_origin() {
-    local root="${1:-$HOME/src}"
+    local root=""
     local arg
     local -a reset_args=()
+    local -a positional=()
     local -a repos=()
-    local -a ok_repos=()
     local -a failed_repos=()
-    local entry repo_name status_code
-    local -i total=0 ok_count=0 fail_count=0 skipped=0 index=0
+    local entry repo_name
+    local -i total=0 ok_count=0 fail_count=0 skipped=0 index=0 status_code=0
+    local -i parsing=1
 
-    for arg in "$@"; do
+    while (( parsing && $# > 0 )); do
+        arg="$1"
         case "$arg" in
             --help|-h)
                 printf 'usage: reset_all_to_origin [root] [-- reset_to_origin args...]\n'
@@ -779,19 +781,37 @@ function reset_all_to_origin() {
             --)
                 shift
                 reset_args=("$@")
-                break
+                parsing=0
+                ;;
+            --*)
+                printf '\033[31merror: unknown option %s\033[0m\n' "$arg" >&2
+                return 1
+                ;;
+            *)
+                positional+=("$arg")
+                shift
                 ;;
         esac
     done
 
-    if [[ ! -d "$root" ]]; then
+    if (( ${#positional[@]} > 1 )); then
+        printf '\033[31merror: too many positional arguments\033[0m\n' >&2
+        return 1
+    fi
+
+    root="${positional[1]:-$HOME/src}"
+
+    # Resolve symlinks so the displayed path is canonical.
+    if [[ -d "$root" ]]; then
+        root="${root:A}"
+    else
         printf '\033[31merror: %s is not a directory\033[0m\n' "$root" >&2
         return 1
     fi
 
-    # Collect immediate subdirectories in stable, sorted order.
-    for entry in "$root"/*(N/); do
-        repos+=("${entry%/}")
+    # Collect immediate subdirectories (and symlinks to dirs) in sorted order.
+    for entry in "$root"/*(N-/); do
+        repos+=("$entry")
     done
 
     if (( ${#repos[@]} == 0 )); then
@@ -806,7 +826,7 @@ function reset_all_to_origin() {
         (( index++ ))
         repo_name="${entry##*/}"
 
-        if [[ ! -d "$entry/.git" ]] && ! git -C "$entry" rev-parse --git-dir >/dev/null 2>&1; then
+        if ! git -C "$entry" rev-parse --git-dir >/dev/null 2>&1; then
             (( skipped++ ))
             printf '\n[%d/%d] \033[33mskip\033[0m %s (not a git repository)\n' \
                 "$index" "$total" "$repo_name"
@@ -816,12 +836,15 @@ function reset_all_to_origin() {
         printf '\n[%d/%d] \033[32m%s\033[0m\n' "$index" "$total" "$repo_name"
         printf -- '----------------------------------------\n'
 
-        ( cd "$entry" && reset_to_origin "${reset_args[@]}" )
+        if (( ${#reset_args[@]} > 0 )); then
+            ( cd -- "$entry" && reset_to_origin "${reset_args[@]}" )
+        else
+            ( cd -- "$entry" && reset_to_origin )
+        fi
         status_code=$?
 
         if (( status_code == 0 )); then
             (( ok_count++ ))
-            ok_repos+=("$repo_name")
         else
             (( fail_count++ ))
             failed_repos+=("$repo_name (exit $status_code)")
