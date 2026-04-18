@@ -750,3 +750,95 @@ function soft_reset_origin() {
     printf 'soft reset onto %s: \033[32mgit reset --soft %s\033[0m\n' "${main_branch}" "${main_branch}"
     git reset --soft "$main_branch"
 }
+
+function reset_all_to_origin() {
+    local root="${1:-$HOME/src}"
+    local arg
+    local -a reset_args=()
+    local -a repos=()
+    local -a ok_repos=()
+    local -a failed_repos=()
+    local entry repo_name status_code
+    local -i total=0 ok_count=0 fail_count=0 skipped=0 index=0
+
+    for arg in "$@"; do
+        case "$arg" in
+            --help|-h)
+                printf 'usage: reset_all_to_origin [root] [-- reset_to_origin args...]\n'
+                printf '\n'
+                printf 'Iterate every immediate subdirectory of ROOT (default: $HOME/src),\n'
+                printf 'and run reset_to_origin sequentially in each one that is a git\n'
+                printf 'repository. Non-git directories are skipped. Failures do not abort\n'
+                printf 'the run; a summary is printed at the end.\n'
+                printf '\n'
+                printf 'arguments:\n'
+                printf '  root  directory to scan (default: $HOME/src)\n'
+                printf '  --    forward remaining args to reset_to_origin\n'
+                return 0
+                ;;
+            --)
+                shift
+                reset_args=("$@")
+                break
+                ;;
+        esac
+    done
+
+    if [[ ! -d "$root" ]]; then
+        printf '\033[31merror: %s is not a directory\033[0m\n' "$root" >&2
+        return 1
+    fi
+
+    # Collect immediate subdirectories in stable, sorted order.
+    for entry in "$root"/*(N/); do
+        repos+=("${entry%/}")
+    done
+
+    if (( ${#repos[@]} == 0 )); then
+        printf '\033[33mno subdirectories found in %s\033[0m\n' "$root"
+        return 0
+    fi
+
+    total=${#repos[@]}
+    printf 'scanning \033[32m%s\033[0m (%d entries)\n' "$root" "$total"
+
+    for entry in "${repos[@]}"; do
+        (( index++ ))
+        repo_name="${entry##*/}"
+
+        if [[ ! -d "$entry/.git" ]] && ! git -C "$entry" rev-parse --git-dir >/dev/null 2>&1; then
+            (( skipped++ ))
+            printf '\n[%d/%d] \033[33mskip\033[0m %s (not a git repository)\n' \
+                "$index" "$total" "$repo_name"
+            continue
+        fi
+
+        printf '\n[%d/%d] \033[32m%s\033[0m\n' "$index" "$total" "$repo_name"
+        printf -- '----------------------------------------\n'
+
+        ( cd "$entry" && reset_to_origin "${reset_args[@]}" )
+        status_code=$?
+
+        if (( status_code == 0 )); then
+            (( ok_count++ ))
+            ok_repos+=("$repo_name")
+        else
+            (( fail_count++ ))
+            failed_repos+=("$repo_name (exit $status_code)")
+        fi
+    done
+
+    printf '\n========================================\n'
+    printf 'summary: %d total, \033[32m%d ok\033[0m, \033[31m%d failed\033[0m, \033[33m%d skipped\033[0m\n' \
+        "$total" "$ok_count" "$fail_count" "$skipped"
+
+    if (( fail_count > 0 )); then
+        printf '\033[31mfailed repositories:\033[0m\n'
+        for entry in "${failed_repos[@]}"; do
+            printf '  %s\n' "$entry"
+        done
+        return 1
+    fi
+
+    return 0
+}
