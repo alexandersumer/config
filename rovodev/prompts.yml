@@ -86,3 +86,13 @@ prompts:
   - name: sync-main
     description: "Fetch latest main and merge it into the current branch"
     content_file: prompts/sync-main/SKILL.md
+
+  - name: write-up
+    description: "Document the preceding discussion as clear, fact-checked prose in chat"
+    content_file: prompts/write-up/SKILL.md
+    inputs:
+      - name: focus
+        label: Focus or angle
+        description: Optional aspect of the discussion to emphasize. Leave empty to cover the whole discussion.
+        type: string
+        required: false
