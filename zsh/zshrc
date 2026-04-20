@@ -88,6 +88,7 @@ alias convo-ai-2="cd $HOME/atlassian/convo-ai-2 && sdk use java $JDK21"
 alias convo-ai-3="cd $HOME/atlassian/convo-ai-3 && sdk use java $JDK21"
 alias alta-1="cd $HOME/atlassian/alta-1"
 alias alta-2="cd $HOME/atlassian/alta-2"
+alias alta-3="cd $HOME/atlassian/alta-3"
 
 ########################################
 # Functions
