@@ -89,6 +89,7 @@ alias convo-ai-3="cd $HOME/atlassian/convo-ai-3 && sdk use java $JDK21"
 alias alta-1="cd $HOME/atlassian/alta-1"
 alias alta-2="cd $HOME/atlassian/alta-2"
 alias alta-3="cd $HOME/atlassian/alta-3"
+alias alta-4="cd $HOME/atlassian/alta-4"
 
 ########################################
 # Functions
@@ -224,3 +225,6 @@ precmd_functions+=(__hist_capture_exit __hist_remove_notfound)
 if [[ -r "$HOME/.local/bin/env" ]]; then
   . "$HOME/.local/bin/env"
 fi
+
+# bun completions
+[ -s "/Users/asumer/.bun/_bun" ] && source "/Users/asumer/.bun/_bun"
