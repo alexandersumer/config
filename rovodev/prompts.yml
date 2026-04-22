@@ -55,10 +55,6 @@ prompts:
     description: "Stage all changes, commit with auto-generated message, and push"
     content_file: prompts/git-commit-push/SKILL.md
 
-  - name: regenerate-detekt-baseline
-    description: "Regenerate detekt baselines for Main and Test source sets"
-    content_file: prompts/regenerate-detekt-baseline/SKILL.md
-
   - name: review-tests
     description: "Review and strengthen tests in a branch for depth, mutation resilience, and correctness"
     content_file: prompts/review-tests/SKILL.md
