@@ -82,7 +82,7 @@ alias clear="echo 'The clear command is disabled.'"
 
 # Project navigation
 alias blog="cd $HOME/atlassian/alexandersumer.com"
-alias assp="cd $HOME/atlassian/assp"
+alias atlassian-sandbox="cd $HOME/atlassian/atlassian-sandbox"
 alias convo-ai-1="cd $HOME/atlassian/convo-ai-1 && sdk use java $JDK21"
 alias convo-ai-2="cd $HOME/atlassian/convo-ai-2 && sdk use java $JDK21"
 alias convo-ai-3="cd $HOME/atlassian/convo-ai-3 && sdk use java $JDK21"
