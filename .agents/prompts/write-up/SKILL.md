@@ -14,13 +14,13 @@ Write a document of the preceding discussion. Apply the focus below if provided.
 
 $ARGUMENTS
 
-Output to this chat window only. Never write to disk.
+Output to this chat window only. Do not write to disk.
 
-Audience was in the discussion. Lead with the conclusion, then the reasoning, then what is open. Prose by default. Headings, bullets, and tables only when the content is genuinely structured. As short as the content allows.
+Audience was in the discussion. Structure: conclusion first, then reasoning, then what is open. Prose by default. Use headings, bullets, or tables only when the content is genuinely structured. Length matches content; cut any word that does not earn its place.
 
-Verify every load-bearing fact against source material directly: code, official docs, primary specs, the referenced files. Do not rely on chat summaries, team discussions, or your own earlier assertions. Omit any fact you cannot verify. Do not guess, estimate, or invent timelines or phases.
+Verify every load-bearing fact against primary source material: the code, official docs, primary specs, the referenced files. Treat chat summaries, team discussions, and your own earlier assertions as unverified. Omit any fact you cannot verify against a primary source.
 
-Quote sources verbatim when citing a specific fact. Identify the source inline.
+When citing a specific fact, quote the source verbatim and identify it inline.
 
 Forbidden:
 - em dashes

@@ -10,16 +10,19 @@ inputs:
     required: false
 ---
 
-The user may have provided a PR number, URL, or additional instructions as input — use them if present. Otherwise default to the current branch's PR.
+Target PR: the value supplied as input, or the current branch's PR if none was supplied.
 
-Fetch all open review comments on the target PR using `gh pr view --json reviews,comments` and `gh pr review-comment list` (or equivalent `gh` CLI commands available). Read the branch diff to understand the full context of the changes.
+Fetch all open review comments on the target PR using `gh pr view --json reviews,comments` and `gh pr review-comment list` (or equivalent available `gh` CLI commands). Read the cumulative branch diff using three-dot syntax (`git diff base...HEAD`) for full context.
 
-For each comment, assess legitimacy:
-- **Address**: bugs, correctness issues, missing edge cases, security concerns, architectural problems, unclear naming, missing tests, factual mistakes. These are legitimate regardless of tone.
-- **Ignore**: personal style preferences with no objective basis, subjective rewrites that don't improve correctness or clarity, requests to add unnecessary complexity, comments already addressed by existing code, and anything that contradicts the intent of the branch.
+Classify every comment, then act:
+- **Address**: bugs, correctness issues, missing edge cases, security concerns, architectural problems, unclear naming, missing tests, factual mistakes. Legitimate regardless of tone.
+- **Ignore**: subjective style preferences, rewrites that don't improve correctness or clarity, requests to add complexity, comments already satisfied by existing code, anything contradicting the branch's intent.
 
-When addressing a legitimate comment, read the relevant file and surrounding context first. Apply the fix with surgical precision — do not refactor beyond what the comment requests. After all fixes are applied, run the build if a build command is available.
+For each addressed comment, read the relevant file and surrounding context, then apply the smallest fix that resolves it. Keep the change scoped to the comment; leave unrelated code alone. After all fixes, run the build if a build command is available.
 
-Do not leave a comment response or explanation — just make the code changes.
+Make code changes only. Do not post replies or explanations to the PR.
 
-Report a brief summary at the end: list each comment with `[addressed]` or `[ignored: reason]`.
+Acceptance criteria:
+- Every comment appears in the final report exactly once.
+- Each entry uses the form `<file>:<line> [addressed]` or `<file>:<line> [ignored: <one-line reason>]`.
+- Build passes if a build command exists.

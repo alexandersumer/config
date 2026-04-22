@@ -10,10 +10,19 @@ inputs:
     required: true
 ---
 
-Remove fully rolled out feature flag `$ARGUMENTS`. Keep the NEW/enabled behavior, delete OLD/disabled code paths.
+Remove fully rolled out feature flag `$ARGUMENTS`. Keep the enabled behavior; delete the disabled paths.
 
-Search thoroughly for ALL references: full key, enum constant, short name, and any string variants. Check test directories explicitly as they are often missed.
+Find every reference before editing: full key string, enum/constant name, short name, any aliases, and any string variants. Search production code, test code, configuration, and documentation.
 
-Remove flag checks and conditionals, keeping only the enabled code path. Delete tests for disabled/old behavior as they are now invalid. Remove the flag definition from enum/config after all references are gone. Clean up unused imports and dead code left behind.
+Apply the cleanup:
+- Replace each flag check with the enabled branch inlined; delete the disabled branch.
+- Delete tests that exclusively cover the disabled behavior.
+- Remove the flag definition from its enum/config once no references remain.
+- Remove imports, helpers, and types left unused by the above.
 
-Run the build and test suite. If checks fail, fix missed references or tests expecting old behavior, then re-run until green.
+Run the build and test suite. Fix any failures by correcting missed references or updating tests that asserted disabled behavior. Iterate until green.
+
+Acceptance criteria:
+- Zero references to the flag remain (verified by repeating the search).
+- Build and tests pass.
+- No behavioral changes beyond removing the disabled path.

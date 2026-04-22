@@ -10,12 +10,23 @@ inputs:
     required: false
 ---
 
-First, find and read the README to learn how to run checks locally — do not skip this.
+Read the README to learn how to run checks locally.
 
-Use the error output below if provided; otherwise, run the full local check suite to identify failures. Before fixing, reproduce the failure locally to confirm you can see it — this is especially important for integration tests. Diagnose the root cause. Fix it with a clean, architectural solution — fix the actual code that the checker is complaining about. Test failures are almost always caused by the code itself, not by configuration or dependencies — do not modify build config, dependency versions, or test infrastructure to make tests pass.
-
-Never suppress, silence, or bypass a failure. This means: no @Suppress, no @SuppressWarnings, no noinspection comments, no detekt/lint baseline changes, no annotation-based opt-outs, no wrapping code to dodge the checker. If a linter says a suspend modifier is redundant, remove it. If a checker flags an unsafe pattern, rewrite the code. Always address what the tool is actually telling you.
-
-After every fix, re-run the full local check suite to verify the fix works and nothing else regressed. Do not stop until local checks pass. If failures persist after 3 fix attempts, stop and report the remaining failures with your diagnosis.
+Use the error output below if provided; otherwise, run the full local check suite to discover failures.
 
 $ARGUMENTS
+
+For each failure:
+1. Reproduce locally so you can see it (mandatory for integration tests).
+2. Diagnose the root cause in the application code under test.
+3. Fix the application code the checker is pointing at. Examples of correct fixes: remove a redundant `suspend` modifier when a linter flags it; rewrite an unsafe pattern when a static analyzer flags it; correct the production logic when a test asserts the right behavior.
+
+Allowed changes: application source code, test code that asserts correct behavior.
+Disallowed changes: `@Suppress`, `@SuppressWarnings`, `noinspection`, lint/detekt/checker baselines, annotation-based opt-outs, wrapping code to dodge a checker, dependency version bumps, build config changes, test infrastructure changes.
+
+After each fix, re-run the full local check suite. Iterate until green.
+
+Acceptance criteria:
+- Local check suite passes end-to-end.
+- No file in the disallowed list above was modified.
+- If failures remain after 3 fix attempts, stop and report each remaining failure with its diagnosis.

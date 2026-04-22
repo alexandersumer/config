@@ -3,8 +3,16 @@ name: resolve-conflict
 description: Resolve merge conflicts preserving branch intent
 ---
 
-Analyze the conflict markers and the intent of both the current branch and the incoming branch. Resolve conflicts to preserve the intent of the current branch while incorporating necessary updates from the incoming branch.
+Read the conflict markers and the commit history of both branches to identify the intent on each side. Resolve conflicts so the current branch's intent is preserved while the incoming branch's updates are incorporated.
 
-When the incoming branch has intentionally removed or simplified code (feature flags, dead code, deprecated APIs, temporary constructs) that was not introduced by the current branch, accept the removal rather than reintroducing it. Update the current branch's code to work without them.
+When the incoming branch intentionally removed or simplified code (feature flags, dead code, deprecated APIs, temporary constructs) that the current branch did not introduce, accept the removal. Adapt the current branch's code to work without it.
 
-After resolving, search the affected files for remaining conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`). Run the build if a build command is available.
+After resolving:
+- Search every affected file for `<<<<<<<`, `=======`, `>>>>>>>`. Re-resolve any that remain.
+- Run the build if a build command is available.
+
+Acceptance criteria:
+- No conflict markers remain in the working tree.
+- Current branch's intent is intact.
+- Code introduced or removed by the incoming branch is reflected, not reverted.
+- Build passes if a build command exists.

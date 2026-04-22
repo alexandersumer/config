@@ -10,12 +10,23 @@ inputs:
     required: false
 ---
 
-Determine the base branch and get the cumulative branch diff using three-dot syntax (`git diff base...HEAD`). Do not use two-dot diff as it includes unrelated changes from the base branch.
+Determine the base branch. Get the cumulative branch diff with three-dot syntax: `git diff base...HEAD`.
 
-If `$ARGUMENTS` is provided, narrow the review to only the parts of the diff relevant to that input. Otherwise, review the entire diff.
+Scope: review the entire diff, or narrow to `$ARGUMENTS` if provided.
 
-Scrutinize for critical bugs, security vulnerabilities, architectural flaws, inelegant design, and missing test coverage. Ignore style nits. Only flag problems with high certainty.
+Report every finding in these categories, regardless of how minor it seems within the category:
+- Correctness bugs (logic errors, off-by-one, null/empty handling, race conditions, incorrect error handling).
+- Security vulnerabilities (injection, auth/authz gaps, secret exposure, unsafe deserialization, SSRF, missing input validation).
+- Architectural flaws (wrong layer, broken invariants, leaky abstractions, hidden coupling).
+- Missing test coverage for any new or changed behavior.
+- Behavioral rollout safety: any new or modified runtime behavior that affects users must be behind a feature flag or gradual rollout. If the codebase uses a rollout/feature-flag SDK, the control and replacement blocks must contain real old and new code paths so metrics, logging, and alerting capture real execution; flag literal-only or boolean-hack blocks. Config-only changes, infra updates, and pure refactors with no behavioral change are exempt.
 
-Evaluate whether behavioral changes are safely rolled out behind feature flags. Flag new or modified runtime behavior that could impact users but has no feature flag or gradual rollout mechanism. If the codebase uses a rollout/feature-flag SDK, verify that control and replacement blocks contain actual old and new code paths—not literals or boolean hacks—so that metrics, logging, and alerting capture real execution. Config-only changes, infra updates, and pure refactors with no behavioral change do not require flags.
+Out of scope (do not report): formatting, naming preferences, comment wording, import order, or any purely subjective style point.
 
-Output findings as a list in the format `filename:line_number problem_description problem_fix`. If no issues are found, say so briefly.
+Output format — one finding per line:
+
+```
+<filename>:<line> <problem> -> <fix>
+```
+
+If nothing in scope was found, output exactly: `no issues found`.

@@ -3,4 +3,21 @@ name: describe-branch
 description: Generate a PR description (3 sentences + summary line)
 ---
 
-Determine the base branch and get the cumulative branch diff using three-dot syntax (`git diff base...HEAD`). Do not use two-dot diff as it includes unrelated changes from the base branch. Write a direct, concise PR description of what changed and why. Limit to 3 sentences. Output each sentence on its own line. Mention only the primary components modified, not internal implementation details. Do not use bullet points or lists. End with a [Conventional Commits v1.0.0](https://www.conventionalcommits.org/en/v1.0.0/) summary line in the form `<type>[optional scope]: <description>` (lowercase, imperative, no trailing period, ≤72 chars). Suitable for use as a squash-merge commit subject.
+Determine the base branch. Get the cumulative branch diff with three-dot syntax: `git diff base...HEAD`.
+
+Write a PR description of what changed and why, covering only the primary components modified.
+
+Output format (exactly this shape):
+
+```
+<sentence 1: what changed>
+<sentence 2: why or impact>
+<sentence 3: notable constraint, follow-up, or scope boundary>
+
+<type>[optional scope]: <description>
+```
+
+Acceptance criteria:
+- Exactly 3 sentences of prose, each on its own line, no bullets or lists.
+- Final line follows [Conventional Commits v1.0.0](https://www.conventionalcommits.org/en/v1.0.0/): lowercase, imperative, no trailing period, ≤72 chars; suitable as a squash-merge subject.
+- No mention of internal implementation details that aren't user- or reviewer-facing.
