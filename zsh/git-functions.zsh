@@ -343,9 +343,15 @@ function reset_to_origin() {
     # ── Background fetch for remote branch availability ───────────────
     if (( ! sync_fetch )); then
         printf '\033[33mupdating remote branches in background…\033[0m\n'
-        git fetch --prune --no-tags "$remote" &>/dev/null &
-        disown
+        # Run the background fetch in its own subshell so it fully detaches
+        # from the parent job table.  This avoids `disown: no current job`
+        # errors when reset_to_origin itself is called from inside a
+        # subshell/pipeline (e.g. by reset_all_to_origin), which would
+        # otherwise leak a non-zero exit status out of this function.
+        ( git fetch --prune --no-tags "$remote" &>/dev/null & ) 2>/dev/null
     fi
+
+    return 0
 }
 
 function rebase_on_origin() {
