@@ -8,6 +8,11 @@ inputs:
     description: Optional override for the next chunk to tackle. Leave empty to read the spec from the repo or conversation.
     type: string
     required: false
+  - name: project_root
+    label: Project root path
+    description: Optional path that anchors spec resolution in monorepos with multiple parallel plans (e.g. a service directory or a plan subdirectory). Leave empty to infer from the just-merged diff.
+    type: string
+    required: false
 ---
 
 The previous branch merged. Reset to a fresh default branch, read the project spec, pick the next chunk, ship it on a new branch (uncommitted).
@@ -22,19 +27,27 @@ Switch to the default branch. Run `git fetch origin <default-branch> --prune`, t
 
 ## Read the project spec
 
+Compute the locality signal first — the just-merged diff is the strongest clue to which project you are on:
+- Merged paths: `git log -1 --name-only --pretty=format: origin/<default-branch>`.
+- Previous branch: `git reflog --pretty=%gs | grep -m1 'checkout: moving from' | sed -E 's/.*moving from ([^ ]+) to.*/\1/'`.
+
+Derive the locality prefix set: longest common path prefixes from the merged files plus any project token in the previous branch name (e.g. `cli` from `feat/cli-foo`).
+
+Output: `Locality: <prefixes> (from <signal>)`.
+
 Resolve the spec from the first source that yields one:
-
-1. The `focus` input if non-empty. Treat its text as the spec.
-2. A planning artifact in the repo. Run these searches in parallel and read every match:
+1. `focus` input — treat as the spec.
+2. `project_root` input — restrict the search below to that path.
+3. Planning artifact, scored by locality. Collect candidates:
    - `git ls-files | grep -iE '^(\.plan|\.projects|plan|project|projects|roadmap|todo|tasks|backlog|milestones)(\.md)?$'`
-   - `git ls-files 'docs/*' | grep -iE '(plan|project|roadmap|todo|backlog|milestone)'`
-   - `git ls-files '.plan/*' '.projects/*' '.tasks/*' 2>/dev/null`
-   The most recently modified match (`git log -1 --format=%cI -- <file>`) is authoritative; older matches are background.
-3. The preceding conversation: what was just merged, what was promised next.
+   - `git ls-files 'docs/*' '.plan/*' '.projects/*' '.tasks/*' '*/PLAN.md' '*/ROADMAP.md' '*/TODO.md' '*/tasks.md' 2>/dev/null`
 
-Output one line: `Spec source: <path or "conversation" or "focus input">`.
+   Score each: +10 path starts with a locality prefix, +5 contents reference a merged path, +3 path or contents contain a previous-branch token, +1 most recently modified. Pick the highest.
+4. Conversation context.
 
-If none of the three yields a usable spec, stop and ask the user for one. Do not invent a project.
+Output: `Spec source: <path or "conversation" or "focus input">`.
+
+Stop and ask the user (do not guess) if: the top score is 0, the top two are within 5 points, or the chosen spec contains no merged path and no previous-branch token.
 
 ## Pick the next chunk
 
@@ -93,6 +106,7 @@ Leave the changes in the working tree, uncommitted. Do not run `git add`, `git c
 Final message uses exactly this shape:
 
 ```
+Locality: <prefix1>, <prefix2> (from <signal>)
 Spec source: <path or "conversation" or "focus input">
 Chunk: <name>
 Why: <one sentence tying it to the spec>
@@ -116,9 +130,10 @@ Keep the message under 25 lines. Do not add a preamble, summary, or sign-off.
 ## Acceptance criteria
 
 - `git rev-parse HEAD` matched `git rev-parse origin/<default-branch>` before any new file was touched.
-- Spec source line was emitted before chunk selection.
+- Locality line was emitted before spec selection.
+- Spec source line was emitted before chunk selection, and the chosen spec passed the verification step (references a just-merged path or a previous-branch-name token).
 - Chosen chunk fits the four qualification rules above and was announced in one line.
-- Diff touches 1–10 files and stays inside the chunk's stated scope.
+- Diff touches 1–10 files and stays inside the chunk's stated scope, all under the locality prefix or the supplied `project_root`.
 - New tests would fail under at least one named mutation of the new code.
 - Local build and test suite passed end to end on the final attempt.
 - Current branch is the new kebab-case branch, working tree contains the changes, no commit was created.
