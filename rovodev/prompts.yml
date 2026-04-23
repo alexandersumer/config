@@ -79,6 +79,16 @@ prompts:
         type: string
         required: false
 
+  - name: ship-next-chunk
+    description: "Pick the next chunk from the spec/plan and implement it end-to-end on a fresh branch, ready for git-commit-push"
+    content_file: prompts/ship-next-chunk/SKILL.md
+    inputs:
+      - name: focus
+        label: Focus or spec
+        description: Optional spec text or focus for the next chunk. Leave empty to discover the spec from the repo or conversation.
+        type: string
+        required: false
+
   - name: sync-main
     description: "Fetch latest main and merge it into the current branch"
     content_file: prompts/sync-main/SKILL.md

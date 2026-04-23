@@ -1,5 +1,5 @@
 ---
-name: continue-next
+name: ship-next-chunk
 description: Sync to fresh main, pick the next project chunk from the spec, implement it, and put it on a new branch
 argument-hint: "[optional: project goal or focus]"
 inputs:
