@@ -19,12 +19,9 @@ $ARGUMENTS
 </spec>
 
 <scope_floor>
-This prompt exists because agents tend to nibble. Do not nibble.
+Do not nibble. Ship the entire spec in one pass; if genuinely too large, ship a vertical slice (real production code wired into real entry points, exercised by real tests) and name what was deferred.
 
-- Default expectation: ship the entire spec in one pass. If the spec is genuinely larger than one session, ship a coherent vertical slice that is independently useful and explicitly name what was deferred.
-- A "vertical slice" means: real production code, wired into the real entry points, exercised by real tests, callable by a real user or caller. Not a scaffold. Not an interface with no implementation. Not docs describing what would happen.
-- Disqualified as substantial work: editing only docs/READMEs/comments, adding only types or interfaces, adding only TODOs, adding only one trivial helper, renaming files, or reformatting. If your diff looks like that, you are not done — return to <implement>.
-- Size signal you are aiming at: typically 5+ files touched, hundreds of lines net, multiple new tests with non-trivial assertions, at least one end-to-end behavior demonstrated by a command or test you ran. Use judgement; do not pad.
+Disqualified as substantial: docs/comments-only, types/interfaces-only, TODOs-only, one trivial helper, renames, reformatting. Size signal: typically 5+ files, hundreds of lines net, multiple non-trivial tests, one end-to-end behavior demonstrated by a command you ran. Use judgement; do not pad.
 </scope_floor>
 
 <resolve_spec>

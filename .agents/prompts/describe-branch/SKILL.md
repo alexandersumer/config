@@ -32,9 +32,4 @@ Acceptance criteria for the summary line (must follow [Conventional Commits v1.0
 - `description` is lowercase, imperative mood ("add", not "adds"/"added"), no trailing period, ≤72 characters total including type/scope, and reads as a valid squash-merge subject.
 - Must be consistent with the 3-sentence prose above (same change, same scope).
 
-Selection guidance:
-- If the diff adds new user-visible capability → `feat`.
-- If it corrects incorrect behavior → `fix`.
-- If it only restructures code with no behavior change → `refactor`.
-- If it only changes docs/tests/build/CI → `docs`/`test`/`build`/`ci` respectively.
-- If multiple types apply, choose the one matching the highest-impact change and mention the secondary change in sentence 1 or 3.
+Type selection: `feat` for new user-visible capability, `fix` for incorrect behavior, `refactor` for restructuring with no behavior change, otherwise `docs`/`test`/`build`/`ci`. If multiple apply, pick the highest-impact one and mention the secondary in sentence 1 or 3.
