@@ -1,6 +1,6 @@
 ---
-name: forge-spec
-description: Build out a spec or plan end-to-end as substantial production-grade work, with canonical patterns and robust verification
+name: build-spec
+description: Build a spec or plan end-to-end as substantial production-grade work, with canonical patterns and robust verification
 argument-hint: "[optional: spec path, plan name, or inline spec]"
 inputs:
   - name: spec

@@ -65,9 +65,9 @@ prompts:
         type: string
         required: false
 
-  - name: forge-spec
-    description: "Build out a spec or plan end-to-end as substantial production-grade work, with canonical patterns and robust verification"
-    content_file: prompts/forge-spec/SKILL.md
+  - name: build-spec
+    description: "Build a spec or plan end-to-end as substantial production-grade work, with canonical patterns and robust verification"
+    content_file: prompts/build-spec/SKILL.md
     inputs:
       - name: spec
         label: Spec or plan
