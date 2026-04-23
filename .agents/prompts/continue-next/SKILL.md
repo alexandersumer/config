@@ -1,67 +1,125 @@
 ---
 name: continue-next
-description: Sync to fresh main, then pick up the next substantial chunk of project work on a new branch
+description: Sync to fresh main, pick the next project chunk from the spec, implement it, and put it on a new branch
 argument-hint: "[optional: project goal or focus]"
 inputs:
   - name: focus
     label: Project focus
-    description: Optional description of the active project or next chunk to tackle. Leave empty to infer from conversation context.
+    description: Optional override for the next chunk to tackle. Leave empty to read the spec from the repo or conversation.
     type: string
     required: false
 ---
 
-The previous branch has been merged. Reset to a fresh default branch and continue the project with the next chunk of work.
+The previous branch merged. Reset to a fresh default branch, read the project spec, pick the next chunk, ship it on a new branch (uncommitted).
 
-$ARGUMENTS
-
-## Refresh main
+## Refresh the default branch
 
 Preconditions (stop and report if either fails):
-- Working tree has no uncommitted changes. If it does, tell the user to commit or stash first.
-- A default branch (`main` or `master`) exists on `origin`.
+- `git status` is clean.
+- `origin` has a default branch (`main` or `master`).
 
-Determine the default branch. Switch to it. Run `git fetch origin <default-branch> --prune`, then `git reset --hard origin/<default-branch>` so the local default branch matches origin exactly. Confirm `git status` is clean and `git log -1` shows the latest origin commit.
+Switch to the default branch. Run `git fetch origin <default-branch> --prune`, then `git reset --hard origin/<default-branch>`. Confirm `git status --porcelain` is empty and `git rev-parse HEAD` matches `git rev-parse origin/<default-branch>`.
 
-## Identify the project spec and next chunk
+## Read the project spec
 
-Resolve the project spec in this order. Stop at the first source that yields a usable spec:
-1. `$ARGUMENTS` if provided.
-2. A planning file or directory in the repo. Check `.plan`, `.plan/`, `.projects`, `.projects/`, `PROJECT.md`, `PROJECTS.md`, `PLAN.md`, `ROADMAP.md`, `TODO.md`, `docs/plan*`, `docs/project*`, `docs/roadmap*`, and any equivalent the repo uses. Use `git ls-files` and a case-insensitive search to find them. Read the most recent or most specific file.
-3. The preceding conversation context (what was just merged, what remains).
+Resolve the spec from the first source that yields one:
 
-State the spec source you used in one line before proceeding.
+1. The `focus` input if non-empty. Treat its text as the spec.
+2. A planning artifact in the repo. Run these searches in parallel and read every match:
+   - `git ls-files | grep -iE '^(\.plan|\.projects|plan|project|projects|roadmap|todo|tasks|backlog|milestones)(\.md)?$'`
+   - `git ls-files 'docs/*' | grep -iE '(plan|project|roadmap|todo|backlog|milestone)'`
+   - `git ls-files '.plan/*' '.projects/*' '.tasks/*' 2>/dev/null`
+   The most recently modified match (`git log -1 --format=%cI -- <file>`) is authoritative; older matches are background.
+3. The preceding conversation: what was just merged, what was promised next.
 
-From the spec, identify what just shipped and what is still open. Pick the next chunk that is:
-- Substantial enough to move the project meaningfully closer to completion (not a one-line tweak).
-- Self-contained enough to ship as a single PR.
-- Logically next given what just merged (do not skip prerequisites, do not duplicate work already in flight).
+Output one line: `Spec source: <path or "conversation" or "focus input">`.
 
-If the next chunk is ambiguous, list the candidate chunks you considered and pick one with a one-sentence justification before proceeding.
+If none of the three yields a usable spec, stop and ask the user for one. Do not invent a project.
 
-If a planning file exists and tracks task status, mark the chosen chunk as in progress in that file as part of the change.
+## Pick the next chunk
 
-## Do the work
+A chunk qualifies when **all** of these hold:
 
-Stay on the default branch while exploring; only create the new branch once you are ready to commit (see below).
+- It is the next item in the spec's stated sequence, or it unblocks the next stated item.
+- It has not shipped (check `git log --oneline -50 origin/<default-branch>` and any open branches via `git branch -a`).
+- Its expected diff fits the size band: 1 to ~10 files, roughly 50–500 lines net, one user-visible behavior or one internal capability that another chunk will consume.
+- It has a single observable acceptance signal you can name in one sentence (a test that passes, a CLI that produces output X, an endpoint that returns Y).
 
-Read the relevant files first to learn the existing patterns. Match those patterns: naming, error handling, layering, test style, comment density. Do not invent new abstractions or dependencies when existing ones fit.
+Examples of qualifying chunks:
+- `add JSON output mode to the report command, with golden-file tests`
+- `extract the retry policy into a single class and route the three call sites through it`
+- `implement the /healthz endpoint with liveness and readiness probes plus integration tests`
 
-Implement the change end to end:
-- Production code, tests, and any user-facing strings or docs that the change requires.
-- Cover real failure modes with tests that would fail under a plausible mutation of the new code.
-- Behavioral changes that affect users go behind the project's existing feature-flag or rollout mechanism if one is in use.
+Examples that do not qualify (state why and pick a different one):
+- `improve error handling` — no observable signal.
+- `clean up the codebase` — not in the spec, no boundary.
+- `rename one variable` — below the size band.
+- `rewrite the auth layer` — above the size band, ship in stages.
 
-After implementing, run the local build and test suite. Fix failures by correcting the code the checker points at, not by suppressing checks, bumping versions, or editing baselines. Iterate until green.
+If two or more chunks qualify, list them, then pick the one whose acceptance signal is most concrete and announce the pick in one line: `Chunk: <name>. Why: <one sentence tying it to the spec>.`
 
-## Branch and hand off
+If the spec file tracks status (checkboxes, status columns, headings like `In progress`), update the chosen chunk's status in that file as part of the diff.
 
-Once the work is complete and checks are green, create a short descriptive branch from the current commit (kebab-case, names the change, no ticket prefix) and switch to it. Do not commit, push, or open a PR; leave that to the user or a follow-up prompt.
+## Implement
 
-Acceptance criteria:
-- Local default branch matches `origin/<default-branch>` exactly before any new work begins.
-- The chosen chunk is named explicitly with a one-sentence justification tying it to the project's remaining work.
-- Diff is scoped to the chosen chunk; no drive-by changes.
-- New code reads like the surrounding code and is covered by tests that would catch a plausible mutation.
-- Local build and test suite pass end to end.
-- A new branch exists for the work, with the changes present in the working tree, uncommitted.
-- Final report lists: chunk chosen, files touched, tests added or updated, branch name, and what the user should do next.
+Stay on the default branch while reading and exploring. Use file-reading and grep tools liberally to map existing patterns before writing code; explicit reading beats guessing on Opus 4.7.
+
+Parallelize independent investigations in a single tool batch:
+- Spec file(s)
+- Recent commits on the default branch (`git log -20 --stat origin/<default-branch>`)
+- The modules the chunk will touch
+- Existing tests that exercise those modules
+
+Match the surrounding code: same naming, same error-handling style, same test framework, same comment density, same dependency set. Reuse existing helpers and types.
+
+Build the change end to end in one pass:
+- Production code for the one behavior.
+- Tests that fail under at least one plausible mutation of the new code (off-by-one, swapped args, null vs empty, flipped conditional, wrong exception type).
+- User-facing strings, docs, and config the change requires.
+- Feature-flag or rollout wrapper if the codebase already uses one for behavioral changes.
+
+Run the local build and test suite. On failure, fix the application code the checker points at. Re-run. Iterate until green. Allowed: edits to application source and tests. Disallowed: `@Suppress`, lint baselines, dependency bumps, build-config edits, test-infra edits.
+
+## Branch and report
+
+Create a branch from the current commit and switch to it: `git switch -c <kebab-case-name>`. Pick the name from the chunk: a verb plus the affected noun, no ticket prefix.
+
+Examples: `add-json-report-output`, `extract-retry-policy`, `implement-healthz-endpoint`.
+
+Leave the changes in the working tree, uncommitted. Do not run `git add`, `git commit`, `git push`, or open a PR.
+
+## Output
+
+Final message uses exactly this shape:
+
+```
+Spec source: <path or "conversation" or "focus input">
+Chunk: <name>
+Why: <one sentence tying it to the spec>
+Branch: <branch-name>
+
+Files:
+- <path>
+- <path>
+
+Tests:
+- <test name>: <mutation it now catches>
+- <test name>: <mutation it now catches>
+
+Checks: <command run> -> <pass/fail summary>
+
+Next: run the git-commit-push prompt to ship it.
+```
+
+Keep the message under 25 lines. Do not add a preamble, summary, or sign-off.
+
+## Acceptance criteria
+
+- `git rev-parse HEAD` matched `git rev-parse origin/<default-branch>` before any new file was touched.
+- Spec source line was emitted before chunk selection.
+- Chosen chunk fits the four qualification rules above and was announced in one line.
+- Diff touches 1–10 files and stays inside the chunk's stated scope.
+- New tests would fail under at least one named mutation of the new code.
+- Local build and test suite passed end to end on the final attempt.
+- Current branch is the new kebab-case branch, working tree contains the changes, no commit was created.
+- Final message matches the output shape above, ≤25 lines.
