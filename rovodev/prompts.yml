@@ -65,6 +65,16 @@ prompts:
         type: string
         required: false
 
+  - name: forge-spec
+    description: "Build out a spec or plan end-to-end as substantial production-grade work, with canonical patterns and robust verification"
+    content_file: prompts/forge-spec/SKILL.md
+    inputs:
+      - name: spec
+        label: Spec or plan
+        description: Path to a spec/plan file (e.g. `.plan/foo.md`, `.projects/bar.md`), a plan name to resolve under those directories, or the inline spec text. Leave empty to discover the most recent plan in `.plan` or `.projects`.
+        type: string
+        required: false
+
   - name: resolve-conflict
     description: "Resolve merge conflicts preserving branch intent"
     content_file: prompts/resolve-conflict/SKILL.md
