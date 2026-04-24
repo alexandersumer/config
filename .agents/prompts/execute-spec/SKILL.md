@@ -40,7 +40,7 @@ Before writing code, learn the patterns. Run these reads in one parallel batch:
 - The target repo's `README.md`, `CONTRIBUTING.md`, and `CLAUDE.md` / `AGENTS.md` if present.
 - The directories the spec touches, plus their nearest existing tests.
 - Two or three sibling features in the same repo that solve a similar shape of problem, end to end.
-- One or two reference repos under `~/atlassian` whose layout and language match the target. Grep for the same problem shape (CLI subcommand, HTTP handler, retry policy, migration, worker, cache, etc.). Extract: naming, layering, error handling, test framework, fixture style, dependency injection, comment density, logging, telemetry, feature-flagging.
+- One or two reference repos (prior art on your machine or accessible via tooling) whose layout and language match the target. Grep for the same problem shape (CLI subcommand, HTTP handler, retry policy, migration, worker, cache, etc.). Extract: naming, layering, error handling, test framework, fixture style, dependency injection, comment density, logging, telemetry, feature-flagging.
 
 Output: `Canonical patterns: <repo>:<path> for <aspect>` lines, one per pattern you will mirror.
 </learn_canonical_patterns>
@@ -58,7 +58,7 @@ For each task:
 - Build production code, tests, wiring, docs, and config in one pass. Wire new code into the real entry points (CLI, server, worker, public API) — code that exists but is not reachable does not count.
 - Mirror the canonical patterns identified above. Reuse existing helpers, types, fixtures, and abstractions. Do not introduce new dependencies, frameworks, or layers unless the spec requires them.
 - Tests must fail under at least one named mutation of the new code (off-by-one, swapped args, null vs empty, flipped conditional, wrong exception type, dropped side effect). Note the mutation in the test name or a comment. Cover the happy path, at least one failure path, and at least one edge case per behavior.
-- Run the full local check suite after each task. Fix the application code the checker points at. Disallowed: `@Suppress`, lint baselines, dependency bumps, build-config edits, test-infra edits, skipped or `xit`'d tests, `// TODO: implement` placeholders in shipped paths.
+- Run the full local check suite after each task. Fix the application code the checker points at. Disallowed: per-site warning suppressions, lint/checker baselines, dependency bumps, build-config edits, test-infra edits, skipped or disabled tests, `TODO: implement` placeholders in shipped paths.
 
 Parallelize independent reads and edits in single tool batches. Do not narrate intermediate steps; just do the work.
 </implement>

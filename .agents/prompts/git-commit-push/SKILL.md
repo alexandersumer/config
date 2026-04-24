@@ -35,4 +35,4 @@ Acceptance criteria:
 - No emojis, no ticket IDs in the subject, no imitation of non-conforming prefixes seen in `git log`.
 - After pushing from a non-default branch, output the existing PR URL or the create-PR URL.
 
-Examples: `docs: correct spelling of CHANGELOG`, `feat(lang): add Polish language`, `feat(api)!: drop support for Node 6`.
+Examples: `docs: correct spelling of CHANGELOG`, `feat(lang): add Polish language`, `feat(api)!: drop support for legacy clients`.

@@ -15,7 +15,7 @@ Determine the base branch. Get the cumulative branch diff with three-dot syntax:
 For each test in scope, run a mutation check: imagine a plausible bug in the production code it covers (off-by-one, swapped arguments, null vs empty, flipped conditional, missing await, wrong exception type). If the test would still pass under that mutation, strengthen it until it would fail.
 
 Apply these strengthening moves:
-- Replace weak assertions (`assertNotNull`, `assertTrue(x.size() > 0)`) with specific ones on the actual values.
+- Replace weak assertions (existence checks, "not null", "size > 0", "no exception thrown") with specific ones on the actual values.
 - Rewrite tests that assert on implementation structure (private fields, mock call order with no behavioral meaning) to assert on observable behavior.
 - Add edge case coverage that maps to a real failure mode in the code under test.
 

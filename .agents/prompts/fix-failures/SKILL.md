@@ -19,10 +19,10 @@ $ARGUMENTS
 For each failure:
 1. Reproduce locally so you can see it (mandatory for integration tests).
 2. Diagnose the root cause in the application code under test.
-3. Fix the application code the checker is pointing at. Examples of correct fixes: remove a redundant `suspend` modifier when a linter flags it; rewrite an unsafe pattern when a static analyzer flags it; correct the production logic when a test asserts the right behavior.
+3. Fix the application code the checker is pointing at. Examples of correct fixes: remove a redundant modifier when a linter flags it; rewrite an unsafe pattern when a static analyzer flags it; correct the production logic when a test asserts the right behavior.
 
 Allowed changes: application source code, test code that asserts correct behavior.
-Disallowed changes: `@Suppress`, `@SuppressWarnings`, `noinspection`, lint/detekt/checker baselines, annotation-based opt-outs, wrapping code to dodge a checker, dependency version bumps, build config changes, test infrastructure changes.
+Disallowed changes: per-site warning suppressions, lint/checker baselines, annotation-based opt-outs, wrapping code to dodge a checker, dependency version bumps, build config changes, test infrastructure changes.
 
 After each fix, re-run the full local check suite. Iterate until green.
 

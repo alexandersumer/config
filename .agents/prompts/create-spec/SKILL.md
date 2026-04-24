@@ -31,7 +31,7 @@ In one parallel batch of reads:
 - `README.md`, `CONTRIBUTING.md`, `AGENTS.md` / `CLAUDE.md` if present.
 - Directories the topic touches, plus their nearest tests.
 
-External reads (e.g. reference repos under `~/...`) are for your learning only. Translate any pattern into this repo's vocabulary before it appears in the spec. Never cite an external path, repo, or person in the spec output.
+External reads (reference repos, prior art outside this workspace) are for your learning only. Translate any pattern into this repo's vocabulary before it appears in the spec. Never cite an external path, repo, or person in the spec output.
 
 If no prior specs exist, use <spec_shape> and place the file under `.plan/specs/`.
 
@@ -95,7 +95,7 @@ What exists today, what it cannot do, and why that matters now. Concrete, not "w
 
 Just enough to implement. Include:
 - Module / package layout (one short tree if helpful).
-- Public interfaces or schemas as TypeScript / Go / Python / YAML / JSON snippets — small, complete, copyable. NOT walls of code.
+- Public interfaces or schemas as language-appropriate snippets (the repo's primary language, plus YAML/JSON for config) — small, complete, copyable. NOT walls of code.
 - Cross-module flow only when not obvious from the interfaces.
 
 Use sub-headings per component when it helps; otherwise one section is fine.
@@ -129,15 +129,15 @@ If the repo's existing-spec convention differs (e.g. an `## Impact` or `## Capab
 <style_exemplar>
 Match the shape, tone, and density of these examples. Substitute names from this repo.
 
-Decision:
+Decision (language-agnostic example; substitute concepts native to the repo's stack):
 
 ```
 ### Decision 2: Validate at the boundary, not at every call site
 
-**Rationale:** Validation logic duplicated across handlers drifts. Centralising at the request boundary matches how `<repo-existing-module>` already gates inputs and lets handlers assume parsed types. Cost is one extra allocation per request, measured at ~10µs.
+**Rationale:** Validation logic duplicated across handlers drifts. Centralising at the request boundary matches how `<repo-existing-module>` already gates inputs and lets handlers assume parsed types. Cost is one extra allocation per request, measured small.
 
 **Rejected alternatives:**
-- Per-handler validation — proven to drift in `<repo-existing-module>`; three divergent copies removed last quarter.
+- Per-handler validation — proven to drift in `<repo-existing-module>`; divergent copies removed previously.
 - Schema-as-type-only (no runtime check) — silently accepts malformed inputs from non-typed callers.
 ```
 

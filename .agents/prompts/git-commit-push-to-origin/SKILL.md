@@ -30,4 +30,4 @@ Acceptance criteria:
 - Subject matches the regex `^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9-]+\))?!?: [a-z].{0,70}[^.]$`.
 - No emojis, no ticket IDs in the subject, no imitation of non-conforming prefixes seen in `git log`.
 
-Examples: `docs: correct spelling of CHANGELOG`, `feat(lang): add Polish language`, `feat(api)!: drop support for Node 6`.
+Examples: `docs: correct spelling of CHANGELOG`, `feat(lang): add Polish language`, `feat(api)!: drop support for legacy clients`.
