@@ -160,36 +160,20 @@ Style invariants:
 </style_exemplar>
 
 <write>
-Emit one line: `Conventions: <path> for <aspect>` (≤4 lines).
-Emit one line: `Spec path: <path>`.
-Write the spec file at the resolved path.
-Write `proposal.md` companion if using the `changes/*` shape (1–3 paragraphs: problem, proposed change, files affected).
-Emit the final report per <output_format>.
+If you cannot resolve scope or intent from the topic + repo reads, ask ONE batched clarifying question and stop.
 
-If you cannot resolve scope or intent from the topic + repo reads, ask ONE batched clarifying question and stop. Otherwise make the call and ship.
+Otherwise:
+- Read per <learn_repo_conventions>.
+- Write the spec file at the resolved path per <spec_shape> and <style_exemplar>.
+- Write `proposal.md` companion if using the `changes/*` shape (1–3 paragraphs: problem, proposed change, files affected).
+- Emit one line: `Spec written: <path>`.
 </write>
 
 <acceptance_criteria>
-- `Conventions: ...` and `Spec path: ...` lines emitted before the file was written.
 - The spec file exists at the resolved path with front matter, all <spec_shape> sections, and <style_exemplar> invariants satisfied.
 - Every Decision names at least one rejected alternative.
 - Every Acceptance Criterion is observable and falsifiable.
 - Files Changed table references real paths in this repo (or marks them `NEW`).
 - The spec contains no person names, no external repo references, no paths outside this repo.
-- No open questions in the output — decisions were made or a clarifying question was asked upfront.
+- Output is the spec file itself. Status message is one line: `Spec written: <path>`. No workflow suggestions, no narration.
 </acceptance_criteria>
-
-<output_format>
-```
-Conventions: <path> for <aspect>
-Spec path: <path>
-
-Title: <title>
-Decisions: <N> (<comma-separated one-word topics>)
-Acceptance criteria: <N>
-Out of scope: <N> items
-
-Next: review with `grill-me`, then `execute-spec`.
-```
-≤10 lines, no preamble, no narration, no open questions.
-</output_format>
