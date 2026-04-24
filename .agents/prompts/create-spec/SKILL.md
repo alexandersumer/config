@@ -159,32 +159,37 @@ Style invariants:
 - Length scales with scope. Single-change specs typically run 150–600 lines.
 </style_exemplar>
 
+<write>
+Emit one line: `Conventions: <path> for <aspect>` (≤4 lines).
+Emit one line: `Spec path: <path>`.
+Write the spec file at the resolved path.
+Write `proposal.md` companion if using the `changes/*` shape (1–3 paragraphs: problem, proposed change, files affected).
+Emit the final report per <output_format>.
+
+If you cannot resolve scope or intent from the topic + repo reads, ask ONE batched clarifying question and stop. Otherwise make the call and ship.
+</write>
+
 <acceptance_criteria>
-- A single line `Conventions: ...` was emitted before any file was written, citing concrete repo paths (or "no prior specs found" if none).
-- A single line `Spec path: <path>` was emitted before any file was written.
-- The spec file exists at the resolved path with the front matter, all sections, and the style rules satisfied.
-- Every Decision in the spec names at least one rejected alternative.
-- Every Acceptance Criterion in the spec is observable and falsifiable.
-- The Files Changed table references real paths in this repo (or marks them `NEW` for files to be created).
-- The spec contains no person names, no external repo references, and no paths outside this repo.
-- No follow-up `.md` files were created beyond the spec itself (and `proposal.md` companion when using the `changes/*` shape).
+- `Conventions: ...` and `Spec path: ...` lines emitted before the file was written.
+- The spec file exists at the resolved path with front matter, all <spec_shape> sections, and <style_exemplar> invariants satisfied.
+- Every Decision names at least one rejected alternative.
+- Every Acceptance Criterion is observable and falsifiable.
+- Files Changed table references real paths in this repo (or marks them `NEW`).
+- The spec contains no person names, no external repo references, no paths outside this repo.
+- No open questions in the output — decisions were made or a clarifying question was asked upfront.
 </acceptance_criteria>
 
 <output_format>
-Final message uses exactly this shape, ≤20 lines, no preamble, no sign-off:
-
 ```
-Conventions: <repo>:<path> for <aspect>
+Conventions: <path> for <aspect>
 Spec path: <path>
 
 Title: <title>
-Decisions: <N> (<short list of one-word topics>)
+Decisions: <N> (<comma-separated one-word topics>)
 Acceptance criteria: <N>
-Out of scope: <N>
+Out of scope: <N> items
 
-Open questions (if any):
-- <one line>
-
-Next: review with `grill-me`, then implement with `execute-spec`.
+Next: review with `grill-me`, then `execute-spec`.
 ```
+≤10 lines, no preamble, no narration, no open questions.
 </output_format>
