@@ -65,9 +65,24 @@ prompts:
         type: string
         required: false
 
-  - name: build-spec
-    description: "Build a spec or plan end-to-end as substantial production-grade work, with canonical patterns and robust verification"
-    content_file: prompts/build-spec/SKILL.md
+  - name: create-spec
+    description: "Author a tight, decision-rich technical spec ready to hand to execute-spec — no fluff, no filler"
+    content_file: prompts/create-spec/SKILL.md
+    inputs:
+      - name: topic
+        label: Topic or seed
+        description: One-line feature/topic, a problem statement, or a path to seed notes (e.g. `.plan/seed/foo.md`). Leave empty to infer from conversation context.
+        type: string
+        required: false
+      - name: out_path
+        label: Output path
+        description: Optional override for where the spec is written. Leave empty to auto-pick (`.plan/specs/`, `.plan/changes/<slug>/design.md`, or `docs/specs/` based on what already exists in the repo).
+        type: string
+        required: false
+
+  - name: execute-spec
+    description: "Execute a spec or plan end-to-end as substantial production-grade work, with canonical patterns and robust verification"
+    content_file: prompts/execute-spec/SKILL.md
     inputs:
       - name: spec
         label: Spec or plan
