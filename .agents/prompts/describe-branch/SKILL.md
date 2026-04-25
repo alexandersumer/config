@@ -7,7 +7,7 @@ Determine the base branch from the explicit upstream or remote default branch, f
 
 Write a PR title and description that follow the [Conventional Commits v1.0.0](https://www.conventionalcommits.org/en/v1.0.0/) message structure. The first line is the PR title and must be a valid Conventional Commit subject suitable for squash merge. The optional description is the Conventional Commit body and footers: explain what changed and why, call out breaking changes or follow-ups when applicable, and stay grounded only in the diff.
 
-This output is the canonical PR title and description. Any caller or SCM/code-review tool that uses this output must use the first line verbatim as the PR title and the rest as the PR description; do not substitute the branch name, a prose summary, or a tool-default title.
+This output is the canonical PR title and description. Any caller or SCM/code-review tool that uses this output must use the first line verbatim as the PR title and the rest as the PR description; do not substitute the branch name, a prose summary, an issue-key prefix, a sentence-case summary, or a tool-default title. If you cannot produce a first line that passes the Conventional Commit subject regex below, revise it until it does before returning output.
 
 Output format (exactly this shape, nothing else):
 
@@ -21,10 +21,13 @@ Output format (exactly this shape, nothing else):
 
 Acceptance criteria for the subject line:
 - Structure: `<type>[optional scope][!]: <description>`.
+- The complete first line must match this regex exactly: `^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9-]+\))?!?: [a-z].{0,70}[^.]$`.
 - `type` is one of: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`. Pick the type that reflects the dominant user-visible change in the diff (prefer `feat`/`fix` over `chore`/`refactor` when applicable).
 - `scope` is optional, lowercase, a single short noun in parentheses identifying the affected area (e.g. `auth`, `api`, `parser`); omit it if no single scope dominates.
 - Use `!` before the colon when the change is breaking and include a `BREAKING CHANGE:` footer.
 - `description` is lowercase, imperative mood ("add", not "adds"/"added"), no trailing period, ≤72 characters total including type/scope, and reads as a valid squash-merge subject.
+- Do not include issue keys, branch-name fragments, ticket prefixes, emojis, markdown, quotes, or labels before the Conventional Commit type.
+- Do not imitate non-conforming commit prefixes found in `git log`; normalize the title to the Conventional Commit structure above.
 
 Acceptance criteria for the body and footers:
 - Body is optional; include it when the subject alone is not enough for a reviewer to understand what changed and why.
@@ -35,3 +38,9 @@ Acceptance criteria for the body and footers:
 - No marketing language, no emojis, no issue keys unless they appear in the branch/commits.
 
 Type selection: `feat` for new user-visible capability, `fix` for incorrect behavior, `refactor` for restructuring with no behavior change, otherwise `docs`/`test`/`build`/`ci`. If multiple apply, pick the highest-impact one and mention secondary changes in the body.
+
+Before returning, silently validate the final answer:
+- The very first character of the response starts the Conventional Commit type; there is no preamble.
+- The first line matches `^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9-]+\))?!?: [a-z].{0,70}[^.]$`.
+- The first line is not a branch name, issue-key title, sentence-case prose summary, markdown heading, bullet, or quoted string.
+- If any check fails, rewrite the title and re-check before outputting.
