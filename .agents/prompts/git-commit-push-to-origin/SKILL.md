@@ -1,11 +1,24 @@
 ---
 name: git-commit-push-to-origin
-description: Stage all changes, commit with auto-generated Conventional Commits message, and push directly to origin
+description: Stage all changes, commit with auto-generated Conventional Commits message, and push directly to origin, preferring available SCM tools
 ---
 
 If the working tree is clean, stop.
 
+## Tool preference
+
+Before any source-control operation, check whether an SCM integration/tool is available for this repository host (Bitbucket, GitHub, GitLab, or otherwise).
+
+- Prefer the SCM tool when it can perform the operation safely and completely.
+- Use direct `git` only when no tool supports the operation, or when the operation is inherently local (for example: inspect the working tree, stage files, create a local commit).
+- Do not mix tool and direct-git approaches for the same remote operation unless the tool fails or lacks the required capability.
+- When falling back to direct `git`, briefly state why.
+
+## Commit and push flow
+
 Stage all changes. Read the staged diff. Write the commit message. Commit. Push to origin on the current branch.
+
+Use an available SCM tool for push/remote publication if it can perform the operation for the current host and branch. Otherwise, fall back to direct `git push origin <current-branch>`.
 
 ## Commit message
 

@@ -48,11 +48,11 @@ prompts:
         required: false
 
   - name: git-commit-push-to-origin
-    description: "Stage all changes, commit with auto-generated message, and push directly to origin"
+    description: "Stage all changes, commit with Conventional Commits message, and push to origin preferring SCM tools"
     content_file: prompts/git-commit-push-to-origin/SKILL.md
 
   - name: git-commit-push
-    description: "Stage all changes, commit with auto-generated message, and push"
+    description: "Stage all changes, commit with Conventional Commits message, and push preferring SCM tools"
     content_file: prompts/git-commit-push/SKILL.md
 
   - name: review-tests
@@ -66,7 +66,7 @@ prompts:
         required: false
 
   - name: create-spec
-    description: "Author a tight, decision-rich technical spec ready to hand to execute-spec — no fluff, no filler"
+    description: "Author a tight technical spec plus chunky implementation plan for execute-spec — no fluff, no filler"
     content_file: prompts/create-spec/SKILL.md
     inputs:
       - name: topic
