@@ -128,6 +128,16 @@ prompts:
     description: "Fetch the latest default branch and merge it into the current branch"
     content_file: prompts/sync-main/SKILL.md
 
+  - name: verify-and-fix
+    description: "Strictly verify the current implementation both empirically and formally, then fix every real defect found"
+    content_file: prompts/verify-and-fix/SKILL.md
+    inputs:
+      - name: scope
+        label: Verification scope
+        description: Optional path, function, behavior, or planning artifact to verify. Leave empty to infer the scope from conversation, recent changes, or the relevant planning artifact.
+        type: string
+        required: false
+
   - name: write-up
     description: "Document the preceding discussion as clear, fact-checked prose in chat"
     content_file: prompts/write-up/SKILL.md
