@@ -54,19 +54,19 @@ Reject vague cleanup, one-variable renames, helper/type/test/docs-only nibbles, 
 
 If artifacts track status, update the chosen chunk status in the relevant artifact.
 
+## Branch
+Before editing, compute a Conventional Commit subject `<type>(<optional-scope>): <description>` matching `^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9-]+\))?!?: [a-z].{0,70}[^.]$`.
+
+Derive the branch as `<type>/<kebab-case-description>` from that subject (include `<scope>` when useful, e.g. `feat/auth-add-pkce`). Use no ticket prefix, marketing language, or emojis. Create the branch with `git switch -c <branch-name>` from the fresh default-branch commit before making implementation edits.
+
 ## Implement
-Stay on default branch while reading. In parallel read artifact files, recent default-branch commits, touched modules, and existing tests.
+Now on the new branch, read recent default-branch commits, touched modules, and existing tests in parallel with any remaining artifact files.
 
 Match surrounding code: naming, error handling, test framework, comment density, dependencies. Build end to end: production behavior, wiring, tests catching at least one named mutation, required docs/config, rollout wrapper if the codebase already uses one for behavioral changes.
 
 Run local build/tests; fix application/test code until green. Disallowed: suppressions, lint baselines, dependency bumps, build-config edits, test-infra edits.
 
-## Branch and output
-Create `git switch -c <kebab-case-name>` from current commit. Branch name must derive from a Conventional Commits subject for the chunk:
-- Compute a Conventional Commit subject `<type>(<optional-scope>): <description>` matching `^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9-]+\))?!?: [a-z].{0,70}[^.]$`.
-- Derive the branch as `<type>/<kebab-case-description>` (include `<scope>` when useful, e.g. `feat/auth-add-pkce`).
-- No ticket prefix, no marketing language, no emojis.
-
+## Output
 Leave changes uncommitted; do not add/commit/push/open PR. Downstream `create-pull-request` can reuse this subject as the commit message and PR title.
 
 Final response exactly:

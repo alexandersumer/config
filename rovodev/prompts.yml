@@ -1,11 +1,16 @@
 prompts:
   - name: address-comments
-    description: "Look at PR review comments and robustly address legitimate ones, ignore noise"
+    description: "Address legitimate PR review comments with minimal code changes; ignore subjective or noisy feedback"
     content_file: prompts/address-comments/SKILL.md
     inputs:
       - name: pr_target
         label: PR number or URL
         description: PR number or URL to address comments on. Leave empty to use the current branch's PR.
+        type: string
+        required: false
+      - name: focus
+        label: Focus or instructions
+        description: Optional focus area or extra instructions for which comments to address.
         type: string
         required: false
 
@@ -47,12 +52,16 @@ prompts:
         type: string
         required: false
 
+  - name: git-commit-push
+    description: "Commit all staged and unstaged changes with a conventional commit, then push the current branch to origin"
+    content_file: prompts/git-commit-push-to-origin/SKILL.md
+
   - name: git-commit-push-to-origin
-    description: "Stage changes, commit with a Conventional Commits message, push to origin, and create or report the PR"
+    description: "Commit all staged and unstaged changes with a conventional commit, then push the current branch to origin"
     content_file: prompts/git-commit-push-to-origin/SKILL.md
 
   - name: create-pull-request
-    description: "Create a pull request for staged and unstaged changes"
+    description: "Create a pull request for staged and unstaged changes. Use when the user asks to create, open, or prepare a PR for the current working tree."
     content_file: prompts/create-pull-request/SKILL.md
 
   - name: review-tests
@@ -66,7 +75,7 @@ prompts:
         required: false
 
   - name: create-spec
-    description: "Author a tight planning artifact plus chunky implementation plan — no fluff, no filler"
+    description: "Author a tight planning artifact plus a chunky implementation plan — no fluff, no filler"
     content_file: prompts/create-spec/SKILL.md
     inputs:
       - name: topic
@@ -110,7 +119,7 @@ prompts:
         required: false
 
   - name: ship-next-chunk
-    description: "Pick the next chunk from the planning artifact set and implement it end-to-end on a fresh branch, ready for create-pull-request"
+    description: "Sync to the fresh default branch, pick the next artifact-backed chunk, implement it, and put it on a new branch"
     content_file: prompts/ship-next-chunk/SKILL.md
     inputs:
       - name: artifact
@@ -123,13 +132,18 @@ prompts:
         description: Backward-compatible alias for artifact. Prefer artifact for new usage.
         type: string
         required: false
+      - name: project_root
+        label: Project root path
+        description: Optional path that anchors artifact discovery in repos with multiple parallel plans. Leave empty to infer from the just-merged diff.
+        type: string
+        required: false
 
   - name: sync-main
     description: "Fetch the latest default branch and merge it into the current branch"
     content_file: prompts/sync-main/SKILL.md
 
   - name: verify-and-fix
-    description: "Strictly verify the current implementation both empirically and formally, then fix every real defect found"
+    description: "Verify the important scoped behavior empirically and by code reasoning, then fix real defects"
     content_file: prompts/verify-and-fix/SKILL.md
     inputs:
       - name: scope
