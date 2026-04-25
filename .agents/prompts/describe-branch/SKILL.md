@@ -3,7 +3,7 @@ name: describe-branch
 description: Generate a Conventional Commits PR title and description
 ---
 
-Determine the base branch (prefer the merge-base against `main`/`master`/`develop` or the explicit upstream). Get the cumulative branch diff with three-dot syntax: `git diff base...HEAD`, and inspect `git log base..HEAD --oneline` for additional intent signals. Skim file paths first to identify the primary components touched, then read the meaningful hunks; ignore generated files, lockfiles, and pure formatting noise.
+Determine the base branch from the explicit upstream or remote default branch, falling back to common default branch names only when necessary. Get the cumulative branch diff with three-dot syntax: `git diff base...HEAD`, and inspect `git log base..HEAD --oneline` for additional intent signals. Skim file paths first to identify the primary components touched, then read the meaningful hunks; ignore generated files, lockfiles, and pure formatting noise.
 
 Write a PR title and description that follow the [Conventional Commits v1.0.0](https://www.conventionalcommits.org/en/v1.0.0/) message structure. The first line is the PR title and must be a valid Conventional Commit subject suitable for squash merge. The optional description is the Conventional Commit body and footers: explain what changed and why, call out breaking changes or follow-ups when applicable, and stay grounded only in the diff.
 

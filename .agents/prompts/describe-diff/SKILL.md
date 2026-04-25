@@ -14,5 +14,5 @@ Acceptance criteria:
 
 Examples:
 - `add retry to http client`
-- `rename UserService to AccountService`
+- `rename user service to account service`
 - `fix off-by-one in pagination cursor`

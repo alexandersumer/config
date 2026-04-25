@@ -26,7 +26,7 @@ Rules:
 Do not ask; just act.
 
 - On a non-default branch: stay on it. Do not create, switch, or rename.
-- On the default branch (`main`/`master`): fetch the remote state, then create a short descriptive branch from `origin/<default>` and switch to it before committing. Use an SCM tool for the remote-state lookup/fetch if available; otherwise use `git fetch origin`.
+- On the default branch: detect the upstream remote and default branch (prefer the current branch's upstream remote and its HEAD, then common names such as `main`, `master`, or `develop`), fetch the remote state, then create a short descriptive branch from `<remote>/<default>` and switch to it before committing. Use an SCM tool for the remote-state lookup/fetch if available; otherwise use `git fetch <remote>`.
 
 ## Commit and push flow
 

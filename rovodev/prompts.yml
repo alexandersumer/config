@@ -66,27 +66,32 @@ prompts:
         required: false
 
   - name: create-spec
-    description: "Author a tight technical spec plus chunky implementation plan for execute-spec — no fluff, no filler"
+    description: "Author a tight planning artifact plus chunky implementation plan — no fluff, no filler"
     content_file: prompts/create-spec/SKILL.md
     inputs:
       - name: topic
         label: Topic or seed
-        description: One-line feature/topic, a problem statement, or a path to seed notes (e.g. `.plan/seed/foo.md`). Leave empty to infer from conversation context.
+        description: One-line feature/topic, a problem statement, or a path to seed notes/artifact (e.g. `.plan/seed/foo.md`, `docs/design/foo.md`). Leave empty to infer from conversation context.
         type: string
         required: false
       - name: out_path
         label: Output path
-        description: Optional override for where the spec is written. Leave empty to auto-pick (`.plan/specs/`, `.plan/changes/<slug>/design.md`, or `docs/specs/` based on what already exists in the repo).
+        description: Optional override for where the primary planning artifact is written. Leave empty to auto-pick from existing repo artifact conventions.
         type: string
         required: false
 
   - name: execute-spec
-    description: "Execute a spec or plan end-to-end as substantial production-grade work, with canonical patterns and robust verification"
+    description: "Execute a planning artifact end-to-end as substantial production-grade work, with canonical patterns and robust verification"
     content_file: prompts/execute-spec/SKILL.md
     inputs:
+      - name: artifact
+        label: Planning artifact
+        description: Path to a spec, plan, design, proposal, roadmap, or task artifact; a bare artifact name to resolve under repo planning directories; or inline instructions. Leave empty to discover the most relevant recent planning artifact.
+        type: string
+        required: false
       - name: spec
-        label: Spec or plan
-        description: Path to a spec/plan file (e.g. `.plan/foo.md`, `.projects/bar.md`), a plan name to resolve under those directories, or the inline spec text. Leave empty to discover the most recent plan in `.plan` or `.projects`.
+        label: Planning artifact (legacy alias)
+        description: Backward-compatible alias for artifact. Prefer artifact for new usage.
         type: string
         required: false
 
@@ -105,17 +110,17 @@ prompts:
         required: false
 
   - name: ship-next-chunk
-    description: "Pick the next chunk from the spec/plan and implement it end-to-end on a fresh branch, ready for git-commit-push"
+    description: "Pick the next chunk from the planning artifact set and implement it end-to-end on a fresh branch, ready for git-commit-push"
     content_file: prompts/ship-next-chunk/SKILL.md
     inputs:
       - name: focus
-        label: Focus or spec
-        description: Optional spec text or focus for the next chunk. Leave empty to discover the spec from the repo or conversation.
+        label: Focus or artifact
+        description: Optional artifact text or focus for the next chunk. Leave empty to discover the planning artifact set from the repo or conversation.
         type: string
         required: false
 
   - name: sync-main
-    description: "Fetch latest main and merge it into the current branch"
+    description: "Fetch the latest default branch and merge it into the current branch"
     content_file: prompts/sync-main/SKILL.md
 
   - name: write-up

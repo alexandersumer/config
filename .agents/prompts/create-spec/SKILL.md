@@ -1,16 +1,16 @@
 ---
 name: create-spec
-description: Author a tight technical spec plus a chunky implementation plan for execute-spec — no fluff, no filler
-argument-hint: "[optional: feature/topic, problem statement, or path to seed notes]"
+description: Author a tight planning artifact plus a chunky implementation plan — no fluff, no filler
+argument-hint: "[optional: feature/topic, problem statement, or path to seed notes/artifact]"
 inputs:
   - name: topic
     label: Topic or seed
-    description: One-line feature/topic, a problem statement, or a path to seed notes (e.g. `.plan/seed/foo.md`). Leave empty to infer from conversation context.
+    description: One-line feature/topic, a problem statement, or a path to seed notes/artifact (e.g. `.plan/seed/foo.md`, `docs/design/foo.md`). Leave empty to infer from conversation context.
     type: string
     required: false
   - name: out_path
     label: Output path
-    description: Optional override for where the spec is written. Leave empty to auto-pick (`.plan/specs/`, `.plan/changes/<slug>/design.md`, or `docs/specs/` based on what already exists in the repo). A sibling plan is always written too.
+    description: Optional override for where the primary planning artifact is written. Leave empty to auto-pick from existing repo artifact conventions. A companion implementation plan is always written too.
     type: string
     required: false
 ---
@@ -18,52 +18,53 @@ inputs:
 <intent>
 Produce TWO self-contained planning artifacts that another engineer (or `execute-spec`) can implement without follow-up questions:
 
-1. A tight, decision-rich technical spec: what to build, why, constraints, design, files, and observable acceptance.
+1. A tight, decision-rich primary artifact: what to build, why, constraints, design, files, and observable acceptance. This may be called a spec, design, proposal, RFC, change document, or another repo-native name.
 2. A tight, chunky implementation plan: how to ship substantial end-to-end work slices, favoring meaningful chunks over tiny PRs.
 
 Both artifacts must be ruthlessly scoped, concrete, and free of fluff.
 </intent>
 
 <inputs>
-- `topic`: the seed for the spec and plan — a one-liner, a problem statement, or a path to existing notes. If empty, infer from the preceding conversation. If still ambiguous on scope or intent, ask ONE batched clarifying question and stop.
-- `out_path`: optional override for where the spec file lands. The implementation plan must be written next to it using the same slug.
+- `topic`: the seed for the planning artifact and plan — a one-liner, a problem statement, or a path to existing notes/artifacts. If empty, infer from the preceding conversation. If still ambiguous on scope or intent, ask ONE batched clarifying question and stop.
+- `out_path`: optional override for where the primary planning artifact lands. The implementation plan should be written next to it using the same slug unless repo conventions clearly separate design/spec/proposal artifacts from plans.
 </inputs>
 
 <learn_repo_conventions>
 In one parallel batch of reads:
-- `git ls-files '.plan/*' '.projects/*' 'docs/specs/*' 'docs/design/*' 'docs/rfcs/*' '*/SPEC.md' '*/DESIGN.md' '*/PROPOSAL.md' '*/PLAN.md' '*/ROADMAP.md'`.
-- Read the 2 most recent existing planning artifacts. Mirror their front matter, heading order, and tone only where doing so preserves the requirements below.
-- `README.md`, `CONTRIBUTING.md`, `AGENTS.md` / `CLAUDE.md` if present.
+- `git ls-files '.plan/*' '.projects/*' 'docs/specs/*' 'docs/design/*' 'docs/plans/*' 'docs/rfcs/*' '*/SPEC.md' '*/spec.md' '*/DESIGN.md' '*/design.md' '*/PROPOSAL.md' '*/proposal.md' '*/PLAN.md' '*/plan.md' '*/ROADMAP.md' '*/roadmap.md' '*/TODO.md' '*/todo.md' '*/tasks.md'`.
+- Read up to 4 existing planning artifacts, prioritizing the most relevant by path, name, recency, and topic overlap. Mirror their front matter, heading order, and tone only where doing so preserves the requirements below.
+- `README.md`, `CONTRIBUTING.md`, and repo-local agent instruction files such as `AGENTS.md` if present.
 - Directories the topic touches, plus their nearest tests.
 
 External reads (reference repos, prior art outside this workspace) are for learning only. Translate any pattern into this repo's vocabulary before it appears in either artifact. Never cite an external path, repo, URL, article, tool vendor, benchmark, or person in the output unless the topic is specifically about that external thing.
 
-If no prior planning artifacts exist, use <spec_shape> and <plan_shape> and place both files under `.plan/specs/`.
+If no prior planning artifacts exist, use <primary_artifact_shape> and <plan_shape> and place both files under `.plan/` using clear names (`<slug>.md` and `<slug>-plan.md`).
 
 Before writing, emit up to four convention lines: `Conventions: <path> for <aspect>`.
 </learn_repo_conventions>
 
 <resolve_location>
-Pick the spec output path in this order:
+Pick the primary artifact output path in this order:
 1. `out_path` input if provided.
-2. If existing specs live under `.plan/specs/`, write `.plan/specs/<NN>-<slug>.md` (next available number).
-3. If existing specs live under `.plan/changes/<name>/`, write `.plan/changes/<slug>/design.md` and a sibling `proposal.md` (short "why + what changes" companion).
-4. If under `docs/specs/` or `docs/rfcs/`, mirror that.
-5. Otherwise create `.plan/specs/<slug>.md`.
+2. If existing artifacts for the same kind of work use a clear directory and filename convention, mirror that convention. Preserve repo-native names such as `design.md`, `proposal.md`, `spec.md`, `PLAN.md`, `ROADMAP.md`, numbered files, or change directories when they are the local convention.
+3. If the repo uses change directories such as `.plan/changes/<name>/`, write the primary artifact in a new change directory using the repo's established primary filename. Add companion artifacts only if companions already appear in that convention.
+4. If artifacts live under `.plan/specs/`, `docs/specs/`, `docs/design/`, `docs/plans/`, or `docs/rfcs/`, mirror that directory and numbering style.
+5. Otherwise create `.plan/<slug>.md`.
 
-Pick the plan output path as a sibling of the spec:
-- If the spec is named `design.md`, write `plan.md` in the same directory.
-- Otherwise write `<spec-stem>-plan.md` next to the spec. Example: `.plan/specs/004-search.md` gets `.plan/specs/004-search-plan.md`.
+Pick the implementation plan output path by convention:
+- If the repo already separates plans from specs/designs/proposals, mirror that separation.
+- If the primary artifact is inside a change directory, write `plan.md` in the same directory.
+- Otherwise write `<primary-artifact-stem>-plan.md` next to the primary artifact.
 
 `<slug>` is kebab-case, derived from the topic, ≤6 words.
 
 Before writing, emit two path lines:
-- `Spec path: <path>`
+- `Artifact path: <path>`
 - `Plan path: <path>`
 </resolve_location>
 
-<spec_shape>
-The spec MUST contain these sections in this order. Omit a section ONLY if it is genuinely N/A and say so in one line.
+<primary_artifact_shape>
+The primary planning artifact MUST contain these sections in this order unless the repo has an existing equivalent structure. Omit a section ONLY if it is genuinely N/A and say so in one line.
 
 ```
 ---
@@ -85,12 +86,12 @@ What exists today, what it cannot do, and why that matters now. Concrete, not "w
 - <observable outcome>
 
 **Non-Goals:**
-- <explicit exclusion> — <one-line reason or "deferred to <next milestone/spec>">
+- <explicit exclusion> — <one-line reason or "deferred to <next milestone/artifact>">
 - <explicit exclusion>
 
 ## Decisions
 
-### Decision 1: <one-line claim, e.g. "Use Zod for boundary validation">
+### Decision 1: <one-line claim, e.g. "Validate requests at the boundary">
 
 **Rationale:** 1–3 sentences citing constraints, existing patterns in the repo, or measured trade-offs.
 
@@ -106,7 +107,7 @@ What exists today, what it cannot do, and why that matters now. Concrete, not "w
 
 Just enough to implement. Include:
 - Module / package layout (one short tree if helpful).
-- Public interfaces or schemas as language-appropriate snippets (the repo's primary language, plus YAML/JSON for config) — small, complete, copyable. NOT walls of code.
+- Public interfaces, schemas, config, or contracts as language-appropriate snippets — small, complete, copyable. NOT walls of code.
 - Cross-module flow only when not obvious from the interfaces.
 
 Use sub-headings per component when it helps; otherwise one section is fine.
@@ -130,12 +131,12 @@ Given / When / Then, observable. Each criterion must be checkable by a test, a C
 
 ## Out of Scope
 
-- <item> — <one-line reason or pointer to follow-up spec>
+- <item> — <one-line reason or pointer to follow-up artifact>
 - <item>
 ```
 
-If the repo's existing-spec convention differs (e.g. an `## Impact` or `## Capabilities` section), adopt theirs only if the resulting spec remains observable, decision-rich, and scoped.
-</spec_shape>
+If the repo's existing planning-artifact convention differs (e.g. an `## Impact`, `## Capabilities`, or `## Proposal` section), adopt theirs only if the resulting artifact remains observable, decision-rich, and scoped.
+</primary_artifact_shape>
 
 <plan_shape>
 The implementation plan MUST be a separate file. It MUST favor chunky work: substantial, end-to-end slices that produce real reachable behavior and are worth reviewing. Do not design a sequence of tiny PRs for isolated helpers, renames, pure types, plumbing-only work, or one-file nibbles unless the entire project is genuinely that small.
@@ -146,7 +147,7 @@ The plan MUST contain these sections in this order:
 ---
 status: DRAFT
 slug: <kebab-case-slug>
-spec: <relative path to spec file>
+artifact: <relative path to primary planning artifact>
 date: <YYYY-MM-DD>
 ---
 
@@ -201,7 +202,7 @@ date: <YYYY-MM-DD>
 Chunk quality bar:
 - A chunk is too small if it only moves code around, adds scaffolding, updates types, or writes tests without shipping reachable behavior.
 - A chunk is too large if it cannot be reviewed coherently or lacks a single dominant acceptance signal.
-- Every chunk MUST map to one or more spec acceptance criteria.
+- Every chunk MUST map to one or more primary-artifact acceptance criteria or explicitly stated outcomes.
 </plan_shape>
 
 <style_exemplar>
@@ -235,12 +236,12 @@ Chunk:
 ```
 
 Style invariants:
-- The spec and plan MUST NOT name people, cite external repos, include irrelevant external references, or reference paths outside this repo. Use roles ("the implementer", "an operator").
+- The primary artifact and plan MUST NOT name people, cite external repos, include irrelevant external references, or reference paths outside this repo. Use roles ("the implementer", "an operator").
 - Use RFC-style "MUST / SHOULD / MAY" for implementer-facing invariants.
 - Tables for option matrices; code fences only for interface snippets, tree diagrams, and shape examples.
 - Concrete in-repo paths and type names — never "the appropriate module".
 - Tight prose only: no motivational framing, no generic best-practice filler, no duplicated rationale, no "future possibilities" unless in Deferred / Follow-up with a reason.
-- Length scales with scope. Single-change specs typically run 150–600 lines; plans should be shorter than the spec unless the rollout is unusually complex.
+- Length scales with scope. Single-change planning artifacts typically run 150–600 lines; plans should be shorter than the primary artifact unless the rollout is unusually complex.
 </style_exemplar>
 
 <write>
@@ -248,23 +249,23 @@ If you cannot resolve scope or intent from the topic + repo reads, ask ONE batch
 
 Otherwise:
 - Read per <learn_repo_conventions>.
-- Write the spec file at the resolved spec path per <spec_shape> and <style_exemplar>.
-- Write the plan file at the resolved plan path per <plan_shape> and <style_exemplar>.
-- Write `proposal.md` companion if using the `changes/*` shape (1–3 paragraphs: problem, proposed change, files affected). This does not replace the plan.
+- Write the primary planning artifact at the resolved artifact path per <primary_artifact_shape> and <style_exemplar>.
+- Write the implementation plan at the resolved plan path per <plan_shape> and <style_exemplar>.
+- Write companion artifacts such as `proposal.md` only when that companion is part of the repo's existing convention. This does not replace the plan.
 - Emit two lines:
-  - `Spec written: <path>`
+  - `Artifact written: <path>`
   - `Plan written: <path>`
 </write>
 
 <acceptance_criteria>
-- The spec file exists at the resolved path with front matter, all <spec_shape> sections, and <style_exemplar> invariants satisfied.
-- The plan file exists at the resolved path with front matter, all <plan_shape> sections, and <style_exemplar> invariants satisfied.
-- The plan references the spec by relative path.
-- Every Decision names at least one rejected alternative.
-- Every Acceptance Criterion is observable and falsifiable.
-- Every plan chunk has a concrete acceptance signal and maps to one or more spec acceptance criteria.
+- The primary planning artifact exists at the resolved path with front matter, <primary_artifact_shape> content or a repo-native equivalent, and <style_exemplar> invariants satisfied.
+- The implementation plan exists at the resolved path with front matter, <plan_shape> content or a repo-native equivalent, and <style_exemplar> invariants satisfied.
+- The plan references the primary artifact by relative path.
+- Every Decision names at least one rejected alternative unless the repo-native artifact structure has an equivalent decision/option rationale format.
+- Every Acceptance Criterion or outcome is observable and falsifiable.
+- Every plan chunk has a concrete acceptance signal and maps to one or more primary-artifact acceptance criteria or outcomes.
 - The plan favors chunky end-to-end slices: no standalone helper/type/test/docs-only chunks unless the whole project scope is that small and the plan says why.
 - Files Changed table and plan Files lists reference real paths in this repo (or mark them `NEW`).
 - Neither artifact contains person names, irrelevant external references, external repo references, URLs, or paths outside this repo.
-- Output is the files themselves. Final status is exactly two lines: `Spec written: <path>` and `Plan written: <path>`. No workflow suggestions, no narration.
+- Output is the files themselves. Final status is exactly two lines: `Artifact written: <path>` and `Plan written: <path>`. No workflow suggestions, no narration.
 </acceptance_criteria>
