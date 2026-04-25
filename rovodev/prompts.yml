@@ -30,7 +30,7 @@ prompts:
         required: true
 
   - name: describe-branch
-    description: "Generate a PR description (3 sentences + summary line)"
+    description: "Generate a Conventional Commits summary followed by a 3-sentence PR description"
     content_file: prompts/describe-branch/SKILL.md
 
   - name: describe-diff
@@ -48,11 +48,11 @@ prompts:
         required: false
 
   - name: git-commit-push-to-origin
-    description: "Stage all changes, commit with Conventional Commits message, and push to origin preferring SCM tools"
+    description: "Stage changes, commit with a Conventional Commits message, push to origin, and create or report the PR"
     content_file: prompts/git-commit-push-to-origin/SKILL.md
 
   - name: git-commit-push
-    description: "Stage all changes, commit with Conventional Commits message, and push preferring SCM tools"
+    description: "Stage changes, commit with a Conventional Commits message, push, and create or report the PR"
     content_file: prompts/git-commit-push/SKILL.md
 
   - name: review-tests
