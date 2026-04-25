@@ -71,7 +71,7 @@ prompts:
     inputs:
       - name: topic
         label: Topic or seed
-        description: One-line feature/topic, a problem statement, or a path to seed notes/artifact (e.g. `.plan/seed/foo.md`, `docs/design/foo.md`). Leave empty to infer from conversation context.
+        description: One-line feature/topic, problem statement, or path to seed notes/artifact. Leave empty to infer from conversation context.
         type: string
         required: false
       - name: out_path
@@ -86,7 +86,7 @@ prompts:
     inputs:
       - name: artifact
         label: Planning artifact
-        description: Path to a spec, plan, design, proposal, roadmap, or task artifact; a bare artifact name to resolve under repo planning directories; or inline instructions. Leave empty to discover the most relevant recent planning artifact.
+        description: Path/name/text for a spec, plan, design, proposal, roadmap, task artifact, or inline instructions. Leave empty to discover the most relevant recent artifact.
         type: string
         required: false
       - name: spec
@@ -115,7 +115,7 @@ prompts:
     inputs:
       - name: focus
         label: Focus or artifact
-        description: Optional artifact text or focus for the next chunk. Leave empty to discover the planning artifact set from the repo or conversation.
+        description: Optional artifact text or focus for the next chunk. Leave empty to discover the planning artifact set from repo/context.
         type: string
         required: false
 
