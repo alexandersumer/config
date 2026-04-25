@@ -113,9 +113,14 @@ prompts:
     description: "Pick the next chunk from the planning artifact set and implement it end-to-end on a fresh branch, ready for git-commit-push"
     content_file: prompts/ship-next-chunk/SKILL.md
     inputs:
+      - name: artifact
+        label: Project, plan, spec, or artifact
+        description: Optional project name, plan/spec/design/proposal/roadmap/task path or text, or focus for the next chunk. Leave empty to infer from repo/context.
+        type: string
+        required: false
       - name: focus
-        label: Focus or artifact
-        description: Optional artifact text or focus for the next chunk. Leave empty to discover the planning artifact set from repo/context.
+        label: Project/focus (legacy alias)
+        description: Backward-compatible alias for artifact. Prefer artifact for new usage.
         type: string
         required: false
 

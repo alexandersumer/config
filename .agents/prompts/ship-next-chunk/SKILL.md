@@ -1,11 +1,16 @@
 ---
 name: ship-next-chunk
 description: Sync to the fresh default branch, pick the next artifact-backed chunk, implement it, and put it on a new branch
-argument-hint: "[optional: project goal or focus]"
+argument-hint: "[optional: project, plan, spec, artifact path, or inline artifact]"
 inputs:
+  - name: artifact
+    label: Project, plan, spec, or artifact
+    description: Optional project name, plan/spec/design/proposal/roadmap/task path or text, or focus for the next chunk. Leave empty to infer from repo/context.
+    type: string
+    required: false
   - name: focus
-    label: Project focus
-    description: Optional artifact text or focus for the next chunk. Leave empty to discover the planning artifact set from repo/context.
+    label: Project/focus (legacy alias)
+    description: Backward-compatible alias for artifact. Prefer artifact for new usage.
     type: string
     required: false
   - name: project_root
@@ -29,12 +34,13 @@ Emit locality before artifact selection:
 - Output `Locality: <prefixes> (from <signal>)`.
 
 Resolve from first source that works:
-1. `focus` input as artifact text or discovery focus.
-2. `project_root` as search restriction.
-3. Repo artifacts scored by locality: `.plan`, `.projects`, `.tasks`, docs planning dirs, common `SPEC/DESIGN/PROPOSAL/PLAN/ROADMAP/TODO/tasks` filenames. Score path locality, references to merged paths, previous-branch tokens, implementation-plan role, recency. Read companion design/proposal/plan files in same dir or linked front matter.
-4. Conversation context.
+1. `artifact` input as project name, artifact path/text, or discovery focus.
+2. Legacy `focus` input the same way, if `artifact` is empty.
+3. `project_root` as search restriction.
+4. Repo artifacts scored by locality: `.plan`, `.projects`, `.tasks`, docs planning dirs, common `SPEC/DESIGN/PROPOSAL/PLAN/ROADMAP/TODO/tasks` filenames. Score path locality, references to merged paths, previous-branch tokens, implementation-plan role, recency. Read companion design/proposal/plan files in same dir or linked front matter.
+5. Conversation/repo context when nothing is specified.
 
-Emit `Artifact source: <path or "conversation" or "focus input">`. Ask, do not guess, if no artifact scores, top two are close, or chosen set lacks locality evidence.
+Emit `Artifact source: <path or "conversation" or "artifact input">`. Ask, do not guess, if no artifact scores, top two are close, or chosen set lacks locality evidence.
 
 ## Pick chunk
 A chunk qualifies only if:
@@ -61,7 +67,7 @@ Create `git switch -c <kebab-case-name>` from current commit. Branch name: verb 
 Final response exactly:
 ```
 Locality: <prefixes> (from <signal>)
-Artifact source: <path or "conversation" or "focus input">
+Artifact source: <path or "conversation" or "artifact input">
 Chunk: <name>
 Why: <one sentence tying it to the artifact set>
 Branch: <branch-name>
