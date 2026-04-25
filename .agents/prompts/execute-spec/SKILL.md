@@ -79,7 +79,7 @@ Before final report:
 ```
 Artifact: <path or "inline">
 Canonical patterns:
-- <repo>:<path> for <aspect>
+- <path> for <aspect>
 
 Shipped:
 - <behavior>: <files> — verified by `<command>` -> <result>

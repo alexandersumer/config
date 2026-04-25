@@ -1,9 +1,9 @@
 ---
-name: git-commit-push-to-origin
-description: Commit staged and unstaged changes with a Conventional Commit message, then push the current branch to origin
+name: git-commit-push
+description: Commit staged and unstaged changes with a Conventional Commit message, then push the current branch to its upstream
 ---
 
-Commit the current staged and unstaged changes, then push the current branch to `origin`.
+Commit the current staged and unstaged changes, then push the current branch to its configured upstream.
 
 Steps:
 1. Inspect `git status`, the current branch, the staged diff, and the unstaged diff.
@@ -12,7 +12,7 @@ Steps:
 4. Stage all intended working-tree changes exactly as they are. Do not edit files, broaden scope, clean up unrelated code, or create extra changes.
 5. Write one Conventional Commit subject that describes the dominant change: `<type>[optional scope]: <description>`.
 6. Commit with that subject. Add a short body only when the subject alone would hide important context.
-7. Push the current branch to `origin`, setting upstream if needed.
+7. Push to the current branch's upstream. If no upstream exists, push to a branch of the same name on `origin` and set upstream.
 
 Rules:
 - Use the current branch. Do not create, rename, switch, merge, rebase, or reset branches.

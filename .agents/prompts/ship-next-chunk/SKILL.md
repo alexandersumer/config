@@ -20,7 +20,7 @@ inputs:
     required: false
 ---
 
-The previous branch merged. Reset to a fresh default branch, read the relevant artifact set, pick the next chunk, implement it on a new branch, and leave it uncommitted.
+The previous branch merged. Refresh to a fresh default branch, read the relevant artifact set, pick the next chunk, implement it on a new branch, and leave it uncommitted.
 
 ## Refresh
 Preconditions: clean working tree; upstream remote has a resolvable default branch. If either fails, stop and report instead of stashing, discarding, or guessing.

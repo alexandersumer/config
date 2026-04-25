@@ -47,8 +47,12 @@ prompts:
         type: string
         required: false
 
+  - name: git-commit-push
+    description: "Stage changes, commit with a Conventional Commit message, and push the current branch"
+    content_file: prompts/git-commit-push/SKILL.md
+
   - name: git-commit-push-to-origin
-    description: "Stage changes, commit with a Conventional Commits message, push to origin, and create or report the PR"
+    description: "Stage changes, commit with a Conventional Commit message, and push the current branch to origin"
     content_file: prompts/git-commit-push-to-origin/SKILL.md
 
   - name: create-pull-request
@@ -110,7 +114,7 @@ prompts:
         required: false
 
   - name: ship-next-chunk
-    description: "Pick the next chunk from the planning artifact set and implement it end-to-end on a fresh branch, ready for create-pull-request"
+    description: "After a branch merges, refresh from default, pick the next artifact-backed chunk, implement it on a new branch, and leave it uncommitted"
     content_file: prompts/ship-next-chunk/SKILL.md
     inputs:
       - name: artifact
@@ -123,9 +127,14 @@ prompts:
         description: Backward-compatible alias for artifact. Prefer artifact for new usage.
         type: string
         required: false
+      - name: project_root
+        label: Project root path
+        description: Optional path that anchors artifact discovery in repos with multiple parallel plans. Leave empty to infer from the just-merged diff.
+        type: string
+        required: false
 
   - name: sync-main
-    description: "Fetch the latest default branch and merge it into the current branch"
+    description: "Fetch the latest default branch, merge it into the current branch, and complete the merge commit if needed"
     content_file: prompts/sync-main/SKILL.md
 
   - name: verify-and-fix
