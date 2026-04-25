@@ -51,7 +51,7 @@ Use update_todo. Preserve artifact order when it is already a plan unless depend
 For each task:
 - Build production code, wiring, docs/config, and tests together; unreachable code does not count.
 - Mirror canonical patterns. Reuse existing helpers/types/fixtures. Add dependencies/layers only when required by the artifact.
-- Tests cover happy path, failure path, and edge case; each new test would fail under a named plausible mutation.
+- Tests cover the important happy paths and realistic failure/edge cases for this scope; each new test should catch a named plausible mutation or regression.
 - Run local checks after each task. Fix application/test code. Disallowed: suppressions, baselines, dependency bumps, build-config edits, test-infra edits, skipped tests, shipped TODO placeholders.
 
 Parallelize independent reads/edits. Do not narrate intermediate steps.
@@ -90,7 +90,7 @@ Checks: `<command>` -> <pass summary>
 Deferred (if any):
 - <artifact item>: <one-line reason>
 
-Next: review-branch, then git-commit-push.
+Next: review-branch, then create-pull-request.
 ```
 Keep under 35 lines. No preamble, no sign-off.
 </output_format>

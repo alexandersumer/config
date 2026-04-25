@@ -10,7 +10,7 @@ inputs:
     required: false
 ---
 
-Apply the changes described below. If empty, infer them from the preceding conversation.
+Apply the changes described below. If empty, infer them from the preceding conversation. If the requested change is still ambiguous after reading the relevant files, ask one concise question instead of guessing.
 
 $ARGUMENTS
 

@@ -56,10 +56,10 @@ Use repo-native structure if it stays observable, decision-rich, and scoped. Oth
 - Front matter: `status: DRAFT`, `slug`, `date`.
 - Problem: current state, gap, why now, concrete repo references.
 - Goals / Non-Goals: observable outcomes and explicit exclusions.
-- Decisions: 4–10 material decisions, each with rationale and rejected alternatives unless the repo has an equivalent options format.
+- Decisions: only material decisions, each with rationale and rejected alternatives when there was a real trade-off. Do not invent decisions to hit a count.
 - Design: implementable module/package/interface/config details; small snippets only.
 - Files Changed: real repo paths or `NEW`, each with one-line change.
-- Acceptance Criteria: observable, falsifiable checks covering happy path, failure path, and edge case.
+- Acceptance Criteria: observable, falsifiable checks covering the important happy paths and realistic failure/edge cases for this scope.
 - Out of Scope: deferred items with reasons or follow-up artifact pointers.
 </primary_artifact_contract>
 
@@ -94,7 +94,7 @@ Plan written: <path>
 <acceptance_criteria>
 - Primary artifact and plan exist at resolved paths, with repo-native structure or the contracts above.
 - Plan references the primary artifact by relative path.
-- Decisions include rejected alternatives or equivalent option rationale.
+- Decisions include rationale; rejected alternatives appear only when there was a meaningful trade-off.
 - Criteria/outcomes are observable and falsifiable.
 - Chunks are chunky, end-to-end, mapped to outcomes, and have concrete acceptance signals.
 - Referenced paths are real or marked `NEW`.

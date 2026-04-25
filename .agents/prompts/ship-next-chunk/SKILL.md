@@ -23,9 +23,9 @@ inputs:
 The previous branch merged. Reset to a fresh default branch, read the relevant artifact set, pick the next chunk, implement it on a new branch, and leave it uncommitted.
 
 ## Refresh
-Preconditions: clean working tree; upstream remote has a resolvable default branch.
+Preconditions: clean working tree; upstream remote has a resolvable default branch. If either fails, stop and report instead of stashing, discarding, or guessing.
 
-Determine `<remote>` and `<default-branch>` from upstream HEAD, falling back to common default names only if needed. Switch to default branch. Run `git fetch <remote> <default-branch> --prune`, then `git reset --hard <remote>/<default-branch>`. Confirm clean status and `HEAD == <remote>/<default-branch>`.
+Determine `<remote>` and `<default-branch>` from upstream HEAD, falling back to common default names only if needed. Switch to default branch. Run `git fetch <remote> <default-branch> --prune`, then fast-forward to `<remote>/<default-branch>` when safe. Use `git reset --hard <remote>/<default-branch>` only after confirming the working tree is clean and the current branch is the default branch. Confirm clean status and `HEAD == <remote>/<default-branch>`.
 
 ## Discover artifact set
 Emit locality before artifact selection:
@@ -46,7 +46,7 @@ Emit `Artifact source: <path or "conversation" or "artifact input">`. Ask, do no
 A chunk qualifies only if:
 - It is next in the artifact set or unblocks the next item.
 - It has not shipped (`git log -50 <remote>/<default-branch>`, `git branch -a`).
-- Expected diff is about 1–10 files / 50–500 net lines.
+- Expected diff is reviewable, usually about 1–10 files / 50–500 net lines; use artifact needs over numeric targets.
 - It delivers one user-visible behavior or internal capability wired into real entry points.
 - It has one concrete acceptance signal.
 
@@ -67,7 +67,7 @@ Create `git switch -c <kebab-case-name>` from current commit. Branch name must d
 - Derive the branch as `<type>/<kebab-case-description>` (include `<scope>` when useful, e.g. `feat/auth-add-pkce`).
 - No ticket prefix, no marketing language, no emojis.
 
-Leave changes uncommitted; do not add/commit/push/open PR. Downstream `git-commit-push` will reuse this subject as the commit message and PR title.
+Leave changes uncommitted; do not add/commit/push/open PR. Downstream `create-pull-request` can reuse this subject as the commit message and PR title.
 
 Final response exactly:
 ```
@@ -86,7 +86,7 @@ Tests:
 
 Checks: <command run> -> <pass/fail summary>
 
-Next: run the git-commit-push prompt to ship it.
+Next: run the create-pull-request prompt to ship it.
 ```
 Under 25 lines. No preamble, summary, or sign-off.
 

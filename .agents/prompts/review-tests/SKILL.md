@@ -12,7 +12,7 @@ inputs:
 
 Determine the base branch. Get the cumulative branch diff with three-dot syntax: `git diff base...HEAD`. Read the production code under test before evaluating its tests. Narrow the review to `$ARGUMENTS` if provided.
 
-For each test in scope, run a mutation check: imagine a plausible bug in the production code it covers (off-by-one, swapped arguments, null vs empty, flipped conditional, missing await, wrong exception type). If the test would still pass under that mutation, strengthen it until it would fail.
+For each important behavior in scope, run a mutation check: imagine a plausible bug in the production code it covers (off-by-one, swapped arguments, null vs empty, flipped conditional, missing await, wrong exception type). Strengthen tests only when the missing assertion would catch a realistic regression.
 
 Apply these strengthening moves:
 - Replace weak assertions (existence checks, "not null", "size > 0", "no exception thrown") with specific ones on the actual values.
@@ -24,7 +24,7 @@ Out of scope: tests for trivial code (plain getters/setters, generated code, fra
 After edits, run the build to verify tests pass.
 
 Acceptance criteria:
-- Every strengthened test would catch at least one plausible mutation it previously missed.
+- Each strengthened test catches a realistic mutation or boundary case it previously missed.
 - No new tests for trivial code.
 - Build is green.
 - Final report lists each touched test as `<file>::<test_name> — <what changed and which mutation it now catches>`.

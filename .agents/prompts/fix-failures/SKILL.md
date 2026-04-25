@@ -24,7 +24,7 @@ For each failure:
 Allowed changes: application source code, test code that asserts correct behavior.
 Disallowed changes: per-site warning suppressions, lint/checker baselines, annotation-based opt-outs, wrapping code to dodge a checker, dependency version bumps, build config changes, test infrastructure changes.
 
-After each fix, re-run the full local check suite. Iterate until green.
+After each fix, run the smallest relevant check first, then the full local check suite once the targeted failure is resolved. Iterate until green or clearly blocked.
 
 Acceptance criteria:
 - Local check suite passes end-to-end.

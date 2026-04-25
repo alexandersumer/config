@@ -1,6 +1,6 @@
 ---
 name: address-comments
-description: Look at PR review comments and robustly address legitimate ones, ignore noise
+description: Address legitimate PR review comments with minimal code changes; ignore subjective or noisy feedback
 argument-hint: "[PR number or URL] [optional focus or instructions]"
 inputs:
   - name: pr_target
@@ -15,7 +15,7 @@ Target PR: the value supplied as input, or the current branch's PR if none was s
 Detect the repository host from the remote URL, then fetch all open review comments on the target PR using the matching SCM/code-review integration or CLI for that host. Read the cumulative branch diff using three-dot syntax (`git diff base...HEAD`) for full context.
 
 Classify every comment, then act:
-- **Address**: bugs, correctness issues, missing edge cases, security concerns, architectural problems, unclear naming, missing tests, factual mistakes. Legitimate regardless of tone.
+- **Address**: bugs, correctness issues, missing edge cases, security concerns, architectural problems, misleading naming that can cause misuse, missing tests for changed behavior, factual mistakes. Legitimate regardless of tone.
 - **Ignore**: subjective style preferences, rewrites that don't improve correctness or clarity, requests to add complexity, comments already satisfied by existing code, anything contradicting the branch's intent.
 
 For each addressed comment, read the relevant file and surrounding context, then apply the smallest fix that resolves it. Keep the change scoped to the comment; leave unrelated code alone. After all fixes, run the build if a build command is available.

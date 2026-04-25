@@ -51,9 +51,9 @@ prompts:
     description: "Stage changes, commit with a Conventional Commits message, push to origin, and create or report the PR"
     content_file: prompts/git-commit-push-to-origin/SKILL.md
 
-  - name: git-commit-push
-    description: "Stage changes, commit with a Conventional Commits message, push, and create or report the PR"
-    content_file: prompts/git-commit-push/SKILL.md
+  - name: create-pull-request
+    description: "Create a pull request for staged and unstaged changes"
+    content_file: prompts/create-pull-request/SKILL.md
 
   - name: review-tests
     description: "Review and strengthen tests in a branch for depth, mutation resilience, and correctness"
@@ -110,7 +110,7 @@ prompts:
         required: false
 
   - name: ship-next-chunk
-    description: "Pick the next chunk from the planning artifact set and implement it end-to-end on a fresh branch, ready for git-commit-push"
+    description: "Pick the next chunk from the planning artifact set and implement it end-to-end on a fresh branch, ready for create-pull-request"
     content_file: prompts/ship-next-chunk/SKILL.md
     inputs:
       - name: artifact
@@ -149,7 +149,7 @@ prompts:
         required: false
 
   - name: grill-me
-    description: "Interview the user relentlessly about a plan or design until reaching shared understanding, resolving each branch of the decision tree"
+    description: "Stress-test a plan or design with focused questions until the important decisions are clear"
     content_file: prompts/grill-me/SKILL.md
     inputs:
       - name: plan

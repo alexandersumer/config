@@ -12,7 +12,7 @@ inputs:
 
 Remove fully rolled out feature flag `$ARGUMENTS`. Keep the enabled behavior; delete the disabled paths.
 
-Find every reference before editing: full key string, enum/constant name, short name, any aliases, and any string variants. Search production code, test code, configuration, and documentation.
+Find references before editing: full key string, enum/constant name, obvious aliases, and common string variants. Search production code, tests, configuration, and docs, but do not chase unrelated substring matches once context proves they are different concepts.
 
 Apply the cleanup:
 - Replace each flag check with the enabled branch inlined; delete the disabled branch.
@@ -20,7 +20,7 @@ Apply the cleanup:
 - Remove the flag definition from its enum/config once no references remain.
 - Remove imports, helpers, and types left unused by the above.
 
-Run the build and test suite. Fix any failures by correcting missed references or updating tests that asserted disabled behavior. Iterate until green.
+Run targeted checks first, then the build/test suite when available. Fix failures by correcting missed references or updating tests that asserted disabled behavior. Iterate until green or clearly blocked.
 
 Acceptance criteria:
 - Zero references to the flag remain (verified by repeating the search).

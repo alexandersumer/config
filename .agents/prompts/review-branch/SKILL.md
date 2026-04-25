@@ -14,12 +14,12 @@ Determine the base branch. Get the cumulative branch diff with three-dot syntax:
 
 Scope: review the entire diff, or narrow to `$ARGUMENTS` if provided.
 
-Report every finding in these categories, regardless of how minor it seems within the category:
+Report material findings in these categories. Skip theoretical, low-impact, or already-mitigated issues unless they are likely to affect correctness, security, maintainability, or reviewability:
 - Correctness bugs (logic errors, off-by-one, null/empty handling, race conditions, incorrect error handling).
 - Security vulnerabilities (injection, auth/authz gaps, secret exposure, unsafe deserialization, SSRF, missing input validation).
 - Architectural flaws (wrong layer, broken invariants, leaky abstractions, hidden coupling).
-- Missing test coverage for any new or changed behavior.
-- Behavioral rollout safety: any new or modified runtime behavior that affects users must be behind a feature flag or gradual rollout. If the codebase uses a rollout/feature-flag SDK, the control and replacement blocks must contain real old and new code paths so metrics, logging, and alerting capture real execution; flag literal-only or boolean-hack blocks. Config-only changes, infra updates, and pure refactors with no behavioral change are exempt.
+- Missing test coverage for important new or changed behavior that could plausibly regress.
+- Behavioral rollout safety: user-impacting runtime behavior should follow the repo's normal rollout pattern. Flag missing or fake rollout wrappers only when the change is risky enough to need gradual exposure. Config-only changes, infra updates, and pure refactors with no behavioral change are exempt.
 
 Out of scope (do not report): formatting, naming preferences, comment wording, import order, or any purely subjective style point.
 
