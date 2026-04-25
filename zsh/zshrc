@@ -10,11 +10,6 @@ export ZSH_DISABLE_COMPFIX=true
 export PURE_PROMPT_SYMBOL="$"
 export PURE_PROMPT_VICMD_SYMBOL="$"
 
-# Project-specific
-# Keep sensitive project tokens out of this tracked config. Put local-only
-# exports in ~/.local/bin/env or your password manager shell hook.
-
-
 # Cache setup
 DISABLE_LS_COLORS=true
 export ZSH_CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/oh-my-zsh"
