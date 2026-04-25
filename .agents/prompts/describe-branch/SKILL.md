@@ -7,6 +7,8 @@ Determine the base branch from the explicit upstream or remote default branch, f
 
 Write a PR title and description that follow the [Conventional Commits v1.0.0](https://www.conventionalcommits.org/en/v1.0.0/) message structure. The first line is the PR title and must be a valid Conventional Commit subject suitable for squash merge. The optional description is the Conventional Commit body and footers: explain what changed and why, call out breaking changes or follow-ups when applicable, and stay grounded only in the diff.
 
+This output is the canonical PR title and description. Any caller or SCM/code-review tool that uses this output must use the first line verbatim as the PR title and the rest as the PR description; do not substitute the branch name, a prose summary, or a tool-default title.
+
 Output format (exactly this shape, nothing else):
 
 ```

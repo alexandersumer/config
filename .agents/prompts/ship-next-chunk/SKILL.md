@@ -62,7 +62,12 @@ Match surrounding code: naming, error handling, test framework, comment density,
 Run local build/tests; fix application/test code until green. Disallowed: suppressions, lint baselines, dependency bumps, build-config edits, test-infra edits.
 
 ## Branch and output
-Create `git switch -c <kebab-case-name>` from current commit. Branch name: verb + affected noun, no ticket prefix. Leave changes uncommitted; do not add/commit/push/open PR.
+Create `git switch -c <kebab-case-name>` from current commit. Branch name must derive from a Conventional Commits subject for the chunk:
+- Compute a Conventional Commit subject `<type>(<optional-scope>): <description>` matching `^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9-]+\))?!?: [a-z].{0,70}[^.]$`.
+- Derive the branch as `<type>/<kebab-case-description>` (include `<scope>` when useful, e.g. `feat/auth-add-pkce`).
+- No ticket prefix, no marketing language, no emojis.
+
+Leave changes uncommitted; do not add/commit/push/open PR. Downstream `git-commit-push` will reuse this subject as the commit message and PR title.
 
 Final response exactly:
 ```
@@ -70,6 +75,7 @@ Locality: <prefixes> (from <signal>)
 Artifact source: <path or "conversation" or "artifact input">
 Chunk: <name>
 Why: <one sentence tying it to the artifact set>
+Subject: <Conventional Commit subject for the chunk>
 Branch: <branch-name>
 
 Files:
@@ -92,5 +98,5 @@ Under 25 lines. No preamble, summary, or sign-off.
 - Diff stays within locality/project_root and touches 1–10 files unless artifact justifies otherwise.
 - New tests catch named mutation.
 - Final build/tests pass.
-- Current branch is new kebab-case branch; working tree has changes; no commit.
+- Current branch is a new kebab-case branch derived from a valid Conventional Commit subject; working tree has changes; no commit.
 - Final message matches output shape.

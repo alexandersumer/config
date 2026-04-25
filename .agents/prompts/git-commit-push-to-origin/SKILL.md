@@ -32,7 +32,7 @@ Use an available SCM tool for push/remote publication if it can perform the oper
 After a successful push to origin from a non-default branch, do not stop at a provider-generated create-PR URL when an SCM/code-review tool can create or discover pull requests.
 
 1. Use the available host-matched SCM/code-review tool to look for an existing open PR from the pushed branch into the repository's default branch.
-2. If an existing PR is found, output its URL and briefly note whether it already has a meaningful description. Do not overwrite or comment unless the user explicitly requested that.
+2. If an existing PR is found, output its URL and briefly note whether the title is a valid Conventional Commit subject and whether it already has a meaningful description. If the existing title is not a valid Conventional Commit subject and the SCM/code-review tool supports updating PR titles, update the title to the Conventional Commit subject derived from the commit(s); otherwise call out the non-conforming title explicitly. Do not overwrite descriptions or post comments unless the user explicitly requested that.
 3. If no PR exists and the SCM/code-review tool supports PR creation, create the PR using:
    - **title**: the Conventional Commit subject from the commit message.
    - **description**: a Conventional Commits body and optional footers grounded in the pushed diff. Explain what changed and why, include `BREAKING CHANGE:` when applicable, and do not force fixed sections. Do not create an empty-description PR when the subject alone is insufficient for review.
@@ -64,6 +64,6 @@ Acceptance criteria:
 - No emojis, no ticket IDs in the subject, no imitation of non-conforming prefixes seen in `git log`.
 - After pushing to origin from a non-default branch, the final response includes either an existing PR URL or the URL of the PR you created with the host-matched SCM/code-review tool.
 - A create-PR URL alone is not acceptable when a tool can create the PR.
-- Any newly created PR has a non-empty title and, when needed for review context, a non-empty description; the title is the Conventional Commit subject and the description is a Conventional Commits body with optional footers.
+- Any PR title (newly created or, when the tool supports updates, also pre-existing) is a valid Conventional Commit subject matching the commit subject regex above; never use the branch name, a prose summary, or a tool-default title. The PR description is a Conventional Commits body with optional footers, non-empty when the subject alone is insufficient for review.
 
 Examples: `docs: correct spelling of CHANGELOG`, `feat(lang): add Polish language`, `feat(api)!: drop support for legacy clients`.
