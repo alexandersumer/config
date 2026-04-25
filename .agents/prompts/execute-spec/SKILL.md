@@ -38,9 +38,9 @@ Before writing, read in parallel:
 - README/CONTRIBUTING/repo-local agent instructions.
 - Directories the artifact touches and nearest tests.
 - 2–3 sibling features in this repo with similar shape.
-- 1–2 reference repos or prior-art areas when useful; translate patterns into this repo’s vocabulary.
+- 1–2 prior-art areas inside this repo when useful; do not inspect external repositories unless the artifact explicitly names them.
 
-Emit `Canonical patterns: <repo>:<path> for <aspect>` lines before editing.
+Emit `Canonical patterns: <path> for <aspect>` lines before editing.
 </learn_patterns>
 
 <plan>
@@ -52,15 +52,15 @@ For each task:
 - Build production code, wiring, docs/config, and tests together; unreachable code does not count.
 - Mirror canonical patterns. Reuse existing helpers/types/fixtures. Add dependencies/layers only when required by the artifact.
 - Tests cover the important happy paths and realistic failure/edge cases for this scope; each new test should catch a named plausible mutation or regression.
-- Run local checks after each task. Fix application/test code. Disallowed: suppressions, baselines, dependency bumps, build-config edits, test-infra edits, skipped tests, shipped TODO placeholders.
+- Run the smallest relevant checks after each task. Run the full local suite before the final report only when available and reasonable for the repo; otherwise report the strongest targeted checks run. Fix application/test code. Disallowed: suppressions, baselines, dependency bumps, build-config edits, test-infra edits, skipped tests, shipped TODO placeholders.
 
 Parallelize independent reads/edits. Do not narrate intermediate steps.
 </implement>
 
 <verify>
 Before final report:
-- Full local build/test suite green; capture command and one-line pass summary.
-- Every acceptance signal demonstrated by an actual run.
+- Strongest relevant local checks are green; prefer the full suite when available and reasonable, otherwise state why targeted checks were used.
+- Every acceptance signal demonstrated by an actual run, or explicitly listed as not runnable with the reason.
 - Artifact set re-read; every requirement shipped or deferred with reason.
 - Diff stays inside artifact scope; incidental refactors only when needed.
 - Diff clears <scope_floor>.
@@ -71,7 +71,7 @@ Before final report:
 - Every artifact requirement shipped or deferred with reason.
 - New code reachable from real entry points.
 - Tests cover happy/failure/edge and named mutation.
-- Final checks pass without disallowed suppressions.
+- Final checks pass, or blocked checks are named with the blocking reason; no disallowed suppressions.
 - Working tree contains changes, uncommitted, on current branch.
 </acceptance_criteria>
 

@@ -52,7 +52,7 @@ A chunk qualifies only if:
 
 Reject vague cleanup, one-variable renames, helper/type/test/docs-only nibbles, and huge rewrites. If multiple qualify, pick the one with the clearest acceptance signal and announce: `Chunk: <name>. Why: <artifact-set reason>`.
 
-If artifacts track status, update the chosen chunk status in the relevant artifact.
+If artifacts track status, do not update status unless the user explicitly requested artifact bookkeeping; mention the chosen chunk in the final report instead.
 
 ## Implement
 Stay on default branch while reading. In parallel read artifact files, recent default-branch commits, touched modules, and existing tests.

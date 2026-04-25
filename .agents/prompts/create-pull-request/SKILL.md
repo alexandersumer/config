@@ -5,8 +5,8 @@ description: Create a pull request for staged and unstaged changes. Use when the
 
 Create a pull request for the staged and unstaged changes in the current repository.
 
-Use the repository's normal conventions and available tools to decide the right branch, commit message, remote, target branch, PR title, and PR description. Prefer integrated SCM/code-review tools when they can safely perform an operation; otherwise use standard git and provider CLI workflows.
+Use repository conventions, but do not invent missing intent. Inspect the diff and use the existing branch when it is suitable. If no branch exists, derive one from the dominant change. Use the repository's configured remote and target branch instead of guessing.
 
-Work autonomously: inspect the changes, commit what needs to be committed, publish the branch if needed, create or reuse the appropriate pull request, and finish with the PR URL plus a brief summary of what was done.
+Only include staged and unstaged changes already present in the working tree. Do not broaden scope, refactor opportunistically, or run unrelated cleanup. Commit what needs to be committed, publish the branch if needed, create or reuse the appropriate pull request, and finish with the PR URL plus a brief summary of what was done.
 
 If there are no changes to ship, stop and say so.

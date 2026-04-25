@@ -21,10 +21,10 @@ Apply these strengthening moves:
 
 Out of scope: tests for trivial code (plain getters/setters, generated code, framework boilerplate), framework or style conventions of the existing test suite.
 
-After edits, run the build to verify tests pass.
+After edits, run the smallest relevant test command first. Run the broader build/test command only when available and reasonable for the repo; otherwise report the targeted verification used.
 
 Acceptance criteria:
 - Each strengthened test catches a realistic mutation or boundary case it previously missed.
 - No new tests for trivial code.
-- Build is green.
+- Relevant tests are green; broader build/test results are included when run, or omitted with a one-line reason.
 - Final report lists each touched test as `<file>::<test_name> — <what changed and which mutation it now catches>`.

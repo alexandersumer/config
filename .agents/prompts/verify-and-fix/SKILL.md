@@ -13,7 +13,7 @@ inputs:
 Verify the important scoped behavior, then fix real defects. Be evidence-driven without turning the task into an exhaustive proof exercise.
 
 ## Resolve scope
-First source that yields one: `scope` input → recent changes (`git status`, `git diff base...HEAD`) → relevant planning artifact → conversation. Emit `Scope:` and `Source:` before any verification. If ambiguous or trivially small, ask.
+First source that yields one: `scope` input → recent changes (`git status`, `git diff base...HEAD`) → relevant planning artifact → conversation. Emit `Scope:` and `Source:` before any verification. If ambiguous, ask. If trivially small, verify it directly instead of expanding the scope.
 
 ## Specification under test
 List the important contract items with primary sources. Items without a source are open questions, not assumptions. Keep the list scoped to behavior that can realistically affect correctness or compatibility.
