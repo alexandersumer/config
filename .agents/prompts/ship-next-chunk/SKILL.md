@@ -75,7 +75,7 @@ If the spec file tracks status (checkboxes, status columns, headings like `In pr
 
 ## Implement
 
-Stay on the default branch while reading and exploring. Use file-reading and grep tools liberally to map existing patterns before writing code; explicit reading beats guessing on Opus 4.7.
+Stay on the default branch while reading and exploring. Use file-reading and grep tools liberally to map existing patterns before writing code; explicit reading beats guessing.
 
 Parallelize independent investigations in a single tool batch:
 - Spec file(s)

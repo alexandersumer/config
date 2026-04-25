@@ -1,6 +1,6 @@
 ---
 name: describe-diff
-description: Generate a <10 word phrase summarizing working changes
+description: Generate a ≤10 word phrase summarizing working changes
 ---
 
 If the working tree is clean, output `clean` and stop.

@@ -35,7 +35,7 @@ After a successful push to origin from a non-default branch, do not stop at a pr
 2. If an existing PR is found, output its URL and briefly note whether it already has a meaningful description. Do not overwrite or comment unless the user explicitly requested that.
 3. If no PR exists and the SCM/code-review tool supports PR creation, create the PR using:
    - **title**: the Conventional Commit subject from the commit message.
-   - **description**: a populated reviewer-ready body grounded in the pushed diff. Start with the same Conventional Commit subject, then include concise sections for summary, changes, verification, and deferred/follow-up items when applicable. Do not create an empty-description PR.
+   - **description**: a Conventional Commits body and optional footers grounded in the pushed diff. Explain what changed and why, include `BREAKING CHANGE:` when applicable, and do not force fixed sections. Do not create an empty-description PR when the subject alone is insufficient for review.
    - **source branch**: the pushed origin branch.
    - **target branch**: the repository default branch unless upstream configuration clearly indicates another target.
 4. If the SCM/code-review tool cannot create PRs, or PR creation fails for a reason outside your control, explicitly say why and then return the create-PR URL as a fallback.
@@ -64,6 +64,6 @@ Acceptance criteria:
 - No emojis, no ticket IDs in the subject, no imitation of non-conforming prefixes seen in `git log`.
 - After pushing to origin from a non-default branch, the final response includes either an existing PR URL or the URL of the PR you created with the host-matched SCM/code-review tool.
 - A create-PR URL alone is not acceptable when a tool can create the PR.
-- Any newly created PR has a non-empty title and description; the title is the Conventional Commit subject and the description starts with that same subject before the reviewer-facing body.
+- Any newly created PR has a non-empty title and, when needed for review context, a non-empty description; the title is the Conventional Commit subject and the description is a Conventional Commits body with optional footers.
 
 Examples: `docs: correct spelling of CHANGELOG`, `feat(lang): add Polish language`, `feat(api)!: drop support for legacy clients`.

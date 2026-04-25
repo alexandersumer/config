@@ -12,7 +12,7 @@ inputs:
 
 Target PR: the value supplied as input, or the current branch's PR if none was supplied.
 
-Fetch all open review comments on the target PR using whichever code-review CLI is available (`gh` for GitHub, equivalent for the host in use). Read the cumulative branch diff using three-dot syntax (`git diff base...HEAD`) for full context.
+Detect the repository host from the remote URL, then fetch all open review comments on the target PR using the matching SCM/code-review integration or CLI for that host. Read the cumulative branch diff using three-dot syntax (`git diff base...HEAD`) for full context.
 
 Classify every comment, then act:
 - **Address**: bugs, correctness issues, missing edge cases, security concerns, architectural problems, unclear naming, missing tests, factual mistakes. Legitimate regardless of tone.

@@ -30,11 +30,11 @@ prompts:
         required: true
 
   - name: describe-branch
-    description: "Generate a Conventional Commits summary followed by a 3-sentence PR description"
+    description: "Generate a Conventional Commits PR title and description"
     content_file: prompts/describe-branch/SKILL.md
 
   - name: describe-diff
-    description: "Generate a <10 word phrase summarizing working changes"
+    description: "Generate a ≤10 word phrase summarizing working changes"
     content_file: prompts/describe-diff/SKILL.md
 
   - name: fix-failures
