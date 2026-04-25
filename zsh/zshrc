@@ -11,7 +11,9 @@ export PURE_PROMPT_SYMBOL="$"
 export PURE_PROMPT_VICMD_SYMBOL="$"
 
 # Project-specific
-export TF_VAR_signalfx_auth_token="hVXGJsI3YPYJGBaTjPdRQQ"
+# Keep sensitive project tokens out of this tracked config. Put local-only
+# exports in ~/.local/bin/env or your password manager shell hook.
+
 
 # Cache setup
 DISABLE_LS_COLORS=true

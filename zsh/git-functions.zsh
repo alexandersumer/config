@@ -795,7 +795,7 @@ function reset_all_to_origin() {
             --help|-h)
                 printf 'usage: reset_all_to_origin [root] [--retries N] [--retry-delay SECS] [-- reset_to_origin args...]\n'
                 printf '\n'
-                printf 'Iterate every immediate subdirectory of ROOT (default: $HOME/atlassian),\n'
+                printf 'Iterate every immediate subdirectory of ROOT (default: current directory),\n'
                 printf 'and run reset_to_origin sequentially in each one that is a git\n'
                 printf 'repository. Non-git directories are skipped. Transient failures\n'
                 printf '(ssh/network) are retried with exponential backoff. Non-transient\n'
@@ -803,7 +803,7 @@ function reset_all_to_origin() {
                 printf 'is printed at the end.\n'
                 printf '\n'
                 printf 'arguments:\n'
-                printf '  root           directory to scan (default: $HOME/atlassian)\n'
+                printf '  root           directory to scan (default: current directory)\n'
                 printf '  --retries N    max attempts per repo on transient failure (default: 3, min: 1)\n'
                 printf '  --retry-delay  base seconds between retries, doubled each time (default: 2)\n'
                 printf '  --             forward remaining args to reset_to_origin\n'
@@ -847,7 +847,7 @@ function reset_all_to_origin() {
         return 1
     fi
 
-    root="${positional[1]:-$HOME/atlassian}"
+    root="${positional[1]:-$PWD}"
 
     if [[ -d "$root" ]]; then
         root="${root:A}"
