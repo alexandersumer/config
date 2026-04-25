@@ -1,6 +1,6 @@
 ---
 name: fix-failures
-description: Run build/test, fix failures without workarounds or suppressing errors
+description: Run relevant build/tests and fix real failures without suppressions
 argument-hint: "[optional: error output or stack trace]"
 inputs:
   - name: error_output

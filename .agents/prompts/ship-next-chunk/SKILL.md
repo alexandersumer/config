@@ -1,6 +1,6 @@
 ---
 name: ship-next-chunk
-description: Sync to the fresh default branch, pick the next artifact-backed chunk, implement it, and put it on a new branch
+description: Sync to the default branch, choose the next artifact-backed chunk, implement it on a new branch, and leave changes uncommitted
 argument-hint: "[optional: project, plan, spec, artifact path, or inline artifact]"
 inputs:
   - name: artifact
@@ -45,12 +45,12 @@ Emit `Artifact source: <path or "conversation" or "artifact input">`. Ask, do no
 ## Pick chunk
 A chunk qualifies only if:
 - It is next in the artifact set or unblocks the next item.
-- It has not shipped (`git log -50 <remote>/<default-branch>`, `git branch -a`).
+- It has not already been implemented (`git log -50 <remote>/<default-branch>`, `git branch -a`).
 - Expected diff is reviewable, usually about 1–10 files / 50–500 net lines; use artifact needs over numeric targets.
 - It delivers one user-visible behavior or internal capability wired into real entry points.
 - It has one concrete acceptance signal.
 
-Reject vague cleanup, one-variable renames, helper/type/test/docs-only nibbles, and huge rewrites. If multiple qualify, pick the one with the clearest acceptance signal and announce: `Chunk: <name>. Why: <artifact-set reason>`.
+Reject vague cleanup, one-variable renames, helper/type/test/docs-only chunks, and huge rewrites. If multiple qualify, pick the one with the clearest acceptance signal and announce: `Chunk: <name>. Why: <artifact-set reason>`.
 
 If artifacts track status, update the chosen chunk status in the relevant artifact.
 
@@ -67,7 +67,7 @@ Match surrounding code: naming, error handling, test framework, comment density,
 Run local build/tests; fix application/test code until green. Disallowed: suppressions, lint baselines, dependency bumps, build-config edits, test-infra edits.
 
 ## Output
-Leave changes uncommitted; do not add/commit/push/open PR. Downstream `create-pull-request` can reuse this subject as the commit message and PR title.
+Leave changes uncommitted; do not add/commit/push/open PR. Downstream `git-commit-push` can reuse this subject as the commit message and PR title.
 
 Final response exactly:
 ```
@@ -86,7 +86,7 @@ Tests:
 
 Checks: <command run> -> <pass/fail summary>
 
-Next: run the create-pull-request prompt to ship it.
+Next: run the git-commit-push prompt to commit, push, and open or update the PR.
 ```
 Under 25 lines. No preamble, summary, or sign-off.
 

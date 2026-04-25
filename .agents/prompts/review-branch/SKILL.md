@@ -1,6 +1,6 @@
 ---
 name: review-branch
-description: Review for bugs, security, architecture, and test coverage (no style nits)
+description: Review a branch for bugs, security issues, architecture risks, and test gaps
 argument-hint: "[optional: focus area]"
 inputs:
   - name: focus_area

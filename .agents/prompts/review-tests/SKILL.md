@@ -1,6 +1,6 @@
 ---
 name: review-tests
-description: Review and strengthen tests in a branch for depth, mutation resilience, and correctness
+description: Review and strengthen branch tests for meaningful coverage and regression resistance
 argument-hint: "[optional: focus area]"
 inputs:
   - name: focus_area

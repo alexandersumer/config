@@ -1,6 +1,6 @@
 prompts:
   - name: address-comments
-    description: "Address legitimate PR review comments with minimal code changes; ignore subjective or noisy feedback"
+    description: "Address actionable PR review comments with minimal code changes; skip subjective feedback"
     content_file: prompts/address-comments/SKILL.md
     inputs:
       - name: pr_target
@@ -15,7 +15,7 @@ prompts:
         required: false
 
   - name: apply-changes
-    description: "Implement requested changes with surgical precision"
+    description: "Implement requested changes narrowly and consistently"
     content_file: prompts/apply-changes/SKILL.md
     inputs:
       - name: changes
@@ -43,7 +43,7 @@ prompts:
     content_file: prompts/describe-diff/SKILL.md
 
   - name: fix-failures
-    description: "Run build/test, fix failures without workarounds or suppressing errors"
+    description: "Run relevant build/tests and fix real failures without suppressions"
     content_file: prompts/fix-failures/SKILL.md
     inputs:
       - name: error_output
@@ -53,19 +53,15 @@ prompts:
         required: false
 
   - name: git-commit-push
-    description: "Commit all staged and unstaged changes with a conventional commit, then push the current branch to origin"
-    content_file: prompts/git-commit-push-to-origin/SKILL.md
+    description: "Commit current changes with a conventional commit, push the branch, and create or update the pull request. Use for PR-oriented commit/push workflows."
+    content_file: prompts/git-commit-push/SKILL.md
 
   - name: git-commit-push-to-origin
-    description: "Commit all staged and unstaged changes with a conventional commit, then push the current branch to origin"
+    description: "Commit current changes with a conventional commit, then push the current branch to origin"
     content_file: prompts/git-commit-push-to-origin/SKILL.md
 
-  - name: create-pull-request
-    description: "Create a pull request for staged and unstaged changes. Use when the user asks to create, open, or prepare a PR for the current working tree."
-    content_file: prompts/create-pull-request/SKILL.md
-
   - name: review-tests
-    description: "Review and strengthen tests in a branch for depth, mutation resilience, and correctness"
+    description: "Review and strengthen branch tests for meaningful coverage and regression resistance"
     content_file: prompts/review-tests/SKILL.md
     inputs:
       - name: focus_area
@@ -75,7 +71,7 @@ prompts:
         required: false
 
   - name: create-spec
-    description: "Author a tight planning artifact plus a chunky implementation plan — no fluff, no filler"
+    description: "Author a concise planning artifact plus a reviewable implementation plan"
     content_file: prompts/create-spec/SKILL.md
     inputs:
       - name: topic
@@ -90,7 +86,7 @@ prompts:
         required: false
 
   - name: execute-spec
-    description: "Execute a planning artifact end-to-end as substantial production-grade work, with canonical patterns and robust verification"
+    description: "Implement a planning artifact with repo patterns, tests, and verification"
     content_file: prompts/execute-spec/SKILL.md
     inputs:
       - name: artifact
@@ -109,7 +105,7 @@ prompts:
     content_file: prompts/resolve-conflict/SKILL.md
 
   - name: review-branch
-    description: "Review for bugs, security, architecture, and test coverage (no style nits)"
+    description: "Review a branch for bugs, security issues, architecture risks, and test gaps"
     content_file: prompts/review-branch/SKILL.md
     inputs:
       - name: focus_area
@@ -119,7 +115,7 @@ prompts:
         required: false
 
   - name: ship-next-chunk
-    description: "Sync to the fresh default branch, pick the next artifact-backed chunk, implement it, and put it on a new branch"
+    description: "Sync to the default branch, choose the next artifact-backed chunk, implement it on a new branch, and leave changes uncommitted"
     content_file: prompts/ship-next-chunk/SKILL.md
     inputs:
       - name: artifact
@@ -143,7 +139,7 @@ prompts:
     content_file: prompts/sync-main/SKILL.md
 
   - name: verify-and-fix
-    description: "Verify the important scoped behavior empirically and by code reasoning, then fix real defects"
+    description: "Verify scoped behavior with code review and targeted checks, then fix real defects"
     content_file: prompts/verify-and-fix/SKILL.md
     inputs:
       - name: scope

@@ -1,6 +1,6 @@
 ---
 name: address-comments
-description: Address legitimate PR review comments with minimal code changes; ignore subjective or noisy feedback
+description: Address actionable PR review comments with minimal code changes; skip subjective feedback
 argument-hint: "[PR number or URL] [optional focus or instructions]"
 inputs:
   - name: pr_target

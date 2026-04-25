@@ -1,6 +1,6 @@
 ---
 name: verify-and-fix
-description: Verify the important scoped behavior empirically and by code reasoning, then fix real defects
+description: Verify scoped behavior with code review and targeted checks, then fix real defects
 argument-hint: "[optional: scope, file, function, behavior, or planning artifact]"
 inputs:
   - name: scope

@@ -1,6 +1,6 @@
 ---
 name: execute-spec
-description: Execute a planning artifact end-to-end as substantial production-grade work, with canonical patterns and robust verification
+description: Implement a planning artifact with repo patterns, tests, and verification
 argument-hint: "[optional: artifact path, plan name, or inline instructions]"
 inputs:
   - name: artifact
@@ -30,7 +30,7 @@ Read the artifact set end to end before coding. Read linked companions too. If b
 </resolve_artifact>
 
 <scope_floor>
-Ship the artifact’s intended scope. If too large, ship the next coherent vertical slice and name deferred work. Disqualified as substantial: docs/comments-only, types/interfaces-only, TODOs-only, one trivial helper, renames, reformatting. Use judgment; do not pad.
+Implement the artifact’s intended scope. If too large, complete the next coherent vertical slice and name deferred work. Disqualified as substantial: docs/comments-only, types/interfaces-only, TODOs-only, one trivial helper, renames, reformatting. Use judgment; do not pad.
 </scope_floor>
 
 <learn_patterns>
@@ -52,7 +52,7 @@ For each task:
 - Build production code, wiring, docs/config, and tests together; unreachable code does not count.
 - Mirror canonical patterns. Reuse existing helpers/types/fixtures. Add dependencies/layers only when required by the artifact.
 - Tests cover the important happy paths and realistic failure/edge cases for this scope; each new test should catch a named plausible mutation or regression.
-- Run local checks after each task. Fix application/test code. Disallowed: suppressions, baselines, dependency bumps, build-config edits, test-infra edits, skipped tests, shipped TODO placeholders.
+- Run local checks after each task. Fix application/test code. Disallowed: suppressions, baselines, dependency bumps, build-config edits, test-infra edits, skipped tests, committed TODO placeholders.
 
 Parallelize independent reads/edits. Do not narrate intermediate steps.
 </implement>
@@ -61,14 +61,14 @@ Parallelize independent reads/edits. Do not narrate intermediate steps.
 Before final report:
 - Full local build/test suite green; capture command and one-line pass summary.
 - Every acceptance signal demonstrated by an actual run.
-- Artifact set re-read; every requirement shipped or deferred with reason.
+- Artifact set re-read; every requirement implemented or deferred with reason.
 - Diff stays inside artifact scope; incidental refactors only when needed.
 - Diff clears <scope_floor>.
 </verify>
 
 <acceptance_criteria>
 - Artifact and canonical-pattern lines emitted before edits.
-- Every artifact requirement shipped or deferred with reason.
+- Every artifact requirement implemented or deferred with reason.
 - New code reachable from real entry points.
 - Tests cover happy/failure/edge and named mutation.
 - Final checks pass without disallowed suppressions.
@@ -81,7 +81,7 @@ Artifact: <path or "inline">
 Canonical patterns:
 - <repo>:<path> for <aspect>
 
-Shipped:
+Implemented:
 - <behavior>: <files> — verified by `<command>` -> <result>
 
 Diff size: <N files, ~M lines net>
@@ -90,7 +90,7 @@ Checks: `<command>` -> <pass summary>
 Deferred (if any):
 - <artifact item>: <one-line reason>
 
-Next: review-branch, then create-pull-request.
+Next: review-branch, then git-commit-push.
 ```
 Keep under 35 lines. No preamble, no sign-off.
 </output_format>

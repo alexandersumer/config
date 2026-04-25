@@ -1,6 +1,6 @@
 ---
 name: apply-changes
-description: Implement requested changes with surgical precision
+description: Implement requested changes narrowly and consistently
 argument-hint: "[optional: changes to apply]"
 inputs:
   - name: changes

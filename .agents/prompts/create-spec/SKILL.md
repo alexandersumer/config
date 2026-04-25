@@ -1,6 +1,6 @@
 ---
 name: create-spec
-description: Author a tight planning artifact plus a chunky implementation plan — no fluff, no filler
+description: Author a concise planning artifact plus a reviewable implementation plan
 argument-hint: "[optional: feature/topic, problem statement, or path to seed notes/artifact]"
 inputs:
   - name: topic
@@ -18,9 +18,9 @@ inputs:
 <intent>
 Create two implementation-ready planning artifacts:
 1. A primary artifact (spec/design/proposal/RFC/change doc/etc.) that states what to build, why, constraints, decisions, affected files, and observable acceptance.
-2. A companion implementation plan with chunky, reviewable, end-to-end slices.
+2. A companion implementation plan with reviewable, end-to-end slices.
 
-Keep both scoped, concrete, repo-native, and free of filler.
+Keep both scoped, concrete, and repo-native.
 </intent>
 
 <inputs>
@@ -65,8 +65,8 @@ Use repo-native structure if it stays observable, decision-rich, and scoped. Oth
 
 <plan_contract>
 The plan is a separate artifact with front matter referencing the primary artifact. It must include:
-- Strategy: delivery order, dependency chain, what must ship together.
-- Chunking Rules: prefer end-to-end slices; avoid helper/type/test/docs-only nibbles unless paired with behavior; avoid huge rewrites; each chunk has an observable acceptance signal.
+- Strategy: delivery order, dependency chain, what must be implemented together.
+- Chunking Rules: prefer end-to-end slices; avoid helper/type/test/docs-only chunks unless paired with behavior; avoid huge rewrites; each chunk has an observable acceptance signal.
 - Chunks: 2–5 for most medium work. Each chunk has Goal, Scope, Files, Acceptance signal, Depends on.
 - Verification: full-suite and targeted checks.
 - Deferred / Follow-up: item plus reason, or `None`.
@@ -75,7 +75,7 @@ Every chunk maps to primary-artifact criteria/outcomes. Too small: scaffolding/t
 </plan_contract>
 
 <style>
-- Use repo vocabulary and concrete in-repo paths/types; never “appropriate module”.
+- Use repo vocabulary and concrete in-repo paths/types; name the exact module, package, or file when known.
 - Use MUST/SHOULD/MAY for implementer-facing invariants.
 - Tables for matrices; code fences only for snippets/trees/examples.
 - No people names, irrelevant external refs, external repo refs, URLs, or paths outside this repo.
@@ -96,7 +96,7 @@ Plan written: <path>
 - Plan references the primary artifact by relative path.
 - Decisions include rationale; rejected alternatives appear only when there was a meaningful trade-off.
 - Criteria/outcomes are observable and falsifiable.
-- Chunks are chunky, end-to-end, mapped to outcomes, and have concrete acceptance signals.
+- Chunks are reviewable, end-to-end, mapped to outcomes, and have concrete acceptance signals.
 - Referenced paths are real or marked `NEW`.
 - No irrelevant external/person references.
 - Final response is exactly the two `... written:` lines.
