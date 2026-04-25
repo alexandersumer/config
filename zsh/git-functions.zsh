@@ -76,7 +76,7 @@ function _remove_worktrees_for_branches() {
     git worktree prune 2>/dev/null
 }
 
-function reset_to_origin() {
+function _reset_to_origin_single() {
     local remote="origin"
     local branch=""
     local arg
@@ -96,19 +96,6 @@ function reset_to_origin() {
 
     for arg in "$@"; do
         case "$arg" in
-            --help|-h)
-                printf 'usage: reset_to_origin [--sync] [--no-prune] [remote] [branch]\n'
-                printf '\n'
-                printf 'Reset to the default branch on the remote.\n'
-                printf 'By default, fetches only the target branch for a fast reset,\n'
-                printf 'prunes all other local branches, and updates remote tracking\n'
-                printf 'refs in the background.\n'
-                printf '\n'
-                printf 'options:\n'
-                printf '  --sync       fetch all remote refs synchronously before resetting\n'
-                printf '  --no-prune   skip pruning other local branches\n'
-                return 0
-                ;;
             --sync)
                 sync_fetch=1
                 ;;
@@ -776,7 +763,7 @@ function _is_transient_git_failure() {
         -- "$log_file"
 }
 
-function reset_all_to_origin() {
+function _reset_to_origin_multi() {
     local root=""
     local arg
     local -a reset_args=()
@@ -792,23 +779,6 @@ function reset_all_to_origin() {
     while (( parsing && $# > 0 )); do
         arg="$1"
         case "$arg" in
-            --help|-h)
-                printf 'usage: reset_all_to_origin [root] [--retries N] [--retry-delay SECS] [-- reset_to_origin args...]\n'
-                printf '\n'
-                printf 'Iterate every immediate subdirectory of ROOT (default: current directory),\n'
-                printf 'and run reset_to_origin sequentially in each one that is a git\n'
-                printf 'repository. Non-git directories are skipped. Transient failures\n'
-                printf '(ssh/network) are retried with exponential backoff. Non-transient\n'
-                printf 'failures are recorded immediately. The run never aborts; a summary\n'
-                printf 'is printed at the end.\n'
-                printf '\n'
-                printf 'arguments:\n'
-                printf '  root           directory to scan (default: current directory)\n'
-                printf '  --retries N    max attempts per repo on transient failure (default: 3, min: 1)\n'
-                printf '  --retry-delay  base seconds between retries, doubled each time (default: 2)\n'
-                printf '  --             forward remaining args to reset_to_origin\n'
-                return 0
-                ;;
             --retries)
                 if [[ -z "${2-}" || "$2" != <-> ]]; then
                     printf '\033[31merror: --retries requires a non-negative integer\033[0m\n' >&2
@@ -894,10 +864,10 @@ function reset_all_to_origin() {
         while (( attempt <= max_attempts )); do
             : > "$log_file"
             if (( ${#reset_args[@]} > 0 )); then
-                ( cd -- "$entry" && reset_to_origin "${reset_args[@]}" ) 2>&1 | tee "$log_file"
+                ( cd -- "$entry" && _reset_to_origin_single "${reset_args[@]}" ) 2>&1 | tee "$log_file"
                 status_code=${pipestatus[1]}
             else
-                ( cd -- "$entry" && reset_to_origin ) 2>&1 | tee "$log_file"
+                ( cd -- "$entry" && _reset_to_origin_single ) 2>&1 | tee "$log_file"
                 status_code=${pipestatus[1]}
             fi
 
@@ -947,4 +917,138 @@ function reset_all_to_origin() {
     fi
 
     return 0
+}
+
+function reset_to_origin() {
+    local arg
+    local -a forwarded_args=()
+    local -a multi_options=()
+    local -a positional=()
+    local -i parsing=1
+    local -i mode_force=0
+    local mode=""
+    local target=""
+    local target_abs=""
+
+    while (( parsing && $# > 0 )); do
+        arg="$1"
+        case "$arg" in
+            --help|-h)
+                printf 'usage: reset_to_origin [--single|--multi] [--retries N] [--retry-delay SECS] [path] [-- single-repo args...]\n'
+                printf '\n'
+                printf 'Reset git repositories to their default branch on the remote.\n'
+                printf '\n'
+                printf 'If PATH (or the current directory) is itself a git repository,\n'
+                printf 'runs in single-repo mode (equivalent to the previous reset_to_origin).\n'
+                printf 'Otherwise, scans every immediate subdirectory of PATH (default: cwd)\n'
+                printf 'and resets each one that is a git repository, with retries on\n'
+                printf 'transient ssh/network failures.\n'
+                printf '\n'
+                printf 'options:\n'
+                printf '  --single        force single-repo mode for the resolved path\n'
+                printf '  --multi         force multi-repo mode for the resolved path\n'
+                printf '  --retries N     multi-repo: max attempts per repo on transient failure (default: 3)\n'
+                printf '  --retry-delay S multi-repo: base seconds between retries, doubled each time (default: 2)\n'
+                printf '  --              forward remaining args to single-repo mode (per repo in multi)\n'
+                printf '\n'
+                printf 'single-repo args:\n'
+                printf '  --sync          fetch all remote refs synchronously before resetting\n'
+                printf '  --no-prune      skip pruning other local branches\n'
+                printf '  [remote]        remote name (default: origin)\n'
+                printf '  [branch]        target branch (default: remote default branch)\n'
+                return 0
+                ;;
+            --single)
+                mode="single"
+                mode_force=1
+                shift
+                ;;
+            --multi)
+                mode="multi"
+                mode_force=1
+                shift
+                ;;
+            --retries|--retry-delay)
+                if [[ -z "${2-}" ]]; then
+                    printf '\033[31merror: %s requires a value\033[0m\n' "$arg" >&2
+                    return 1
+                fi
+                multi_options+=("$arg" "$2")
+                shift 2
+                ;;
+            --)
+                shift
+                forwarded_args=("$@")
+                parsing=0
+                ;;
+            --*)
+                # Unknown leading option: treat as forwarded single-repo arg.
+                forwarded_args+=("$arg")
+                shift
+                ;;
+            *)
+                positional+=("$arg")
+                shift
+                ;;
+        esac
+    done
+
+    # Auto-detect mode if not forced.
+    if (( ! mode_force )); then
+        if (( ${#positional[@]} >= 1 )) && [[ -d "${positional[1]}" ]]; then
+            target="${positional[1]}"
+            target_abs="${target:A}"
+            if git -C "$target_abs" rev-parse --git-dir >/dev/null 2>&1; then
+                mode="single"
+            else
+                mode="multi"
+            fi
+        else
+            if git rev-parse --git-dir >/dev/null 2>&1; then
+                mode="single"
+            else
+                mode="multi"
+            fi
+        fi
+    fi
+
+    if [[ "$mode" == "single" ]]; then
+        if (( ${#multi_options[@]} > 0 )); then
+            printf '\033[31merror: --retries and --retry-delay only apply in multi-repo mode\033[0m\n' >&2
+            return 1
+        fi
+        if (( ${#positional[@]} >= 1 )) && [[ -d "${positional[1]}" ]]; then
+            target="${positional[1]}"
+            target_abs="${target:A}"
+            shift_positional=("${positional[@]:1}")
+            ( cd -- "$target_abs" && _reset_to_origin_single "${shift_positional[@]}" "${forwarded_args[@]}" )
+            return $?
+        fi
+        _reset_to_origin_single "${positional[@]}" "${forwarded_args[@]}"
+        return $?
+    fi
+
+    # multi mode: rebuild argv exactly as _reset_to_origin_multi expects:
+    # [root] [--retries N] [--retry-delay S] [-- forwarded_args...]
+    local -a multi_argv=()
+    if (( ${#positional[@]} >= 1 )); then
+        if (( ${#positional[@]} > 1 )); then
+            printf '\033[31merror: too many positional arguments\033[0m\n' >&2
+            return 1
+        fi
+        multi_argv+=("${positional[1]}")
+    fi
+    if (( ${#multi_options[@]} > 0 )); then
+        multi_argv+=("${multi_options[@]}")
+    fi
+    if (( ${#forwarded_args[@]} > 0 )); then
+        multi_argv+=("--" "${forwarded_args[@]}")
+    fi
+
+    _reset_to_origin_multi "${multi_argv[@]}"
+}
+
+# Backward-compatible alias for the previous multi-repo entry point.
+function reset_all_to_origin() {
+    reset_to_origin --multi "$@"
 }
