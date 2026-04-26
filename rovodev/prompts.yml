@@ -48,7 +48,7 @@ prompts:
     inputs:
       - name: path
         label: Scan path
-        description: Directory to scan. Leave empty to scan the whole repository with `.`.
+        description: Directory to scan. Empty or repo-like phrases mean `.`.
         type: string
         required: false
 

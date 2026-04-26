@@ -5,22 +5,18 @@ argument-hint: "[optional: scan path]"
 inputs:
   - name: path
     label: Scan path
-    description: Directory to scan. Leave empty to scan the whole repository with `.`.
+    description: Directory to scan. Empty or repo-like phrases mean `.`.
     type: string
     required: false
 ---
 
-Run Desloppify on this repo and follow its queue. Assume `desloppify` is already installed; if it is missing, stop and say so.
+Run Desloppify and follow its queue.
 
-Use `path` if provided; otherwise use `$ARGUMENTS`; otherwise use `.`.
+Path: use `path`; else use `$ARGUMENTS`; treat empty, `repo`, `repository`, `this repo`, `this repository`, `whole repo`, and `whole repository` as `.`.
 
-Before scanning, inspect top-level directories. Exclude only obvious non-source directories such as `.git`, `node_modules`, `vendor`, `dist`, `build`, `coverage`, caches, generated output, or worktrees:
+First run `command -v desloppify`. If missing, reply only: `desloppify is not available on PATH.`
 
-```bash
-desloppify exclude <path>
-```
-
-Ask before excluding anything questionable.
+Before scanning, exclude obvious non-source dirs only (`.git`, `node_modules`, `vendor`, `dist`, `build`, `coverage`, caches, generated output, worktrees). Ask before questionable excludes.
 
 Run:
 
@@ -29,14 +25,12 @@ desloppify scan --path <path>
 desloppify next
 ```
 
-Then loop:
-1. Fix exactly the current `desloppify next` item.
-2. Verify the fix with the smallest relevant repo check.
-3. Run the resolve command Desloppify gave for that item.
-4. Run `desloppify next` again.
+Loop until done or blocked:
+1. Fix the current `next` item.
+2. Run the smallest relevant check.
+3. Run its resolve command.
+4. Run `desloppify next`.
 
-Use `desloppify backlog` only to inspect broader work when the current queue is unclear. Use `desloppify plan` / `desloppify plan queue` only when reordering or grouping work would make the fixes cleaner.
+Use `backlog`, `plan`, or `plan queue` only when needed. Do not suppress, over-exclude, delete tests, or make cosmetic-only changes. Rescan before finishing when practical.
 
-Do not game the score with suppressions, unnecessary exclusions, deleted tests, or cosmetic churn. Fix root causes. Rescan periodically and before the final summary when practical.
-
-Final response: scan path, exclusions, files changed, checks run, final Desloppify state, and anything blocked.
+Final response: path, exclusions, changed files, checks, final Desloppify state, blockers.
