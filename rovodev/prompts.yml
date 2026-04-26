@@ -41,17 +41,6 @@ prompts:
   - name: describe-diff
     description: "Generate a ≤10 word phrase summarizing working changes"
     content_file: prompts/describe-diff/SKILL.md
-
-  - name: desloppify
-    description: "Improve code quality with a dependency-free review/fix loop"
-    content_file: prompts/desloppify/SKILL.md
-    inputs:
-      - name: path
-        label: Scan path
-        description: Directory to scan. Empty or repo-like phrases mean `.`.
-        type: string
-        required: false
-
   - name: fix-failures
     description: "Run relevant build/tests and fix real failures without suppressions"
     content_file: prompts/fix-failures/SKILL.md
