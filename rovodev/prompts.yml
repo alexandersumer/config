@@ -42,6 +42,21 @@ prompts:
     description: "Generate a ≤10 word phrase summarizing working changes"
     content_file: prompts/describe-diff/SKILL.md
 
+  - name: desloppify
+    description: "Install and run Desloppify's scan/next/resolve loop to improve code quality"
+    content_file: prompts/desloppify/SKILL.md
+    inputs:
+      - name: path
+        label: Scan path
+        description: Directory to scan with Desloppify. Leave empty to scan the whole repository with `.`.
+        type: string
+        required: false
+      - name: focus
+        label: Focus or instructions
+        description: Optional scope, priority, or extra quality-improvement instructions.
+        type: string
+        required: false
+
   - name: fix-failures
     description: "Run relevant build/tests and fix real failures without suppressions"
     content_file: prompts/fix-failures/SKILL.md
