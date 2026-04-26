@@ -1,11 +1,11 @@
 prompts:
   - name: address-comments
-    description: "Address actionable PR review comments with minimal code changes; skip subjective feedback"
+    description: "Address actionable pull request review comments with minimal code changes; skip subjective feedback"
     content_file: prompts/address-comments/SKILL.md
     inputs:
       - name: pr_target
-        label: PR number or URL
-        description: PR number or URL to address comments on. Leave empty to use the current branch's PR.
+        label: Pull request number or URL
+        description: Pull request number or URL to address comments on. Leave empty to use the current branch's pull request.
         type: string
         required: false
       - name: focus
@@ -35,7 +35,7 @@ prompts:
         required: true
 
   - name: describe-branch
-    description: "Generate a Conventional Commits PR title and description"
+    description: "Generate a Conventional Commits pull request title and description"
     content_file: prompts/describe-branch/SKILL.md
 
   - name: describe-diff
