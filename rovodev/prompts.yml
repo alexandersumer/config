@@ -100,6 +100,21 @@ prompts:
         type: string
         required: false
 
+  - name: reconcile-plan
+    description: "Reconcile planning artifacts with current codebase and branch state"
+    content_file: prompts/reconcile-plan/SKILL.md
+    inputs:
+      - name: artifact
+        label: Planning artifact
+        description: Optional spec, plan, project, task path/name/text, or discovery focus. Leave empty to discover relevant artifacts.
+        type: string
+        required: false
+      - name: scope
+        label: Reconciliation scope
+        description: Optional code path, branch diff, project root, behavior, or branch/default-branch comparison scope. Leave empty to infer from branch and artifact locality.
+        type: string
+        required: false
+
   - name: resolve-conflict
     description: "Resolve merge conflicts preserving branch intent"
     content_file: prompts/resolve-conflict/SKILL.md

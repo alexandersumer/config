@@ -41,12 +41,14 @@ link_file() {
   fi
 }
 
+# --- prompt content ---
+# Rovo Dev may resolve content_file entries relative to either the symlink path
+# (~/.rovodev/prompts.yml) or the real prompts.yml path after resolving symlinks
+# (<repo>/rovodev/prompts.yml). Keep both bases valid.
+link_file "$SCRIPT_DIR/.agents/prompts" "$ROVODEV_DIR/prompts" "repo prompts"
+
 # --- prompts.yml ---
 link_file "$ROVODEV_DIR/prompts.yml" "$GLOBAL_DIR/prompts.yml" "prompts.yml"
-
-# Rovo Dev resolves content_file entries relative to ~/.rovodev/prompts.yml.
-# Keep prompt content under ~/.rovodev as well, instead of claiming a generic
-# ~/.agents namespace.
 link_file "$SCRIPT_DIR/.agents/prompts" "$GLOBAL_DIR/prompts" "prompts"
 
 echo ""
