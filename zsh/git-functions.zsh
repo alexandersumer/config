@@ -76,20 +76,156 @@ function _remove_worktrees_for_branches() {
     git worktree prune 2>/dev/null
 }
 
+function _cleanup_fetch_ref_failure() {
+    local git_dir="$1"
+    local remote="$2"
+    local fetch_output="$3"
+    local cleanup_round="$4"
+    local refs_to_delete ref ref_path log_path _p _dir _stop _cleanup_dir
+    local -a refs_array=()
+    local -a cleaned_refs=()
+
+    if (( cleanup_round == 0 )); then
+        printf '\033[33mfetch failed, cleaning up stale refs and retrying…\033[0m\n' >&2
+
+        # Remove leftover lock files first. Avoid broad remote-tracking ref
+        # deletion here because the fast path fetches only one branch; targeted
+        # cleanup below removes only refs named in git's failure output.
+        for _cleanup_dir in "$git_dir/refs/remotes/$remote" "$git_dir/logs/refs/remotes/$remote"; do
+            [[ -d "$_cleanup_dir" ]] || continue
+            find "$_cleanup_dir" -name "*.lock" -delete 2>/dev/null
+        done
+    fi
+
+    refs_to_delete=$(printf '%s\n' "$fetch_output" \
+        | grep -E "(cannot lock ref|cannot update the ref|removing stale tracking ref|is at [0-9a-f]+ but expected)" \
+        | grep -oE "refs/remotes/${remote}/[^'[:space:]\":]+" \
+        | awk '!seen[$0]++')
+
+    if [[ -z "$refs_to_delete" ]]; then
+        return 0
+    fi
+
+    refs_array=(${(f)refs_to_delete})
+    for ref in "${refs_array[@]}"; do
+        ref_path="$git_dir/$ref"
+        log_path="$git_dir/logs/$ref"
+
+        rm -f "${ref_path}.lock" 2>/dev/null
+
+        if [[ -f "$ref_path" ]]; then
+            printf '\033[33mwarning: removing stale ref %s\033[0m\n' "$ref" >&2
+            rm -f "$ref_path"
+            cleaned_refs+=("$ref")
+        elif [[ -d "$ref_path" ]]; then
+            printf '\033[33mwarning: removing stale ref directory %s\033[0m\n' "$ref" >&2
+            rm -rf "$ref_path"
+            cleaned_refs+=("$ref")
+        fi
+
+        if [[ -f "$git_dir/packed-refs" ]] && grep -q " ${ref}$" "$git_dir/packed-refs" 2>/dev/null; then
+            printf '\033[33mwarning: removing stale packed ref %s\033[0m\n' "$ref" >&2
+            sed -i '' "\| ${ref}$|d" "$git_dir/packed-refs"
+            if [[ "${cleaned_refs[-1]:-}" != "$ref" ]]; then
+                cleaned_refs+=("$ref")
+            fi
+        fi
+
+        rm -f "${log_path}.lock" "$log_path" 2>/dev/null
+        [[ -d "$log_path" ]] && rm -rf "$log_path"
+
+        # Resolve D/F conflicts: a parent of the failing ref may exist as a
+        # file (old branch) when a child path (new branch) needs it to be a
+        # directory.
+        for _p in "$ref_path" "$log_path"; do
+            _dir="${_p%/*}"
+            _stop="$git_dir/refs/remotes/$remote"
+            [[ "$_p" == "$log_path" ]] && _stop="$git_dir/logs/refs/remotes/$remote"
+            while [[ "$_dir" != "$_stop" && "$_dir" == "${_stop}/"* ]]; do
+                if [[ -f "$_dir" ]]; then
+                    printf '\033[33mwarning: removing file blocking directory %s\033[0m\n' "${_dir#$git_dir/}" >&2
+                    rm -f "$_dir"
+                fi
+                _dir="${_dir%/*}"
+            done
+        done
+    done
+
+    if (( ${#cleaned_refs[@]} > 0 )); then
+        printf '%s\n' "${cleaned_refs[@]}"
+    fi
+}
+
+function _fetch_with_ref_cleanup() {
+    local git_dir="$1"
+    local remote="$2"
+    shift 2
+    local fetch_output fetch_status=0 stale_output cleaned_output
+    local -i cleanup_rounds=0
+    local -i max_cleanup_rounds=3
+    local -a fetch_cmd=("$@")
+    local -a manual_deleted_refs=()
+    local -a stale_fetch_refs=()
+    local -a cleaned_refs=()
+
+    while true; do
+        fetch_output=$("${fetch_cmd[@]}" 2>&1)
+        fetch_status=$?
+
+        if (( fetch_status == 0 )); then
+            stale_output=$(printf '%s\n' "$fetch_output" \
+                | grep "removing stale tracking ref" \
+                | grep -oE "refs/remotes/${remote}/[^'[:space:]\":]+" \
+                | awk '!seen[$0]++')
+            if [[ -n "$stale_output" ]]; then
+                stale_fetch_refs=(${(f)stale_output})
+            fi
+            break
+        fi
+
+        if (( cleanup_rounds >= max_cleanup_rounds )); then
+            printf '%s\n' "$fetch_output" >&2
+            break
+        fi
+
+        printf '%s\n' "$fetch_output" >&2
+        cleaned_output=$(_cleanup_fetch_ref_failure "$git_dir" "$remote" "$fetch_output" "$cleanup_rounds")
+        if [[ -n "$cleaned_output" ]]; then
+            cleaned_refs=(${(f)cleaned_output})
+            manual_deleted_refs+=("${cleaned_refs[@]}")
+        fi
+
+        (( cleanup_rounds++ ))
+        if (( cleanup_rounds < max_cleanup_rounds )); then
+            sleep $(( cleanup_rounds < 3 ? cleanup_rounds : 3 ))
+        fi
+    done
+
+    if (( fetch_status != 0 )); then
+        printf '\033[31merror: git fetch failed after cleanup attempts\033[0m\n' >&2
+        return $fetch_status
+    fi
+
+    if (( ${#manual_deleted_refs[@]} > 0 )); then
+        printf '\033[33mcleaned up stale tracking refs:\033[0m\n'
+        printf '  %s\n' "${manual_deleted_refs[@]}"
+    fi
+
+    if (( ${#stale_fetch_refs[@]} > 0 )); then
+        printf '\033[33mgit fetch pruned stale tracking refs:\033[0m\n'
+        printf '  %s\n' "${stale_fetch_refs[@]}"
+    fi
+
+    return 0
+}
+
 function _reset_to_origin_single() {
     local remote="origin"
     local branch=""
     local arg
     local -a positional_args=()
-    local fetch_output fetch_status=0 refs_to_delete stale_output
-    local ref ref_path log_path remote_head_ref branch_candidate upstream_ref
-    local _p _dir _stop
-    local -a stale_fetch_refs=()
-    local -a manual_deleted_refs=()
-    local -a refs_array=()
+    local remote_head_ref branch_candidate upstream_ref
     local -a branch_candidates=()
-    local -i cleanup_rounds=0
-    local -i max_cleanup_rounds=3
     local -i branch_from_arg=0
     local -i sync_fetch=0
     local -i do_prune=1
@@ -123,7 +259,10 @@ function _reset_to_origin_single() {
     fi
 
     local git_dir
-    git_dir=$(git rev-parse --git-dir 2>/dev/null)
+    git_dir=$(git rev-parse --git-common-dir 2>/dev/null)
+    if [[ -z "$git_dir" ]]; then
+        git_dir=$(git rev-parse --git-dir 2>/dev/null)
+    fi
     if [[ -z "$git_dir" ]]; then
         printf '\033[31merror: not in a git repository\033[0m\n' >&2
         return 1
@@ -136,118 +275,9 @@ function _reset_to_origin_single() {
 
     if (( sync_fetch )); then
         # ── Synchronous full fetch ────────────────────────────────────
-        # Fetch with retry.  Only perform expensive ref cleanup when
-        # the fetch actually fails (stale refs, D/F conflicts, etc.).
-        while true; do
-            fetch_output=$(git fetch --prune "$remote" 2>&1)
-            fetch_status=$?
-
-            if (( fetch_status == 0 )); then
-                # Collect any refs that git fetch itself pruned (informational).
-                stale_output=$(printf '%s\n' "$fetch_output" \
-                    | grep "removing stale tracking ref" \
-                    | grep -oE "refs/remotes/${remote}/[^'[:space:]\":]+"\
-                    | awk '!seen[$0]++')
-                if [[ -n "$stale_output" ]]; then
-                    stale_fetch_refs=(${(f)stale_output})
-                fi
-                break
-            fi
-
-            # Fetch failed — bail out if we've exhausted cleanup attempts.
-            if (( cleanup_rounds >= max_cleanup_rounds )); then
-                printf '%s\n' "$fetch_output" >&2
-                break
-            fi
-
-            printf '%s\n' "$fetch_output" >&2
-
-            # ── On first failure, do broad cleanup ─────────────────────
-            if (( cleanup_rounds == 0 )); then
-                printf '\033[33mfetch failed, cleaning up stale refs and retrying…\033[0m\n'
-
-                # Remove stale .lock files and subdirectories that cause
-                # D/F conflicts.  Top-level loose ref files stay so git
-                # fetch can do an incremental update.
-                local _cleanup_dir
-                for _cleanup_dir in "$git_dir/refs/remotes/$remote" "$git_dir/logs/refs/remotes/$remote"; do
-                    [[ -d "$_cleanup_dir" ]] || continue
-                    find "$_cleanup_dir" \( -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} + \) -o \( -name "*.lock" -delete \) 2>/dev/null
-                done
-
-                # Purge packed-refs entries for this remote.  Stale packed
-                # entries with outdated hashes cause "is at X but expected
-                # Y" errors that persist across fetches.
-                if [[ -f "$git_dir/packed-refs" ]]; then
-                    sed -i '' "/ refs\/remotes\/${remote}\//d" "$git_dir/packed-refs"
-                fi
-            fi
-
-            # ── Extract and fix specific problematic refs ──────────────
-            refs_to_delete=$(printf '%s\n' "$fetch_output" \
-                | grep -E "(cannot lock ref|cannot update the ref|removing stale tracking ref|is at [0-9a-f]+ but expected)" \
-                | grep -oE "refs/remotes/${remote}/[^'[:space:]\":]+" \
-                | awk '!seen[$0]++')
-
-            if [[ -n "$refs_to_delete" ]]; then
-                refs_array=(${(f)refs_to_delete})
-                for ref in "${refs_array[@]}"; do
-                    ref_path="$git_dir/$ref"
-                    log_path="$git_dir/logs/$ref"
-
-                    # Remove lock files
-                    rm -f "${ref_path}.lock" 2>/dev/null
-
-                    # Remove loose ref (file or directory)
-                    if [[ -f "$ref_path" ]]; then
-                        printf '\033[33mwarning: removing stale ref %s\033[0m\n' "$ref"
-                        rm -f "$ref_path"
-                        manual_deleted_refs+=("$ref")
-                    elif [[ -d "$ref_path" ]]; then
-                        printf '\033[33mwarning: removing stale ref directory %s\033[0m\n' "$ref"
-                        rm -rf "$ref_path"
-                        manual_deleted_refs+=("$ref")
-                    fi
-
-                    # Remove from packed-refs if present
-                    if [[ -f "$git_dir/packed-refs" ]] && grep -q " ${ref}$" "$git_dir/packed-refs" 2>/dev/null; then
-                        printf '\033[33mwarning: removing stale packed ref %s\033[0m\n' "$ref"
-                        sed -i '' "\| ${ref}$|d" "$git_dir/packed-refs"
-                        # Only record once — skip if already recorded from loose cleanup
-                        if [[ "${manual_deleted_refs[-1]:-}" != "$ref" ]]; then
-                            manual_deleted_refs+=("$ref")
-                        fi
-                    fi
-
-                    # Clean corresponding reflog entry
-                    rm -f "${log_path}.lock" "$log_path" 2>/dev/null
-                    [[ -d "$log_path" ]] && rm -rf "$log_path"
-
-                    # Resolve D/F conflicts: a parent of the failing ref
-                    # may exist as a file (old branch) when a child path
-                    # (new branch) needs it to be a directory.
-                    for _p in "$ref_path" "$log_path"; do
-                        _dir="${_p%/*}"
-                        _stop="$git_dir/refs/remotes/$remote"
-                        [[ "$_p" == "$log_path" ]] && _stop="$git_dir/logs/refs/remotes/$remote"
-                        while [[ "$_dir" != "$_stop" && "$_dir" == "${_stop}/"* ]]; do
-                            if [[ -f "$_dir" ]]; then
-                                printf '\033[33mwarning: removing file blocking directory %s\033[0m\n' "${_dir#$git_dir/}"
-                                rm -f "$_dir"
-                            fi
-                            _dir="${_dir%/*}"
-                        done
-                    done
-                done
-            fi
-
-            (( cleanup_rounds++ ))
-        done
-
-        if (( fetch_status != 0 )); then
-            printf '\033[31merror: git fetch failed after cleanup attempts\033[0m\n' >&2
-            return $fetch_status
-        fi
+        # Fetch with retry and cleanup of transient/stale remote-tracking
+        # ref state, including "cannot lock ref ... is at X but expected Y".
+        _fetch_with_ref_cleanup "$git_dir" "$remote" git fetch --prune "$remote" || return $?
 
         # ── Resolve target branch from full fetch ──────────────────────
         if (( branch_from_arg == 0 )); then
@@ -273,10 +303,7 @@ function _reset_to_origin_single() {
         fi
 
         if [[ -n "$branch" ]]; then
-            git fetch "$remote" "$branch" 2>&1 || {
-                printf '\033[31merror: git fetch %s %s failed\033[0m\n' "$remote" "$branch" >&2
-                return 1
-            }
+            _fetch_with_ref_cleanup "$git_dir" "$remote" git fetch "$remote" "$branch" || return $?
         fi
     fi
 
@@ -292,20 +319,6 @@ function _reset_to_origin_single() {
 
     # ── Reset to remote branch ─────────────────────────────────────────
     printf 'resetting to \033[32m%s/%s\033[0m\n' "$remote" "$branch"
-
-    if (( ${#manual_deleted_refs[@]} > 0 )); then
-        printf '\033[33mcleaned up stale tracking refs:\033[0m\n'
-        for ref in "${manual_deleted_refs[@]}"; do
-            printf '  %s\n' "$ref"
-        done
-    fi
-
-    if (( ${#stale_fetch_refs[@]} > 0 )); then
-        printf '\033[33mgit fetch pruned stale tracking refs:\033[0m\n'
-        for ref in "${stale_fetch_refs[@]}"; do
-            printf '  %s\n' "$ref"
-        done
-    fi
 
     if git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null 2>&1; then
         git switch --force "$branch" || return $?
