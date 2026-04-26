@@ -43,7 +43,7 @@ prompts:
     content_file: prompts/describe-diff/SKILL.md
 
   - name: desloppify
-    description: "Run Desloppify's scan/next/resolve loop to improve code quality"
+    description: "Improve code quality with a dependency-free desloppify-style review/fix loop"
     content_file: prompts/desloppify/SKILL.md
     inputs:
       - name: path
