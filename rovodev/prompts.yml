@@ -52,13 +52,13 @@ prompts:
         type: string
         required: false
 
-  - name: git-commit-push
-    description: "Commit current changes with a conventional commit, push the branch, and create or update the pull request. Use for PR-oriented commit/push workflows."
-    content_file: prompts/git-commit-push/SKILL.md
+  - name: git-publish
+    description: "Commit current changes with a conventional commit, push the branch, and create or update the pull request."
+    content_file: prompts/git-publish/SKILL.md
 
-  - name: git-commit-push-to-origin
+  - name: git-publish-to-origin
     description: "Commit current changes with a conventional commit, then push the current branch to origin"
-    content_file: prompts/git-commit-push-to-origin/SKILL.md
+    content_file: prompts/git-publish-to-origin/SKILL.md
 
   - name: review-tests
     description: "Review and strengthen branch tests for meaningful coverage and regression resistance"

@@ -90,7 +90,7 @@ Checks: `<command>` -> <pass summary>
 Deferred (if any):
 - <artifact item>: <one-line reason>
 
-Next: review-branch, then git-commit-push.
+Next: review-branch, then git-publish.
 ```
 Keep under 35 lines. No preamble, no sign-off.
 </output_format>

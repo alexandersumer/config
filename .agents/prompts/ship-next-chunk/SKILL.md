@@ -67,7 +67,7 @@ Match surrounding code: naming, error handling, test framework, comment density,
 Run local build/tests; fix application/test code until green. Disallowed: suppressions, lint baselines, dependency bumps, build-config edits, test-infra edits.
 
 ## Output
-Leave changes uncommitted; do not add/commit/push/open PR. Downstream `git-commit-push` can reuse this subject as the commit message and PR title.
+Leave changes uncommitted; do not add, commit, push, or open a pull request. Downstream `git-publish` can reuse this subject as the commit message and pull request title.
 
 Final response exactly:
 ```
@@ -86,7 +86,7 @@ Tests:
 
 Checks: <command run> -> <pass/fail summary>
 
-Next: run the git-commit-push prompt to commit, push, and open or update the PR.
+Next: run the git-publish prompt to commit, push, and open or update the pull request.
 ```
 Under 25 lines. No preamble, summary, or sign-off.
 
