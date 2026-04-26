@@ -1,6 +1,6 @@
 ---
 name: desloppify
-description: Improve code quality with a dependency-free desloppify-style review/fix loop
+description: Improve code quality with a dependency-free review/fix loop
 argument-hint: "[optional: scan path]"
 inputs:
   - name: path
@@ -10,20 +10,19 @@ inputs:
     required: false
 ---
 
-Improve code quality using only repo inspection and existing checks.
+Improve code quality using repo inspection and existing checks only.
 
-Path: use `path`; else use `$ARGUMENTS`; treat empty, `repo`, `repository`, `this repo`, `this repository`, `whole repo`, `whole repository`, and `this whole repository` as `.`.
+Path: use `path` or `$ARGUMENTS`; treat empty or repo-like phrases (`repo`, `this repo`, `whole repository`, `this whole repository`) as `.`.
 
-Inspect the path, skipping obvious non-source dirs (`.git`, `node_modules`, `vendor`, `dist`, `build`, `coverage`, caches, generated output, worktrees). Ask before skipping anything questionable.
+Skip obvious non-source dirs: `.git`, dependencies, build output, coverage, caches, generated output, worktrees. Ask before questionable skips.
 
-Build a short queue of real issues from the code: duplication, unclear naming, dead code, brittle tests, missing checks, unsafe shell, fragile config, over-complex logic, stale comments, and docs that mislead usage.
+Make a short queue of real issues: duplication, dead code, unclear names, brittle tests, missing checks, unsafe shell, fragile config, over-complex logic, stale comments, misleading docs.
 
-Loop until done or blocked:
-1. Pick the highest-impact queue item.
-2. Fix the root cause, not symptoms.
-3. Run the smallest relevant existing check.
-4. Re-inspect the touched area and continue.
+Loop:
+1. Fix the highest-impact item at the root cause.
+2. Run the smallest relevant existing check.
+3. Re-inspect and continue until done or blocked.
 
 Do not add dependencies, suppressions, broad rewrites, deleted tests, or cosmetic-only churn.
 
-Final response: path, skipped dirs, changed files, checks, remaining queue/blockers.
+Final response: path, skipped dirs, changed files, checks, remaining blockers.
