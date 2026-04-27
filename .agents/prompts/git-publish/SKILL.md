@@ -6,7 +6,7 @@ description: Commit current changes and push to origin; create a pull request on
 Commit the current staged, unstaged, and relevant untracked changes, then push to `origin`. Create a pull request only when starting from the default branch.
 
 Workflow:
-1. Determine the current branch, remote default branch, working-tree status, and enough diff context to choose one Conventional Commit subject. Do not inspect pull requests yet.
+1. Determine the current branch, remote default branch, working-tree status, and enough diff context to choose one Conventional Commit subject. Do not inspect pull requests yet. Do not run tests, builds, linters, type checks, or full verification unless the user explicitly asks.
 2. If there are no staged, unstaged, or relevant untracked changes to commit, stop and say so.
 3. Stage the intended changes, including staged changes, unstaged tracked changes, and relevant untracked files unless the user explicitly excludes something.
 4. If the current branch is not `main`, not `master`, and not the remote default branch:
