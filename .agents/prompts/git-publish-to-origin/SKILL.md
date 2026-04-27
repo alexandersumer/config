@@ -1,9 +1,9 @@
 ---
 name: git-publish-to-origin
-description: Commit changes and push the current branch to origin.
+description: Commit current changes and push to origin.
 ---
 
-Commit the current staged, unstaged, and relevant untracked changes, then push the current branch to `origin`.
+Commit the current staged, unstaged, and relevant untracked changes, then push to `origin`.
 
 Workflow:
 1. Determine the current branch, working-tree status, and enough diff context to choose one Conventional Commit subject.

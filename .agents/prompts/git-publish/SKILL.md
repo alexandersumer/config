@@ -1,9 +1,9 @@
 ---
 name: git-publish
-description: Commit changes, push to origin, and create a pull request only when starting from the default branch.
+description: Commit current changes and push to origin; create a pull request only from the default branch.
 ---
 
-Commit the current staged, unstaged, and relevant untracked changes, then publish the work.
+Commit the current staged, unstaged, and relevant untracked changes, then push to `origin`. Create a pull request only when starting from the default branch.
 
 Workflow:
 1. Determine the current branch, remote default branch, working-tree status, and enough diff context to choose one Conventional Commit subject. Do not inspect pull requests yet.
