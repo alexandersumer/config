@@ -1,6 +1,6 @@
 ---
 name: git-publish
-description: Commit and push existing branches quickly; create a branch and pull request only from the default branch.
+description: Commit changes, push to origin, and create a pull request only when starting from the default branch.
 ---
 
 Commit the current staged, unstaged, and relevant untracked changes, then publish the work.

@@ -1,6 +1,6 @@
 ---
 name: git-publish-to-origin
-description: Commit current changes with a conventional commit, then push the current branch to origin.
+description: Commit changes and push the current branch to origin.
 ---
 
 Commit the current staged, unstaged, and relevant untracked changes, then push the current branch to `origin`.

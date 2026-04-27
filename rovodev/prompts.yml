@@ -52,11 +52,11 @@ prompts:
         required: false
 
   - name: git-publish
-    description: "Commit and push existing branches quickly; create a branch and pull request from the default branch."
+    description: "Commit changes, push to origin, and create a pull request only from the default branch."
     content_file: prompts/git-publish/SKILL.md
 
   - name: git-publish-to-origin
-    description: "Commit current changes and push the current branch to origin."
+    description: "Commit changes and push the current branch to origin."
     content_file: prompts/git-publish-to-origin/SKILL.md
 
   - name: review-tests
