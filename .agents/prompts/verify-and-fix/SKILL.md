@@ -1,6 +1,6 @@
 ---
 name: verify-and-fix
-description: Verify scoped behavior with code review and targeted checks, then fix real defects
+description: Perform adversarial formal and empirical verification of scoped behavior, then fix only proven defects
 argument-hint: "[optional: scope, file, function, behavior, or planning artifact]"
 inputs:
   - name: scope
@@ -10,91 +10,144 @@ inputs:
     required: false
 ---
 
-Verify the important scoped behavior, then fix real defects. Be evidence-driven without turning the task into an exhaustive proof exercise.
+You are not doing a casual check. You are trying to disprove the scoped behavior before you trust it.
 
-## Resolve scope
-First source that yields one: `scope` input → recent changes (`git status`, `git diff base...HEAD`) → relevant planning artifact → conversation. Emit `Scope:` and `Source:` before any verification. If ambiguous or trivially small, ask.
+Verification has two independent burdens of proof:
+1. **Empirical:** executable evidence demonstrates the behavior through real code paths.
+2. **Formal:** source-derived reasoning explains why the behavior follows from the implementation for the relevant state/input space.
 
-## Specification under test
-List the important contract items with primary sources. Items without a source are open questions, not assumptions. Keep the list scoped to behavior that can realistically affect correctness or compatibility.
-- Functional contract: inputs, outputs, side effects, ordering, errors.
-- Invariants: pre/postconditions, state transitions, isolation.
-- Boundaries: empty/null/zero/one/many, min/max, unicode, time zones, concurrency.
-- Failure modes: partial failure, retry, idempotency, cancellation.
-- Cross-component: API/wire formats, schema versions, compatibility.
+A claim is verified only when both burdens are met. If either burden is missing, report `unverified`; do not translate uncertainty into confidence.
 
-## Empirical verification
-For each important contract item, run real commands and capture enough output to support the conclusion:
-- Use the repo's existing build/test/typecheck/lint commands.
-- Add targeted tests for missing boundary/failure cases before claiming the item passes.
-- Exercise integration paths through real entry points when they exist.
-- Record `Empirical: <command> -> <result>` and `Evidence: <test or log ref>`.
+## Resolve scope and standard of proof
+First source that yields a meaningful scope: `scope` input → recent changes (`git status`, `git diff base...HEAD`) → relevant planning artifact → conversation. Emit `Scope:`, `Source:`, and `Verification standard:` before inspecting correctness.
 
-## Formal verification
-For each important contract item, reason from primary sources:
-- Trace control, data, and error flow end to end.
-- Case analysis on inputs/state space (empty, singleton, large, malformed, concurrent, adversarial).
-- Cross-check types/schemas/protocols against declarations and consumers.
-- Cross-check against the planning artifact and docs.
-- Record `Formal: <claim> — <reasoning> — <code refs>`.
+If the scope is ambiguous, too broad to verify deeply, or too small to matter, ask a narrowing question. Prefer a smaller scope with hard evidence over a broad scope with weak statements.
 
-## Forbidden (these are defects in the verification itself)
-- Hedging: "looks fine", "should work", "appears to handle", "likely correct".
-- Asserting correctness from reading without running an exercising test.
-- Claiming a test passes/covers a case without naming the test and the case.
-- Mocking the system under test, then claiming the system under test works.
-- Suppressions, baselines, snapshot rewrites, dependency bumps, or build/test-config edits to clear failures.
-- Loosening tests, deleting cases, weakening assertions, or moving cases out of scope.
-- Rewriting code so the failing test no longer applies, instead of fixing the defect.
-- Concluding "no issues" without empirical evidence and code reasoning for the important scoped behavior.
+Set the verification standard explicitly:
+- `exhaustive-by-reasoning` for small finite logic, pure functions, parsers with bounded grammar, or state machines where cases can be enumerated.
+- `representative-adversarial` for large systems, integrations, UI flows, distributed behavior, performance, or anything with a large input/state space.
+
+## Build the specification from primary sources
+Before evaluating code, list the contract items that must be true. Use primary sources: user request, planning artifact, public API docs, schemas, type declarations, tests that encode intended behavior, existing callers, migration notes, or compatibility requirements.
+
+For each item, record:
+- **Source:** exact file/function/test/doc/conversation reference.
+- **Observable behavior:** what an external caller/user/system can observe.
+- **Invariants:** preconditions, postconditions, state transitions, ordering, idempotency, isolation, authorization, persistence, and error semantics.
+- **Boundaries:** null/empty/zero/one/many, min/max, malformed input, unicode/encoding, time zones/time travel, cancellation, concurrency, retries, partial failure, large inputs, adversarial inputs.
+- **Consumers/producers:** upstream and downstream API, wire, schema, storage, or UI dependencies.
+
+Items without a primary source are `open questions`, not assumptions. Do not verify against guessed intent.
+
+## Formal verification pass
+For every in-scope contract item, perform source-level reasoning that would survive review by a skeptical maintainer:
+- Trace control flow, data flow, state mutation, side effects, and error flow from entry point to observable result.
+- Enumerate cases relevant to the verification standard. For `exhaustive-by-reasoning`, cover every meaningful branch/state combination. For `representative-adversarial`, explain why chosen partitions cover the risk surface.
+- Check preconditions and postconditions at component boundaries, not just inside the edited function.
+- Cross-check types, schemas, serialization formats, permissions, feature flags, migrations, and consumers against the implementation.
+- Identify where the reasoning depends on external behavior, timing, environment, nondeterminism, or undocumented assumptions.
+
+Record formal claims as falsifiable statements: `Formal: <item> — claim: <specific claim> — proof sketch: <case/control/data reasoning> — refs: <file:line...> — gaps: <none|gap>`.
+
+Reading code is not enough. The formal pass must produce a proof sketch or a gap.
+
+## Empirical verification pass
+For every in-scope contract item, produce executable evidence through the realest available path:
+- Discover and use the repo's canonical commands from README/package/build files before inventing commands.
+- Prefer integration or public-entry tests over private-function tests. Use mocks only at true external boundaries; never mock the behavior being verified and then claim it works.
+- Add or strengthen targeted tests for missing boundary/failure/adversarial cases before claiming coverage.
+- For every new or strengthened defect test, demonstrate it is meaningful: it must fail on the defective implementation, fail under a realistic mutation, or be justified as impossible to pre-fail because the defect is environmental/spec-only.
+- Run the narrowest relevant command first, then the broader regression command needed for confidence.
+- Capture enough output to establish command, result, and covered behavior. Do not merely say "tests pass".
+
+Record empirical evidence as: `Empirical: <item> — command: <command> — result: <pass|fail|blocked> — evidence: <test name/log excerpt/ref> — coverage: <cases exercised> — gaps: <none|gap>`.
+
+A passing unrelated suite is not evidence for a contract item. A test name without the behavior it covers is not evidence.
+
+## Adversarial verification requirements
+Actively look for reasons the implementation could be wrong:
+- Mutation thinking: name at least one plausible bug per important behavior (flipped conditional, off-by-one, stale cache, missed await, wrong exception, swallowed error, race, schema drift, auth bypass, timezone/encoding bug) and identify what evidence would catch it.
+- Negative controls: include at least one invalid/error/edge path when the behavior has meaningful failure modes.
+- Cross-boundary checks: if data crosses process, network, storage, queue, API, or UI boundaries, verify both producer and consumer expectations.
+- Regression risk: verify unchanged behavior that could plausibly be affected by the fix.
+
+If you cannot perform one of these checks, record it as a verification gap with the reason and the residual risk.
 
 ## Findings
-One entry per defect, ordered by severity (`critical|high|medium|low`). Spec/code disagreements and missing tests for in-scope behavior are findings, not commentary. Group symptoms with a shared root cause under one finding.
+A finding is any proven defect, spec/code disagreement, missing in-scope test evidence, unverified high-risk assumption, or verification gap that prevents confidence.
+
+For each finding, include:
+- Severity: `critical|high|medium|low`.
+- Location and contract item affected.
+- Evidence: empirical failure, formal contradiction, missing proof, or missing executable coverage.
+- Root cause, not just symptom.
+- Fix status: `fixed`, `deferred: <reason>`, or `blocked: <reason>`.
+
+Group symptoms with the same root cause under one finding. Do not bury missing evidence in prose; list it as a finding or gap.
 
 ## Fix loop
 For each finding, highest severity first:
-1. Smallest correct fix at the root cause. No band-aids, no defensive `try/except`, no silent fallbacks.
-2. Match surrounding code and test style.
-3. Add or strengthen a test that fails without the fix and passes with it.
-4. Re-run empirical verification for the affected items plus regression for the rest of scope.
-5. Re-run formal verification for the affected items.
-6. Mark `fixed` only when both pass. New defects discovered mid-loop become new findings.
+1. Make the smallest correct root-cause fix. Avoid band-aids, silent fallbacks, broad `try/catch`, sleeps, retries without cause, or defensive code that hides the defect.
+2. Preserve intended public behavior and compatibility unless the primary source says otherwise.
+3. Add or strengthen a test that detects the defect or guards the verified contract. Prefer a test that would fail without the fix.
+4. Re-run empirical verification for the affected item and a regression command covering adjacent scope.
+5. Re-run the formal proof sketch for the affected item and update refs/gaps.
+6. If the fix reveals a new defect, add a new finding rather than expanding scope silently.
 
-Stop only when every finding is `fixed` or explicitly `deferred` with a one-line reason and follow-up location.
+Mark `fixed` only after formal and empirical verification both pass. If no code changes are needed, say why the evidence proves that.
 
-## Output (exact shape, nothing else)
+## Forbidden verification shortcuts
+These are defects in the verification itself:
+- Hedging or vibe words: "looks fine", "seems okay", "should work", "appears to", "likely", "probably", "I think".
+- Correctness claims without both executable evidence and source-level proof.
+- Claiming coverage without naming the exact behavior/case the test exercises.
+- Treating compile/typecheck/lint success as behavioral verification.
+- Trusting mocks of the system under test as evidence that the system works.
+- Ignoring failing, flaky, skipped, quarantined, or TODO tests that intersect the scope.
+- Suppressions, baselines, snapshot rewrites, dependency bumps, build/test config changes, warning disables, test deletion, weakened assertions, or moving cases out of scope to get green.
+- Rewriting code so the failing test no longer applies instead of fixing the defect.
+- Saying "no issues" while any important contract item has `gaps`.
+
+## Output shape
+Use this exact structure. Be concise, but every verified claim needs evidence.
+
 ```
 Scope: <files/functions/behaviors/artifact>
-Source: <path or "conversation" or "scope input">
+Source: <scope input|path|conversation|branch diff>
+Verification standard: <exhaustive-by-reasoning|representative-adversarial> — <why appropriate>
 
 Specification:
-- <item> — source: <where>
+- <item id>: <contract item> — source: <primary source> — observable: <behavior> — boundaries/risks: <list>
 
-Empirical:
-- <item>: <command> -> <result> (evidence: <ref>)
+Formal verification:
+- <item id>: claim: <specific claim> — proof sketch: <case/control/data reasoning> — refs: <file:line...> — gaps: <none|gap>
 
-Formal:
-- <item>: <claim> — <reasoning> — <code refs>
+Empirical verification:
+- <item id>: command: <command> — result: <pass|fail|blocked> — evidence: <test/log/ref> — coverage: <cases> — gaps: <none|gap>
+
+Adversarial checks:
+- <item id>: plausible bug: <mutation/failure mode> — caught by: <test/proof/check> — residual risk: <none|risk>
 
 Findings:
-- [<severity>] <file>:<line> <defect> — <evidence> — <root cause> — <fixed|deferred: reason>
+- [<severity>] <item id> <file:line> <defect/gap> — evidence: <evidence> — root cause: <cause> — status: <fixed|deferred: reason|blocked: reason>
 
 Fixes:
-- <file>:<line> <summary> (tests: <names that fail without the fix>)
+- <file:line> <summary> — verification added/updated: <test/check> — would fail without fix: <yes|no + why>
 
 Re-verification:
-- <command> -> <result>
+- <command> -> <result> — scope covered: <items>
 
-Open questions:
-- <item> — <why unresolved>
+Open questions / residual risk:
+- <item or none> — <why unresolved and what would resolve it>
 ```
 
 ## Acceptance criteria
-- `Scope` and `Source` emitted before verification.
-- Important contract items have primary sources, empirical evidence, and code reasoning with refs.
-- No hedging vocabulary.
-- Every finding has evidence, root cause, and `fixed` or `deferred` with reason.
-- Every fix has a new/strengthened test that fails without it (unless the fix is purely a spec/doc correction; state that explicitly).
-- Re-verification commands ran after the last fix and passed.
-- No suppressions, baselines, snapshot rewrites, dependency bumps, build/test-config edits, or test deletions used to clear failures.
-- "No issues" without listed evidence is rejected.
+- Scope, source, and verification standard are emitted before correctness claims.
+- Each important contract item has a primary source, a formal proof sketch, empirical evidence, adversarial consideration, and explicit gaps.
+- Every empirical claim names the command, result, test/log evidence, and behavior covered.
+- Every formal claim includes concrete code references and case/control/data reasoning.
+- Every finding has severity, evidence, root cause, and status.
+- Every fix has a new or strengthened verification check unless explicitly justified.
+- Re-verification ran after the last fix and covers the changed behavior plus plausible regressions.
+- No forbidden shortcuts were used.
+- `No issues found` is valid only when every contract item has `gaps: none` in both formal and empirical verification.

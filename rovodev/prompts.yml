@@ -153,7 +153,7 @@ prompts:
     content_file: prompts/sync-main/SKILL.md
 
   - name: verify-and-fix
-    description: "Verify scoped behavior with code review and targeted checks, then fix real defects"
+    description: "Perform adversarial formal and empirical verification of scoped behavior, then fix only proven defects"
     content_file: prompts/verify-and-fix/SKILL.md
     inputs:
       - name: scope
