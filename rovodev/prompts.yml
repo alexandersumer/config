@@ -59,6 +59,26 @@ prompts:
     description: "Commit current changes and push to origin."
     content_file: prompts/git-publish-to-origin/SKILL.md
 
+  - name: philosophy-of-software-design
+    description: "Review design through an Ousterhout lens: reduce complexity, prefer deep modules, sharpen interfaces, and avoid tactical coding"
+    content_file: prompts/philosophy-of-software-design/SKILL.md
+    inputs:
+      - name: scope
+        label: Design scope
+        description: Optional design, diff, file, plan, or scope to evaluate. Leave empty to infer from conversation or current branch.
+        type: string
+        required: false
+
+  - name: red-green-refactor
+    description: "Implement small behavior with a test-first red/green/refactor loop"
+    content_file: prompts/red-green-refactor/SKILL.md
+    inputs:
+      - name: scope
+        label: Behavior or scope
+        description: Optional behavior, bug, file, or scope to implement with a red-green-refactor loop. Leave empty to infer from conversation.
+        type: string
+        required: false
+
   - name: review-tests
     description: "Review and strengthen branch tests for meaningful coverage and regression resistance"
     content_file: prompts/review-tests/SKILL.md
