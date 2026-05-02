@@ -1,6 +1,6 @@
 ---
 name: philosophy-of-software-design
-description: Apply John Ousterhout-style software design judgment to reduce complexity, improve module depth, sharpen interfaces, and avoid tactical coding. Use when reviewing a design, planning an implementation, refactoring, evaluating architecture, or when the user mentions complexity, deep modules, shallow modules, interfaces, abstractions, decomposition, maintainability, or A Philosophy of Software Design.
+description: Apply John Ousterhout-style software design judgment to reduce complexity, improve module depth, sharpen interfaces, preserve domain clarity, and avoid tactical coding. Use when reviewing a design, planning an implementation, refactoring, evaluating architecture, or when the user mentions complexity, deep modules, shallow modules, interfaces, abstractions, decomposition, domain modeling, maintainability, or A Philosophy of Software Design.
 argument-hint: "[optional: design, diff, file, plan, or scope]"
 inputs:
   - name: scope
@@ -11,14 +11,14 @@ inputs:
 ---
 
 <intent>
-Evaluate software through the lens of reducing long-term complexity. Prefer simple interfaces hiding substantial implementation depth, cohesive boundaries, and changes that make future work easier to understand.
+Evaluate software by reducing long-term complexity while preserving real domain meaning. Prefer simple interfaces that hide substantial implementation depth, cohesive boundaries, and small design moves that make future changes easier to understand.
 </intent>
 
 <workflow>
 1. Resolve the scope from `$ARGUMENTS`, recent conversation, a planning artifact, a file path, or the current branch diff. If the scope is ambiguous, ask one focused question.
 2. Read enough code/design context to understand module boundaries, callers, data flow, and existing conventions before judging.
-3. Identify complexity sources: information leakage, shallow modules, unclear names, special cases, hidden coupling, duplication of knowledge, tactical patches, and premature/generalized abstractions.
-4. Recommend the smallest design move that reduces complexity without broadening scope.
+3. Identify complexity sources: information leakage, shallow modules, unclear names, special cases, hidden coupling, duplicated knowledge, domain/model mismatch, tactical patches, and premature/generalized abstractions.
+4. Recommend the smallest design move that reduces complexity without broadening scope or flattening meaningful domain distinctions.
 </workflow>
 
 <principles>
@@ -27,6 +27,7 @@ Evaluate software through the lens of reducing long-term complexity. Prefer simp
 - Interfaces matter more than implementations: improve what callers must know, not only how internals are written.
 - Pull complexity downward when it simplifies many callers; do not leak implementation details upward.
 - Prefer general-purpose mechanisms only when they remove real repeated special cases; otherwise keep the design concrete.
+- Preserve domain clarity: keep business concepts explicit when they represent real rules, invariants, or language; do not hide meaningful distinctions just to simplify code shape.
 - Avoid tactical coding: do not add patches, flags, wrappers, or conditionals that solve the immediate symptom while making the system harder to reason about.
 </principles>
 
