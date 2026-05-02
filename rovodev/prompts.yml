@@ -60,7 +60,7 @@ prompts:
     content_file: prompts/git-publish-to-origin/SKILL.md
 
   - name: philosophy-of-software-design
-    description: "Review design through an Ousterhout lens: reduce complexity, prefer deep modules, sharpen interfaces, and avoid tactical coding"
+    description: "Review architectural shape, module boundaries, and interface depth through an Ousterhout lens; use for long-term complexity, not style-only or isolated correctness bugs"
     content_file: prompts/philosophy-of-software-design/SKILL.md
     inputs:
       - name: scope
