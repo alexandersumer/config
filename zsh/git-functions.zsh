@@ -219,7 +219,7 @@ function _fetch_with_ref_cleanup() {
     return 0
 }
 
-function _reset_to_origin_single() {
+function _reset_to_remote_default_single() {
     local remote="origin"
     local branch=""
     local arg
@@ -337,7 +337,7 @@ function _reset_to_origin_single() {
 
     # ── Prune local branches ──────────────────────────────────────────
     if (( do_prune )); then
-        prune_all_except_origin "$branch"
+        prune_all_except_remote_default "$branch"
     fi
 
     # ── Background fetch for remote branch availability ───────────────
@@ -345,8 +345,8 @@ function _reset_to_origin_single() {
         printf '\033[33mupdating remote branches in background…\033[0m\n'
         # Run the background fetch in its own subshell so it fully detaches
         # from the parent job table.  This avoids `disown: no current job`
-        # errors when reset_to_origin itself is called from inside a
-        # subshell/pipeline (e.g. by reset_all_to_origin), which would
+        # errors when reset_to_remote_default itself is called from inside a
+        # subshell/pipeline (e.g. by reset_all_to_remote_default), which would
         # otherwise leak a non-zero exit status out of this function.
         ( git fetch --prune --no-tags "$remote" &>/dev/null & ) 2>/dev/null
     fi
@@ -354,9 +354,9 @@ function _reset_to_origin_single() {
     return 0
 }
 
-function rebase_on_origin() {
+function rebase_on_remote_default() {
     local remote="origin"
-    local main_branch
+    local default_branch
     local current_branch
     local git_status
     local git_dir
@@ -376,9 +376,9 @@ function rebase_on_origin() {
         return 1
     fi
 
-    main_branch=$(_get_default_branch "$remote")
-    if [[ -z "$main_branch" ]]; then
-        printf '\033[31merror: could not detect main branch (tried main, master)\033[0m\n'
+    default_branch=$(_get_default_branch "$remote")
+    if [[ -z "$default_branch" ]]; then
+        printf '\033[31merror: could not detect default branch (tried remote HEAD, main, master)\033[0m\n'
         return 1
     fi
 
@@ -409,22 +409,22 @@ function rebase_on_origin() {
     fi
 
     printf '\033[33mcurrent branch:\033[0m %s\n' "$current_branch"
-    printf '\033[33mrebasing onto:\033[0m %s/%s\n' "$remote" "$main_branch"
-    printf 'fetching and rebasing: \033[32mgit fetch %s %s && git rebase %s/%s\033[0m\n' "$remote" "$main_branch" "$remote" "$main_branch"
+    printf '\033[33mrebasing onto:\033[0m %s/%s\n' "$remote" "$default_branch"
+    printf 'fetching and rebasing: \033[32mgit fetch %s %s && git rebase %s/%s\033[0m\n' "$remote" "$default_branch" "$remote" "$default_branch"
 
-    if ! git fetch "$remote" "$main_branch" 2>&1; then
-        printf '\033[31m✗ failed to fetch %s/%s\033[0m\n' "$remote" "$main_branch"
+    if ! git fetch "$remote" "$default_branch" 2>&1; then
+        printf '\033[31m✗ failed to fetch %s/%s\033[0m\n' "$remote" "$default_branch"
         printf '\033[33mcheck your network connection and remote configuration\033[0m\n'
         return 1
     fi
 
-    printf '\033[32m✓ fetched latest %s\033[0m\n' "$main_branch"
+    printf '\033[32m✓ fetched latest %s\033[0m\n' "$default_branch"
 
-    rebase_output=$(git rebase "$remote/$main_branch" 2>&1)
+    rebase_output=$(git rebase "$remote/$default_branch" 2>&1)
     local rebase_exit_code=$?
 
     if [[ $rebase_exit_code -eq 0 ]]; then
-        printf '\033[32m✓ successfully rebased %s onto %s/%s\033[0m\n' "$current_branch" "$remote" "$main_branch"
+        printf '\033[32m✓ successfully rebased %s onto %s/%s\033[0m\n' "$current_branch" "$remote" "$default_branch"
         return 0
     fi
 
@@ -454,7 +454,7 @@ function rebase_on_origin() {
     return 1
 }
 
-function restore_from_origin() {
+function restore_from_remote_default() {
     if [ $# -eq 0 ]; then
         printf '\033[31merror: no file path provided\033[0m\n'
         return 1
@@ -466,18 +466,18 @@ function restore_from_origin() {
     fi
 
     local remote="origin"
-    local main_branch
-    main_branch=$(_get_default_branch "$remote")
-    if [[ -z "$main_branch" ]]; then
-        printf '\033[31merror: could not detect main branch (tried main, master)\033[0m\n'
+    local default_branch
+    default_branch=$(_get_default_branch "$remote")
+    if [[ -z "$default_branch" ]]; then
+        printf '\033[31merror: could not detect default branch (tried remote HEAD, main, master)\033[0m\n'
         return 1
     fi
 
     local file_path filename
     for file_path in "$@"; do
         filename="$(basename "$file_path")"
-        if git restore --source "$remote/$main_branch" "$file_path"; then
-            printf '\033[32m✓ restored '\''%s'\'' from %s/%s\033[0m\n' "$filename" "$remote" "$main_branch"
+        if git restore --source "$remote/$default_branch" "$file_path"; then
+            printf '\033[32m✓ restored '\''%s'\'' from %s/%s\033[0m\n' "$filename" "$remote" "$default_branch"
         else
             printf '\033[31m✗ failed to restore '\''%s'\''\033[0m\n' "$filename"
             return 1
@@ -497,7 +497,7 @@ function branch_create() {
     git switch -c "${branch_name}"
 }
 
-function prune_all_except_origin() {
+function prune_all_except_remote_default() {
     local keep_branch="$1"
     local remote="origin"
     local current_branch
@@ -511,7 +511,7 @@ function prune_all_except_origin() {
     if [[ -z "$keep_branch" ]]; then
         keep_branch=$(_get_default_branch "$remote")
         if [[ -z "$keep_branch" ]]; then
-            printf '\033[31merror: could not detect main branch (tried main, master)\033[0m\n'
+            printf '\033[31merror: could not detect default branch (tried remote HEAD, main, master)\033[0m\n'
             return 1
         fi
     fi
@@ -701,18 +701,18 @@ function fast_gsc()  { _gsc_impl 1 0 "$@"; }
 function gscp()      { _gsc_impl 0 1 "$@"; }
 function fast_gscp() { _gsc_impl 1 1 "$@"; }
 
-function merge_from_origin() {
+function merge_from_remote_default() {
     local remote="origin"
-    local main_branch
+    local default_branch
 
-    main_branch=$(_get_default_branch "$remote")
-    if [[ -z "$main_branch" ]]; then
-        printf '\033[31merror: could not detect main branch (tried main, master)\033[0m\n'
+    default_branch=$(_get_default_branch "$remote")
+    if [[ -z "$default_branch" ]]; then
+        printf '\033[31merror: could not detect default branch (tried remote HEAD, main, master)\033[0m\n'
         return 1
     fi
 
-    printf 'fetching and merging: \033[32mgit fetch %s %s && git merge %s/%s\033[0m\n' "$remote" "$main_branch" "$remote" "$main_branch"
-    git fetch "$remote" "$main_branch" && git merge "$remote/$main_branch"
+    printf 'fetching and merging: \033[32mgit fetch %s %s && git merge %s/%s\033[0m\n' "$remote" "$default_branch" "$remote" "$default_branch"
+    git fetch "$remote" "$default_branch" && git merge "$remote/$default_branch"
 }
 
 function quit_merge() {
@@ -734,27 +734,27 @@ function hard_reset_head() {
     git reset --hard
 }
 
-function soft_reset_origin() {
+function soft_reset_remote_default() {
     if ! git rev-parse --git-dir > /dev/null 2>&1; then
         printf '\033[31merror: not in a git repository\033[0m\n'
         return 1
     fi
 
     local remote="origin"
-    local main_branch
-    main_branch=$(_get_default_branch "$remote")
-    if [[ -z "$main_branch" ]]; then
-        printf '\033[31merror: could not detect main branch (tried main, master)\033[0m\n'
+    local default_branch
+    default_branch=$(_get_default_branch "$remote")
+    if [[ -z "$default_branch" ]]; then
+        printf '\033[31merror: could not detect default branch (tried remote HEAD, main, master)\033[0m\n'
         return 1
     fi
 
-    if ! git show-ref --verify --quiet "refs/heads/$main_branch"; then
-        printf '\033[31merror: local '\''%s'\'' branch not found\033[0m\n' "${main_branch}"
-        printf '\033[33mtry:\033[0m \033[32mgit fetch %s %s:%s\033[0m\n' "$remote" "${main_branch}" "${main_branch}"
+    if ! git show-ref --verify --quiet "refs/heads/$default_branch"; then
+        printf '\033[31merror: local '\''%s'\'' branch not found\033[0m\n' "${default_branch}"
+        printf '\033[33mtry:\033[0m \033[32mgit fetch %s %s:%s\033[0m\n' "$remote" "${default_branch}" "${default_branch}"
         return 1
     fi
-    printf 'soft reset onto %s: \033[32mgit reset --soft %s\033[0m\n' "${main_branch}" "${main_branch}"
-    git reset --soft "$main_branch"
+    printf 'soft reset onto %s: \033[32mgit reset --soft %s\033[0m\n' "${default_branch}" "${default_branch}"
+    git reset --soft "$default_branch"
 }
 
 function _is_transient_git_failure() {
@@ -776,7 +776,7 @@ function _is_transient_git_failure() {
         -- "$log_file"
 }
 
-function _reset_to_origin_multi() {
+function _reset_to_remote_default_multi() {
     local root=""
     local arg
     local -a reset_args=()
@@ -852,7 +852,7 @@ function _reset_to_origin_multi() {
     printf 'scanning \033[32m%s\033[0m (%d entries, retries=%d)\n' \
         "$root" "$total" "$max_attempts"
 
-    log_file=$(mktemp -t reset_all_to_origin.XXXXXX) || {
+    log_file=$(mktemp -t reset_all_to_remote_default.XXXXXX) || {
         printf '\033[31merror: could not create temp log file\033[0m\n' >&2
         return 1
     }
@@ -877,10 +877,10 @@ function _reset_to_origin_multi() {
         while (( attempt <= max_attempts )); do
             : > "$log_file"
             if (( ${#reset_args[@]} > 0 )); then
-                ( cd -- "$entry" && _reset_to_origin_single "${reset_args[@]}" ) 2>&1 | tee "$log_file"
+                ( cd -- "$entry" && _reset_to_remote_default_single "${reset_args[@]}" ) 2>&1 | tee "$log_file"
                 status_code=${pipestatus[1]}
             else
-                ( cd -- "$entry" && _reset_to_origin_single ) 2>&1 | tee "$log_file"
+                ( cd -- "$entry" && _reset_to_remote_default_single ) 2>&1 | tee "$log_file"
                 status_code=${pipestatus[1]}
             fi
 
@@ -932,7 +932,7 @@ function _reset_to_origin_multi() {
     return 0
 }
 
-function reset_to_origin() {
+function reset_to_remote_default() {
     local arg
     local -a forwarded_args=()
     local -a multi_options=()
@@ -947,12 +947,12 @@ function reset_to_origin() {
         arg="$1"
         case "$arg" in
             --help|-h)
-                printf 'usage: reset_to_origin [--single|--multi] [--retries N] [--retry-delay SECS] [path] [-- single-repo args...]\n'
+                printf 'usage: reset_to_remote_default [--single|--multi] [--retries N] [--retry-delay SECS] [path] [-- single-repo args...]\n'
                 printf '\n'
                 printf 'Reset git repositories to their default branch on the remote.\n'
                 printf '\n'
                 printf 'If PATH (or the current directory) is itself a git repository,\n'
-                printf 'runs in single-repo mode (equivalent to the previous reset_to_origin).\n'
+                printf 'runs in single-repo mode.\n'
                 printf 'Otherwise, scans every immediate subdirectory of PATH (default: cwd)\n'
                 printf 'and resets each one that is a git repository, with retries on\n'
                 printf 'transient ssh/network failures.\n'
@@ -1034,14 +1034,14 @@ function reset_to_origin() {
             target="${positional[1]}"
             target_abs="${target:A}"
             shift_positional=("${positional[@]:1}")
-            ( cd -- "$target_abs" && _reset_to_origin_single "${shift_positional[@]}" "${forwarded_args[@]}" )
+            ( cd -- "$target_abs" && _reset_to_remote_default_single "${shift_positional[@]}" "${forwarded_args[@]}" )
             return $?
         fi
-        _reset_to_origin_single "${positional[@]}" "${forwarded_args[@]}"
+        _reset_to_remote_default_single "${positional[@]}" "${forwarded_args[@]}"
         return $?
     fi
 
-    # multi mode: rebuild argv exactly as _reset_to_origin_multi expects:
+    # multi mode: rebuild argv exactly as _reset_to_remote_default_multi expects:
     # [root] [--retries N] [--retry-delay S] [-- forwarded_args...]
     local -a multi_argv=()
     if (( ${#positional[@]} >= 1 )); then
@@ -1058,10 +1058,18 @@ function reset_to_origin() {
         multi_argv+=("--" "${forwarded_args[@]}")
     fi
 
-    _reset_to_origin_multi "${multi_argv[@]}"
+    _reset_to_remote_default_multi "${multi_argv[@]}"
 }
 
-# Backward-compatible alias for the previous multi-repo entry point.
-function reset_all_to_origin() {
-    reset_to_origin --multi "$@"
+function reset_all_to_remote_default() {
+    reset_to_remote_default --multi "$@"
 }
+
+# Backward-compatible aliases for the previous origin-named entry points.
+function reset_to_origin()              { reset_to_remote_default "$@"; }
+function reset_all_to_origin()          { reset_all_to_remote_default "$@"; }
+function rebase_on_origin()             { rebase_on_remote_default "$@"; }
+function restore_from_origin()          { restore_from_remote_default "$@"; }
+function prune_all_except_origin()      { prune_all_except_remote_default "$@"; }
+function merge_from_origin()            { merge_from_remote_default "$@"; }
+function soft_reset_origin()            { soft_reset_remote_default "$@"; }
