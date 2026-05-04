@@ -12,42 +12,18 @@ inputs:
 
 Review the design in `scope`, `$ARGUMENTS`, conversation, artifact, file, or branch diff.
 
-Do not give abstract architecture advice. Show the symptom, evidence, and smallest useful design move.
+This is not an architecture essay. Do the work before judging.
 
-Preserve domain meaning. Do not collapse real concepts or hide real invariants just to make code look simpler.
+Read until you can explain the design pressure in concrete terms: callers, callees, data flow, ownership, domain terms, invariants, change paths, and local conventions. If code can answer the question, inspect code instead of guessing.
 
-Read enough callers, callees, data flow, ownership, domain terms, and conventions before judging.
+Do not give abstract architecture advice. Do not praise or attack shapes in isolation. A design problem exists only when there is evidence: change amplification, cognitive load, hidden coupling, unknown unknowns, information leakage, shallow modules, pass-through APIs, conjoined responsibilities, temporal decomposition, overexposed APIs, or generic interfaces pretending to be reusable.
 
-Look for symptoms:
-- change amplification
-- cognitive load
-- unknown unknowns
+Preserve domain meaning. Do not collapse real concepts, erase useful invariants, or hide important distinctions to make code look simpler. Prefer deep interfaces only when they hide real complexity without lying about the domain.
 
-Map symptoms to design problems only when evidenced:
-- shallow module
-- information leakage
-- pass-through method
-- conjoined methods
-- temporal decomposition
-- overexposed API
-- generic interface
+Be suspicious of abstraction churn. Compare the real choices, including doing nothing. Do not invent fake trade-offs. Recommend no change when the existing design is cheaper than the proposed cleanup.
 
-Compare 2-3 options, including no change when credible. Prefer deep interfaces that hide real complexity without erasing domain language. Recommend restraint when abstraction churn costs more than it saves.
+Your recommendation must be the smallest useful design move: the exact boundary to move, responsibility to merge or split, API to hide, invariant to expose, coupling to accept, or abstraction to delete. If the evidence is insufficient, say what you inspected and what would need to be inspected next.
 
-Output:
-```text
-Scope: <scope>
-Read: <files/artifacts>
-Symptoms:
-- <symptom> — <evidence>
-Options:
-- No change: <trade-off>
-- <option>: <trade-off>
-Recommendation:
-- <smallest useful move>
-Domain check:
-- <preserved distinction/invariant>
-Verdict: <keep | adjust | refactor | defer>
-```
+Write plainly and bluntly. No template. No checklist. No padded sections. Lead with the judgment, then give the evidence that makes it hard to dismiss.
 
-If the design is good, say why briefly.
+If the design is good, say why and stop. Do not manufacture a problem to justify the review.

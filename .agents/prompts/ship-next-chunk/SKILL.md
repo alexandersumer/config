@@ -37,13 +37,9 @@ Discover:
 - emit `Artifact source: <path|conversation|artifact input>`
 - ask if candidates tie or locality is weak
 
-Pick a chunk that is:
-- next or unblocking in the artifact
-- not already implemented
-- reviewable unless the artifact requires more
-- wired into real entry points
-- backed by one acceptance signal
-- not docs/tests/types/helpers-only unless paired with behavior
+Pick the next chunk like a maintainer, not a task-list parser. The right chunk is the next artifact-backed piece of observable behavior that can be reviewed independently and proven through a real entry point.
+
+Do not choose cleanup, scaffolding, test-only, type-only, helper-only, or docs-only work unless it is inseparable from shipped behavior. If the artifact's next chunk is stale, already implemented, too broad, or not locally provable, say so and choose the next reachable slice. If candidates tie or locality is weak, ask before branching.
 
 For infra chunks, the unit of work is a usable local command/harness plus one real example and one plausible broken case it catches.
 
@@ -55,18 +51,4 @@ No suppressions, baselines, dependency bumps, skipped tests, or build/test infra
 
 Run targeted checks and broader checks when available. Do not commit, push, or open a PR.
 
-Final exactly:
-```text
-Locality: <prefixes> (from <signal>)
-Artifact source: <path or "conversation" or "artifact input">
-Chunk: <name>
-Why: <artifact reason>
-Subject: <Conventional Commit subject>
-Branch: <branch-name>
-Files:
-- <path>
-Tests:
-- <test name>: <mutation it catches>
-Checks: <command> -> <result> or not run — <reason>
-Next: run git-publish.
-```
+Final response should be short: locality, artifact source, chosen chunk, why that slice was right, branch, changed files, tests with the bug they catch, checks, and the next command. No padded shipping report.

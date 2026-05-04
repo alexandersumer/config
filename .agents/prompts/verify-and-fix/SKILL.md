@@ -12,42 +12,14 @@ inputs:
 
 Verify `scope`, `$ARGUMENTS`, recent changes, relevant artifact, or conversation behavior.
 
-Do not call existing green tests verification. A claim is verified only with both source-level proof and executable evidence through a real path.
+Do not rubber-stamp green tests. Verification means you can prove the behavior from source and exercise it through a real path.
 
-Emit first:
-- `Scope: <scope>`
-- `Source: <input|diff|artifact|conversation>`
-- `Standard: <exhaustive-by-reasoning|representative-adversarial> — <why>`
+Build expected behavior from primary sources only: request, artifact, public API docs, schemas, types, intended-behavior tests, callers, migrations. If there is no source, say the question is open.
 
-Build the spec from primary sources only: request, artifact, public API docs, schemas, types, intended-behavior tests, callers, migrations. No source means open question.
+Trace the important contracts through real control, data, and error flow. Name the bug that would matter if the contract were wrong. Then run or add the smallest check that would catch that bug.
 
-For each important contract:
-- state observable behavior and risks
-- trace control/data/error flow with code refs
-- name a plausible bug
-- run or add a check that would catch it
-
-If current checks cannot catch the bug class, build the missing check or report the gap. Do not use mocks of the system under test as proof.
+Do not use mocks of the system under test as proof. Do not accept tests that only prove implementation details. If existing checks cannot catch the bug class, add the missing check or say the gap remains.
 
 Fix only proven defects or verification gaps. No suppressions, baselines, dependency bumps, skipped/deleted/weakened tests, sleeps, broad catches, or silent fallbacks.
 
-Final:
-```text
-Scope: <scope>
-Source: <source>
-Standard: <standard>
-Spec:
-- <id>: <contract> — source: <source> — risks: <bugs/boundaries>
-Proof:
-- <id>: <claim> — refs: <file:line> — gaps: <none|gap>
-Evidence:
-- <id>: `<command>` -> <result> — covers: <cases> — gaps: <none|gap>
-Findings:
-- [<severity>] <defect/gap> — status: <fixed|deferred|blocked>
-Fixes:
-- <file:line> <summary> — check: <test/command>
-Residual risk:
-- <none or item>
-```
-
-`No issues found` is valid only when every important item has no proof or evidence gap.
+Write the result plainly. Lead with the verdict: verified, fixed, blocked, or not proven. Then give the source proof, executable evidence, changed files, and any remaining gap. No padded audit template. `No issues found` is valid only when important behavior has both source proof and executable evidence.

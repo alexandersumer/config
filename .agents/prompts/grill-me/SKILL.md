@@ -12,25 +12,12 @@ inputs:
 
 Stress-test `plan`, `$ARGUMENTS`, or the conversation plan.
 
-Do not generate a questionnaire. Ask the single highest-leverage unresolved design question, give your recommended answer, then wait.
+Do not generate a questionnaire. Find the single unresolved decision most likely to change architecture, data model, boundaries, sequencing, verification, or irreversible cost.
 
-If code can answer the question, inspect code instead of asking.
+If code can answer it, inspect code instead of asking.
 
-Focus on decisions that affect architecture, data model, boundaries, sequencing, verification, or irreversible cost. Skip low-impact or convention-settled questions.
+Ask the question only after explaining why this is the pressure point. Give your recommended answer and the trade-off you are accepting. Then stop and wait.
 
-Opening:
-```text
-Plan: <source>
-Q1: <decision>
-Recommended: <answer + reason>
-Your turn: <confirm or choose alternative>
-```
+Skip low-impact, convention-settled, or implementation-detail questions. If the plan is already decided enough to execute, say so and name the next action.
 
-Final:
-```text
-Resolved design tree:
-- <decision> -> <rationale> (confirmed)
-Unresolved:
-- <question or None>: <reason>
-Next: <action>
-```
+No template. No list of possible concerns. One hard question, your answer, then wait.
