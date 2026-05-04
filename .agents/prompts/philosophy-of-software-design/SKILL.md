@@ -1,6 +1,6 @@
 ---
 name: philosophy-of-software-design
-description: Apply John Ousterhout-style software design review to architectural shape, module boundaries, interface depth, abstraction fit, and long-term complexity. This skill should be used when reviewing designs, implementation plans, diffs, refactors, architecture, decomposition, APIs, domain models, or maintainability trade-offs — especially when the user mentions complexity, deep modules, shallow modules, interfaces, information leakage, change amplification, cognitive load, unknown unknowns, or A Philosophy of Software Design. It is not for style-only review or ordinary correctness bugs unless they reveal a design problem.
+description: Use when reviewing code, diffs, PRs, or designs for long-term complexity, module boundaries, interface depth, or abstraction fit. Trigger on phrases like "review this design," "is this the right abstraction," "should this be split," "is this getting too complex," or any architecture feedback request — even without the words "design review." Not for style polish or isolated bugs.
 argument-hint: "[optional: design, diff, file, plan, or scope]"
 inputs:
   - name: scope
@@ -10,37 +10,38 @@ inputs:
     required: false
 ---
 
-<trigger>
-Review architectural shape, module boundaries, and interface depth when the question is long-term complexity — not style polish or isolated correctness bugs.
-</trigger>
-
 <intent>
-Reduce future complexity. Start from observable symptoms, diagnose concrete design red flags, then recommend the smallest change that improves the interface-to-implementation ratio.
+Reduce future complexity by diagnosing symptoms, naming red flags, and recommending the smallest change that improves the interface-to-implementation ratio.
 </intent>
 
 <hard_constraint>
 Preserve domain meaning. Veto any move that flattens meaningful business distinctions, hides real invariants, or erases language the domain depends on, even if the code shape looks simpler.
+For example, do not collapse Invoice and Receipt into Document just because their fields overlap.
 </hard_constraint>
 
-<workflow>
+<process>
 1. Resolve the scope from `$ARGUMENTS`, recent conversation, a design artifact, a file path, or the current branch diff. State assumptions inline and proceed unless a wrong assumption would flip the recommendation; only then ask one focused question.
 2. Read enough context to understand callers, callees, data flow, ownership boundaries, domain terms, and existing conventions before judging.
 3. Measure complexity by symptoms first:
    - Change amplification: how many places must change for one conceptual change?
    - Cognitive load: how much must a reader know at once to use or modify this safely?
    - Unknown unknowns: what hidden dependencies or non-obvious constraints could surprise a maintainer?
-4. Diagnose named red flags only after symptoms are visible. Prefer pattern names and evidence over taste claims.
-5. Design it twice: sketch 2–3 plausible options, including keeping the current design when credible. Prefer the deepest interface for its implementation cost.
-6. Apply restraint: recommend no change when complexity is local, understandable, and cheaper than abstraction churn.
-7. Report findings collaboratively as questions and trade-offs, not mandates. If there is little signal, keep the review short.
-</workflow>
+
+Map symptoms to candidates — change amplification often points to information leakage or conjoined methods; cognitive load often points to shallow modules or overexposure.
+</process>
+
+<stance>
+- Diagnose named red flags only after symptoms are visible. Prefer pattern names and evidence over taste claims.
+- Design it twice: sketch 2–3 plausible options, including keeping the current design when credible. Prefer the deepest interface for its implementation cost.
+- Apply restraint: recommend no change when complexity is local, understandable, and cheaper than abstraction churn.
+- Report findings collaboratively as questions and trade-offs, not mandates. If there is little signal, keep the review short.
+</stance>
 
 <red_flags>
-Use these names when they fit, and cite evidence:
-- Shallow module: the interface is nearly as complex as the implementation it hides.
+- Shallow module: interface complexity ≈ implementation complexity.
 - Information leakage: callers must know internal representation, ordering, storage, protocol, or lifecycle details.
-- Pass-through method: a method mostly forwards parameters/results without adding abstraction, policy, or simplification.
-- Conjoined methods: methods must be called together, or in a specific order, that the interface does not enforce.
+- Pass-through method: forwards parameters/results without adding abstraction, policy, or simplification.
+- Conjoined methods: methods must be called together or in a specific order the interface does not enforce.
 - Temporal decomposition: modules are split by execution order rather than stable concepts or responsibilities.
 - Overexposure: public API, types, fields, options, or flags expose choices most callers should not make.
 - Generic interfaces: names or shapes are so abstract that domain intent and invariants disappear.
@@ -64,6 +65,29 @@ Classify each finding by impact and confidence:
 - Avoid tactical patches that solve the immediate symptom while making the system harder to reason about.
 </principles>
 
+<worked_example>
+```text
+Code shape:
+- Callers construct CacheKey(user.id, org.id, locale, featureFlags.hash)
+- Callers then call cache.get(key), deserializeUser(), and check freshness.
+
+Symptom observed:
+- Cognitive load: every caller must know key structure, serialization, and freshness rules.
+
+Red flag(s):
+- Shallow module: Cache exposes almost as much policy as it hides.
+- Information leakage: callers know the key representation and freshness protocol.
+
+Options:
+- Keep as-is if only one caller exists and policy is still volatile.
+- Add UserCache.getFreshUser(user, org, locale) to own keying, deserialization, and freshness.
+- Split freshness into a separate policy only if multiple caches already share it.
+
+Recommendation:
+- Would moving key construction and freshness behind UserCache reduce caller knowledge without hiding domain rules?
+```
+</worked_example>
+
 <tone>
 Write like a collaborator reviewing design with the author. Prefer questions such as “Would this reduce caller knowledge?”, “What invariant owns this rule?”, or “Could this sit behind the interface?” Use mandates only for blocking issues with strong evidence.
 </tone>
@@ -76,26 +100,22 @@ Scope: <scope>
 Assumption: <inline assumption, if any>
 Design read: <key files/artifacts>
 
-Complexity symptoms:
-- Change amplification: <observed/not observed + evidence>
-- Cognitive load: <observed/not observed + evidence>
-- Unknown unknowns: <observed/not observed + evidence>
+Symptom observed:
+- <symptom> — <evidence with code reference>
 
-Findings:
-- [<severity>] <red flag name> — <collaborative question or concern> — evidence: <file/ref>
+Red flag(s):
+- [<severity>] <red flag name> — <evidence with code reference>
 
-Design it twice:
+Options:
+- No change: <when the current design is acceptable + trade-off>
 - Option A: <alternative + trade-off>
 - Option B: <alternative + trade-off>
-- Option C: <optional current design or third alternative + trade-off>
 
-Recommended design move:
-- <smallest change, or “no change” if restraint applies>
+Recommendation:
+- <question or trade-off framing the smallest useful design move>
 
-Trade-offs:
-- <what gets simpler>
-- <what cost or risk remains>
-- Domain preservation check: <why meaningful distinctions are preserved, or why a tempting move is vetoed>
+Domain preservation check:
+- <why meaningful distinctions are preserved, or why a tempting simplification is vetoed>
 
 Verdict: <keep as-is | adjust before implementation | refactor now | split/defer>
 ```
