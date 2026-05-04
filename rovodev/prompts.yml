@@ -69,15 +69,6 @@ prompts:
         type: string
         required: false
 
-  - name: red-green-refactor
-    description: "Implement small behavior with a test-first red/green/refactor loop"
-    content_file: prompts/red-green-refactor/SKILL.md
-    inputs:
-      - name: scope
-        label: Behavior or scope
-        description: Optional behavior, bug, file, or scope to implement with a red-green-refactor loop. Leave empty to infer from conversation.
-        type: string
-        required: false
 
   - name: review-tests
     description: "Review and strengthen branch tests for meaningful coverage and regression resistance"
@@ -89,9 +80,9 @@ prompts:
         type: string
         required: false
 
-  - name: create-spec
+  - name: create-plan
     description: "Author a concise planning artifact plus a reviewable implementation plan"
-    content_file: prompts/create-spec/SKILL.md
+    content_file: prompts/create-plan/SKILL.md
     inputs:
       - name: topic
         label: Topic or seed
@@ -104,9 +95,9 @@ prompts:
         type: string
         required: false
 
-  - name: execute-spec
+  - name: execute-plan
     description: "Implement a planning artifact with repo patterns, tests, and verification"
-    content_file: prompts/execute-spec/SKILL.md
+    content_file: prompts/execute-plan/SKILL.md
     inputs:
       - name: artifact
         label: Planning artifact

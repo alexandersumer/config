@@ -1,5 +1,5 @@
 ---
-name: create-spec
+name: create-plan
 description: Author a concise planning artifact plus a reviewable implementation plan
 argument-hint: "[optional: feature/topic, problem statement, or path to seed notes/artifact]"
 inputs:

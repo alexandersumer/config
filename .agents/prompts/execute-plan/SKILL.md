@@ -1,5 +1,5 @@
 ---
-name: execute-spec
+name: execute-plan
 description: Implement a planning artifact with repo patterns, tests, and verification
 argument-hint: "[optional: artifact path, plan name, or inline instructions]"
 inputs:
