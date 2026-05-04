@@ -43,5 +43,5 @@ Next chunk:
 - <name or None>: <signal or reason>
 Open questions:
 - <item or None>
-Checks: `<command>` -> <result>
+Checks: `<command>` -> <result> or `not run — <reason>`
 ```

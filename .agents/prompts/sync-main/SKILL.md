@@ -18,4 +18,4 @@ Search for conflict markers. Run build if available. Stage resolved files and co
 Final:
 - Synced: `<branch>` with `<remote>/<default>`
 - Merge: `<fast-forward|merge commit|conflicts resolved>`
-- Checks: `<command>` -> `<result>`
+- Checks: `<command>` -> `<result>` or `not run — <reason>`

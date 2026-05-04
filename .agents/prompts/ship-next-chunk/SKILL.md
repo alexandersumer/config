@@ -20,44 +20,38 @@ inputs:
     required: false
 ---
 
-Start from fresh default, pick the next artifact-backed chunk, implement it on a new branch, leave it uncommitted.
+Start from fresh default, choose the next artifact-backed chunk, implement it on a new branch, leave it uncommitted.
 
-Do not pick easy cleanup. The chunk must deliver the next real capability through real entry points with local verification.
+Do not pick cleanup or helper-only work. Ship the next real behavior/capability through real entry points with local verification.
 
 Refresh:
 - require clean working tree and resolvable upstream default
 - switch to default branch
-- fetch `<remote> <default> --prune`
-- fast-forward or clean reset to `<remote>/<default>` only when safe
-- confirm clean status and matching HEAD
+- run `git fetch --prune <remote> <default>`
+- fast-forward to `<remote>/<default>`; stop if that cannot be done cleanly
 
 Discover:
-- emit `Locality: <prefixes> (from <signal>)` from last merge paths, reflog token, `artifact`, `focus`, or `project_root`
-- resolve artifact set from inputs or repo planning files
-- read companion artifacts
+- emit `Locality: <prefixes> (from <signal>)`
+- use `artifact`, `focus`, `project_root`, last-merge paths, reflog token, or repo planning files
+- read the artifact set and companions
 - emit `Artifact source: <path|conversation|artifact input>`
-- ask if locality is weak or candidates tie
+- ask if candidates tie or locality is weak
 
-Pick chunk:
-- next or unblocking artifact item
+Pick a chunk that is:
+- next or unblocking in the artifact
 - not already implemented
-- reviewable size unless artifact requires more
-- one behavior/capability wired into real entry points
-- one acceptance signal
+- reviewable unless the artifact requires more
+- wired into real entry points
+- backed by one acceptance signal
 - not docs/tests/types/helpers-only unless paired with behavior
 
-For infra chunks, do not shrink below a usable local command/harness with one real example and a plausible broken case it catches.
+For infra chunks, the unit of work is a usable local command/harness plus one real example and one plausible broken case it catches.
 
-Branch:
-- compute valid Conventional Commit subject
-- create `<type>/<kebab-description>` from fresh default
+Create `<type>/<kebab-description>` from fresh default using a valid Conventional Commit subject.
 
-Implement:
-- read touched modules, tests, recent default commits, remaining artifact context
-- build code, wiring, tests, required docs/config
-- tests catch a named realistic regression
-- if existing checks cannot prove the behavior, add the missing targeted path
-- no suppressions, baselines, dependency bumps, skipped tests, or build/test infra edits unless artifact requires them
+Implement code, wiring, tests, and required docs/config. Tests must catch a named regression. If existing checks cannot prove the behavior, add the missing targeted path.
+
+No suppressions, baselines, dependency bumps, skipped tests, or build/test infra edits unless the artifact requires them.
 
 Run targeted checks and broader checks when available. Do not commit, push, or open a PR.
 
@@ -73,6 +67,6 @@ Files:
 - <path>
 Tests:
 - <test name>: <mutation it catches>
-Checks: <command> -> <result>
+Checks: <command> -> <result> or not run — <reason>
 Next: run git-publish.
 ```

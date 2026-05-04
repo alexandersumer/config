@@ -15,4 +15,4 @@ Final:
 - Resolved: `<files>`
 - Preserved: `<branch intent>`
 - Incorporated: `<incoming change>`
-- Checks: `<command>` -> `<result>`
+- Checks: `<command>` -> `<result>` or `not run — <reason>`

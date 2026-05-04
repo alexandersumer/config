@@ -21,7 +21,7 @@ Strengthen only important changed behavior:
 
 Skip trivial getters, generated code, framework boilerplate, and style conventions.
 
-Run targeted tests and the build when available.
+Run targeted tests. Run the build if available. If no check applies, say why.
 
 Final, one per touched test:
 `<file>::<test_name> — catches <named bug>`

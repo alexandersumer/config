@@ -1,6 +1,6 @@
 ---
 name: git-publish
-description: Commit, push, and maybe open PR
+description: Commit and publish changes
 ---
 
 Commit current staged, unstaged, and relevant untracked changes, then push to `origin`. Create a PR only when starting from the default branch.

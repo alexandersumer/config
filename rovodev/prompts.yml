@@ -53,7 +53,7 @@ prompts:
         required: false
 
   - name: git-publish
-    description: "Commit, push, and maybe open PR"
+    description: "Commit and publish changes"
     content_file: prompts/git-publish/SKILL.md
 
   - name: git-publish-to-origin

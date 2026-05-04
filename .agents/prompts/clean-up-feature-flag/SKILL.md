@@ -12,7 +12,7 @@ inputs:
 
 Remove fully rolled out flag `$ARGUMENTS`. Keep enabled behavior. Delete disabled behavior.
 
-Do not just delete the obvious `if`. Remove the flag as a repo concept: checks, aliases, constants, config, tests, docs, fixtures, dead helpers.
+Do not stop at the first conditional. Remove the flag as a repo concept: checks, aliases, constants, config, tests, docs, fixtures, dead helpers.
 
 Search first for full key, enum/constant/generated names, aliases, and string variants across production, tests, config, docs, and fixtures.
 
@@ -23,5 +23,5 @@ Repeat searches until no relevant references remain. Verify retained behavior th
 Final:
 - Removed: `<flag>`
 - References: `<0 or remaining with reason>`
-- Checks: `<command>` -> `<result>`
+- Checks: `<command>` -> `<result>` or `not run — <reason>`
 - Files: `<changed files>`

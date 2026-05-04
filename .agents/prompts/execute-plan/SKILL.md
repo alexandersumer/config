@@ -37,7 +37,7 @@ Final under 25 lines:
 Artifact: <path or inline>
 Implemented:
 - <behavior>: <files> — `<command>` -> <result>
-Checks: `<command>` -> <result>
+Checks: `<command>` -> <result> or `not run — <reason>`
 Deferred:
 - <item or None>: <reason>
 Next: review-branch, then git-publish.

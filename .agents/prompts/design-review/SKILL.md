@@ -12,7 +12,7 @@ inputs:
 
 Review the design in `scope`, `$ARGUMENTS`, conversation, artifact, file, or branch diff.
 
-Do not give architecture vibes. Show the symptom, the code evidence, and the smallest useful design move.
+Do not give abstract architecture advice. Show the symptom, evidence, and smallest useful design move.
 
 Preserve domain meaning. Do not collapse real concepts or hide real invariants just to make code look simpler.
 

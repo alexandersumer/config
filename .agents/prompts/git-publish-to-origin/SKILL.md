@@ -5,7 +5,7 @@ description: Commit and push current branch
 
 Commit current staged, unstaged, and relevant untracked changes, then push current branch to `origin`.
 
-Do not create branches, open PRs, run surprise checks, or use a sloppy subject.
+Do not create branches, open PRs, run unrequested checks, or use an invalid subject.
 
 Workflow:
 1. Inspect branch, status, and enough diff for one subject.
