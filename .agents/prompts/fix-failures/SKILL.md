@@ -10,23 +10,31 @@ inputs:
     required: false
 ---
 
-Read the README to learn how to run checks locally.
+Fix the real failure. Use `error_output`, else `$ARGUMENTS`, else run the repo's local check suite after reading README/CONTRIBUTING/build files.
 
-Use the error output below if provided; otherwise, run the full local check suite to discover failures.
-
-$ARGUMENTS
+Do not satisfy this by rerunning the same command until it happens to pass. The known failure mode is treating test output as the task instead of evidence. Every run must change your knowledge, your hypothesis, or the code.
 
 For each failure:
-1. Reproduce locally so you can see it (mandatory for integration tests).
-2. Diagnose the root cause in the application code under test.
-3. Fix the application code the checker is pointing at. Examples of correct fixes: remove a redundant modifier when a linter flags it; rewrite an unsafe pattern when a static analyzer flags it; correct the production logic when a test asserts the right behavior.
+1. Reproduce it locally, using the smallest command that still exercises the failure.
+2. Identify the root cause in application code or in a test that asserts intended behavior incorrectly.
+3. Fix the root cause. Do not mute the symptom.
+4. Re-run the targeted command, then the broader local suite once targeted evidence is green.
 
-Allowed changes: application source code, test code that asserts correct behavior.
-Disallowed changes: per-site warning suppressions, lint/checker baselines, annotation-based opt-outs, wrapping code to dodge a checker, dependency version bumps, build config changes, test infrastructure changes.
+Allowed changes:
+- application source code
+- tests that assert the correct behavior
 
-After each fix, run the smallest relevant check first, then the full local check suite once the targeted failure is resolved. Iterate until green or clearly blocked.
+Forbidden shortcuts:
+- warning suppressions, lint baselines, annotation opt-outs
+- dependency bumps or build-config edits
+- test-infra edits, skipped tests, deleted tests, weakened assertions
+- wrapper code that dodges the checker instead of fixing the defect
 
-Acceptance criteria:
-- Local check suite passes end-to-end.
-- No file in the disallowed list above was modified.
-- If failures remain after 3 fix attempts, stop and report each remaining failure with its diagnosis.
+If the same command fails three times without new information, stop rerunning it. Build a smaller reproducer, inspect the boundary it exercises, or report the blocker with diagnosis.
+
+Final response:
+- Fixed: `<root cause>`
+- Changed: `<files>`
+- Targeted check: `<command>` -> `<result>`
+- Full check: `<command>` -> `<result or not run: reason>`
+- Remaining: `<none or diagnosed blockers>`

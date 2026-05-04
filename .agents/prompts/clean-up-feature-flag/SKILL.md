@@ -10,19 +10,31 @@ inputs:
     required: true
 ---
 
-Remove fully rolled out feature flag `$ARGUMENTS`. Keep the enabled behavior; delete the disabled paths.
+Remove fully rolled out feature flag `$ARGUMENTS`. Keep the enabled behavior. Delete the disabled behavior.
 
-Find references before editing: full key string, enum/constant name, obvious aliases, and common string variants. Search production code, tests, configuration, and docs, but do not chase unrelated substring matches once context proves they are different concepts.
+Do not satisfy this by deleting the obvious `if` and calling the build green. The known failure mode is leaving aliases, tests, config, docs, or dead disabled-path helpers behind. The cleanup is done only when the flag no longer exists as a concept in the repo and the retained enabled behavior is verified through a real path.
+
+Before editing, search for:
+- full flag key string
+- enum, constant, generated, and config names
+- obvious aliases and string variants
+- production code, tests, config, docs, and fixtures
 
 Apply the cleanup:
-- Replace each flag check with the enabled branch inlined; delete the disabled branch.
-- Delete tests that exclusively cover the disabled behavior.
-- Remove the flag definition from its enum/config once no references remain.
-- Remove imports, helpers, and types left unused by the above.
+- Inline the enabled branch at every check.
+- Delete disabled branches and tests that only assert disabled behavior.
+- Remove the flag definition after references are gone.
+- Remove now-unused imports, helpers, types, config, docs, and fixtures.
+- Do not chase unrelated substring matches after context proves they are different concepts.
 
-Run targeted checks first, then the build/test suite when available. Fix failures by correcting missed references or updating tests that asserted disabled behavior. Iterate until green or clearly blocked.
+Verification:
+- Repeat the searches and prove zero relevant references remain.
+- Run targeted checks for the retained enabled behavior first.
+- If no targeted check exists for important retained behavior, add or strengthen one.
+- Run the broader build/test suite when available.
 
-Acceptance criteria:
-- Zero references to the flag remain (verified by repeating the search).
-- Build and tests pass.
-- No behavioral changes beyond removing the disabled path.
+Final response:
+- Removed: `<flag key>`
+- References: `0 remaining` or `<remaining with reason>`
+- Behavior verified: `<command>` -> `<result>`
+- Files: `<changed files>`

@@ -10,21 +10,22 @@ inputs:
     required: false
 ---
 
-Determine the base branch. Get the cumulative branch diff with three-dot syntax: `git diff base...HEAD`. Read the production code under test before evaluating its tests. Narrow the review to `$ARGUMENTS` if provided.
+Review and strengthen tests for the current branch. Determine the base branch and inspect `git diff base...HEAD`. Read the production code before judging its tests. Narrow to `$ARGUMENTS` only if provided.
 
-For each important behavior in scope, run a mutation check: imagine a plausible bug in the production code it covers (off-by-one, swapped arguments, null vs empty, flipped conditional, missing await, wrong exception type). Strengthen tests only when the missing assertion would catch a realistic regression.
+Do not satisfy this by adding more assertions that would pass under the same bug. The known failure mode is coverage theater: tests that check existence, mocks, snapshots, or implementation shape without proving behavior.
 
-Apply these strengthening moves:
-- Replace weak assertions (existence checks, "not null", "size > 0", "no exception thrown") with specific ones on the actual values.
-- Rewrite tests that assert on implementation structure (private fields, mock call order with no behavioral meaning) to assert on observable behavior.
-- Add edge case coverage that maps to a real failure mode in the code under test.
+For each important changed behavior, name a plausible mutation or regression: flipped branch, off-by-one, swapped argument, null vs empty, missing await, wrong exception, stale cache, permission bypass, schema drift. A test is meaningful only if it would catch that bug.
 
-Out of scope: tests for trivial code (plain getters/setters, generated code, framework boilerplate), framework or style conventions of the existing test suite.
+Strengthen tests when useful:
+- Replace weak assertions with exact observable outcomes.
+- Prefer public-entry behavior over private fields or mock call order.
+- Add edge/failure cases tied to real code paths.
+- Do not add tests for trivial getters, generated code, framework boilerplate, or style conventions.
 
-After edits, run the build to verify tests pass.
+After edits, run the targeted test command and the broader build when available.
 
-Acceptance criteria:
-- Each strengthened test catches a realistic mutation or boundary case it previously missed.
-- No new tests for trivial code.
-- Build is green.
-- Final report lists each touched test as `<file>::<test_name> — <what changed and which mutation it now catches>`.
+Final report, one touched test per line:
+`<file>::<test_name> — <what changed> — catches: <named mutation>`
+
+If no test should change, output exactly:
+`no test changes justified`

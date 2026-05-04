@@ -10,14 +10,19 @@ inputs:
     required: false
 ---
 
-Apply the changes described below. If empty, infer them from the preceding conversation. If the requested change is still ambiguous after reading the relevant files, ask one concise question instead of guessing.
+Apply the requested change. Use `changes`, else `$ARGUMENTS`, else the preceding conversation. If the change is still ambiguous after reading the relevant files, ask one concise question and stop.
 
-$ARGUMENTS
+Do not satisfy this by making a plausible-looking edit in isolation. The known failure mode is guessing the shape of the code from the request, adding a new abstraction, or changing nearby code because it feels cleaner.
 
-Read the relevant files first to learn the existing patterns. Match those patterns: naming, error handling, layering, test style, comment density.
+Read the relevant files first. Match the existing naming, layering, error handling, test style, and comment density. Make the smallest correct change that preserves the surrounding design.
 
-Acceptance criteria:
-- Diff contains only the lines required by the requested change and immediate consistency fixes.
-- New code reads like the surrounding code (same idioms, same abstraction level).
-- No new dependencies, no new abstractions, no new comments unless the change itself requires them.
-- Existing call sites and tests still compile and behave as before.
+Required outcome:
+- The requested behavior or text change is present.
+- The diff contains only required lines and immediate consistency fixes.
+- Existing call sites and tests still compile in the same way.
+- No new dependency, abstraction, comment, or broad refactor appears unless the request itself requires it.
+
+Final response:
+- Changed: `<files>`
+- Checks: `<command or not run: reason>`
+- Notes: `<only if something remains unclear or blocked>`

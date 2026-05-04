@@ -10,23 +10,24 @@ inputs:
     required: false
 ---
 
-Determine the base branch. Get the cumulative branch diff with three-dot syntax: `git diff base...HEAD`.
+Review the current branch for material defects. Determine the base branch and inspect `git diff base...HEAD`. Narrow to `$ARGUMENTS` only if provided.
 
-Scope: review the entire diff, or narrow to `$ARGUMENTS` if provided.
+Do not satisfy this by listing preferences. The known failure mode is review noise: naming taste, formatting, speculative risks, or test suggestions that would not catch a realistic bug. Report only issues that can change correctness, security, maintainability, rollout safety, or reviewer confidence.
 
-Report material findings in these categories. Skip theoretical, low-impact, or already-mitigated issues unless they are likely to affect correctness, security, maintainability, or reviewability:
-- Correctness bugs (logic errors, off-by-one, null/empty handling, race conditions, incorrect error handling).
-- Security vulnerabilities (injection, auth/authz gaps, secret exposure, unsafe deserialization, SSRF, missing input validation).
-- Architectural flaws (wrong layer, broken invariants, leaky abstractions, hidden coupling).
-- Missing test coverage for important new or changed behavior that could plausibly regress.
-- Behavioral rollout safety: user-impacting runtime behavior should follow the repo's normal rollout pattern. Flag missing or fake rollout wrappers only when the change is risky enough to need gradual exposure. Config-only changes, infra updates, and pure refactors with no behavioral change are exempt.
+Look for:
+- correctness bugs: logic errors, boundary mistakes, null/empty handling, races, incorrect error handling
+- security issues: injection, auth/authz gaps, secret exposure, unsafe deserialization, SSRF, missing validation
+- architectural risks: wrong layer, broken invariant, leaky abstraction, hidden coupling
+- missing tests for important new or changed behavior that could plausibly regress
+- rollout safety gaps for risky user-impacting runtime behavior when the repo has a normal rollout pattern
 
-Out of scope (do not report): formatting, naming preferences, comment wording, import order, or any purely subjective style point.
+Do not report:
+- formatting, import order, comment wording, naming preference, or subjective style
+- risks already mitigated by the diff or surrounding code
+- rollout demands for config-only changes, infra-only changes, or pure refactors
 
-Output format — one finding per line:
+Output one finding per line:
+`<filename>:<line> <problem> -> <fix>`
 
-```
-<filename>:<line> <problem> -> <fix>
-```
-
-If nothing in scope was found, output exactly: `no issues found`.
+If nothing material is found, output exactly:
+`no issues found`

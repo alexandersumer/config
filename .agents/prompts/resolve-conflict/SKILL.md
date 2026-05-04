@@ -3,16 +3,23 @@ name: resolve-conflict
 description: Resolve merge conflicts preserving branch intent
 ---
 
-Read the conflict markers and the commit history of both branches to identify the intent on each side. Resolve conflicts so the current branch's intent is preserved while the incoming branch's updates are incorporated.
+Resolve merge conflicts while preserving the current branch's intent and incorporating incoming changes.
 
-When the incoming branch intentionally removed or simplified code (feature flags, dead code, deprecated APIs, temporary constructs) that the current branch did not introduce, accept the removal. Adapt the current branch's code to work without it.
+Do not satisfy this by choosing one side wholesale. The known failure mode is reverting incoming cleanup or deleting branch work because that makes the markers disappear. A conflict is resolved only when both sides' intent has been understood and the resulting code is coherent.
+
+Process:
+- Read every conflict marker and the surrounding file context.
+- Inspect enough commit history from both sides to understand why each side changed.
+- Preserve current branch intent.
+- Incorporate incoming updates.
+- If incoming intentionally removed or simplified feature flags, dead code, deprecated APIs, or temporary constructs that the current branch did not introduce, accept the removal and adapt current-branch code to work without it.
 
 After resolving:
-- Search every affected file for `<<<<<<<`, `=======`, `>>>>>>>`. Re-resolve any that remain.
+- Search affected files and the working tree for `<<<<<<<`, `=======`, `>>>>>>>`.
 - Run the build if a build command is available.
 
-Acceptance criteria:
-- No conflict markers remain in the working tree.
-- Current branch's intent is intact.
-- Code introduced or removed by the incoming branch is reflected, not reverted.
-- Build passes if a build command exists.
+Final response:
+- Resolved: `<files>`
+- Preserved branch intent: `<one line>`
+- Incorporated incoming change: `<one line>`
+- Checks: `<command>` -> `<result>`

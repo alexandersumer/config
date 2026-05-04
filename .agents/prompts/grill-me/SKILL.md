@@ -10,54 +10,35 @@ inputs:
     required: false
 ---
 
-<intent>
-Stress-test a plan or design by asking focused questions one at a time until the important decisions, dependencies, and trade-offs are clear.
-</intent>
+Stress-test the plan or design until the important decisions, dependencies, and trade-offs are clear.
 
-<constraints>
-- Ask one question at a time. Wait for the answer before the next question.
-- For each question, provide your recommended answer upfront so you model what "good" looks like.
-- If a question can be answered by exploring the codebase (existing patterns, architecture, dependencies), do that instead of asking.
-- Prefer the highest-leverage unresolved decision first. Do not exhaustively enumerate branches that are obvious, low-impact, or already settled by repo conventions.
-- Stop when there are no remaining open questions or when you reach a decision that conflicts with the plan's stated intent — surface the conflict explicitly.
-</constraints>
+Do not satisfy this by generating a questionnaire. The known failure mode is asking many generic questions that make the user do the design work. Ask the highest-leverage unresolved question, give your recommended answer, and wait.
 
-<acceptance_criteria>
-- Important architectural choices have a stated reason or constraint backing them.
-- Dependencies between decisions are named (e.g., "this choice depends on the decision about X").
-- The user confirms agreement on each branch before moving on.
-- If a conflict emerges between the plan and a decision, it is surfaced and resolved or explicitly deferred.
-- At the end, you summarize the resolved design tree in a form the user can reference later.
-</acceptance_criteria>
+Start from `plan`, else `$ARGUMENTS`, else conversation context. If the input is a path, read it end to end. If a question can be answered by inspecting the codebase, inspect instead of asking.
 
-<context>
-Start with the plan/design provided in $ARGUMENTS, or infer it from the preceding conversation. Read it end-to-end first before asking any questions. If it is ambiguous or incomplete on a major structural choice, start there.
-</context>
+Rules:
+- Ask one question at a time.
+- Lead with your recommended answer and rationale.
+- Prefer decisions that affect architecture, data model, boundaries, sequencing, verification, or irreversible cost.
+- Skip obvious, low-impact, or repo-convention-settled branches.
+- Stop when the design tree is clear or when a decision conflicts with the plan's stated intent.
 
-<output_format>
-Example opening:
-
-```
+Opening format:
+```text
 Plan: <source>
 
-**Q1: [decision area]**
-
-Recommended: <your suggestion>
-
-Your turn: <wait for answer>
+Q1: <decision area>
+Recommended: <answer + reason>
+Your turn: <specific confirmation or alternative requested>
 ```
 
-At the end, a summary like:
-
-```
+Final summary:
+```text
 Resolved design tree:
-- [decision] -> [rationale] (confirmed)
-- [decision] -> [rationale] (confirmed)
-- [decision] -> [rationale] (confirmed)
+- <decision> -> <rationale> (confirmed)
 
 Unresolved:
-- [open question]: <blocking reason>
+- <open question or None>: <blocking reason>
 
-Next: <suggest what to do with this grilled design>
+Next: <what to do with the grilled design>
 ```
-</output_format>

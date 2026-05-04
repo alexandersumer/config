@@ -20,62 +20,55 @@ inputs:
     required: false
 ---
 
-The previous branch merged. Reset to a fresh default branch, read the relevant artifact set, pick the next chunk, implement it on a new branch, and leave it uncommitted.
+The previous branch merged. Reset to a fresh default branch, choose the next artifact-backed chunk, implement it on a new branch, and leave changes uncommitted.
 
-## Refresh
-Preconditions: clean working tree; upstream remote has a resolvable default branch. If either fails, stop and report instead of stashing, discarding, or guessing.
+Do not satisfy this by picking an easy cleanup or a helper-only slice. The known failure mode is creating a neat branch that does not deliver the next real capability. The chunk must be artifact-backed, reviewable, reachable through real entry points, and locally verified.
 
-Determine `<remote>` and `<default-branch>` from upstream HEAD, falling back to common default names only if needed. Switch to default branch. Run `git fetch <remote> <default-branch> --prune`, then fast-forward to `<remote>/<default-branch>` when safe. Use `git reset --hard <remote>/<default-branch>` only after confirming the working tree is clean and the current branch is the default branch. Confirm clean status and `HEAD == <remote>/<default-branch>`.
+Refresh:
+- Preconditions: clean working tree and resolvable upstream default branch. If either fails, stop. Do not stash, discard, or guess.
+- Determine `<remote>` and `<default-branch>` from upstream HEAD, falling back to common defaults only when needed.
+- Switch to default branch.
+- Fetch `<remote> <default-branch> --prune`.
+- Fast-forward safely. Use `git reset --hard <remote>/<default-branch>` only after confirming the working tree is clean and current branch is the default branch.
+- Confirm clean status and `HEAD == <remote>/<default-branch>`.
 
-## Discover artifact set
-Emit locality before artifact selection:
-- Merged paths: `git log -1 --name-only --pretty=format: <remote>/<default-branch>`.
-- Previous branch token from reflog if available.
-- Output `Locality: <prefixes> (from <signal>)`.
+Discover artifact set:
+- Emit locality first: merged paths from `git log -1 --name-only --pretty=format: <remote>/<default-branch>`, previous branch token from reflog if useful, then `Locality: <prefixes> (from <signal>)`.
+- Resolve from `artifact`, else `focus`, else `project_root`, else repo artifacts scored by locality: `.plan`, `.projects`, `.tasks`, docs planning dirs, common spec/design/proposal/plan/roadmap/todo files.
+- Read companion design/proposal/plan files in the same directory or linked front matter.
+- Emit `Artifact source: <path or conversation or artifact input>`.
+- Ask, do not guess, if no artifact scores, top candidates are close, or locality evidence is weak.
 
-Resolve from first source that works:
-1. `artifact` input as project name, artifact path/text, or discovery focus.
-2. Legacy `focus` input the same way, if `artifact` is empty.
-3. `project_root` as search restriction.
-4. Repo artifacts scored by locality: `.plan`, `.projects`, `.tasks`, docs planning dirs, common `SPEC/DESIGN/PROPOSAL/PLAN/ROADMAP/TODO/tasks` filenames. Score path locality, references to merged paths, previous-branch tokens, implementation-plan role, recency. Read companion design/proposal/plan files in same dir or linked front matter.
-5. Conversation/repo context when nothing is specified.
+Pick chunk:
+- Next in artifact order or required to unblock the next item.
+- Not already implemented in recent default-branch history or existing branches.
+- Reviewable: usually 1-10 files / 50-500 net lines, unless artifact needs justify more.
+- Delivers one user-visible behavior or internal capability wired into real entry points.
+- Has one concrete acceptance signal.
+- Reject vague cleanup, one-variable renames, helper/type/test/docs-only chunks, and huge rewrites.
+- For infrastructure chunks, reviewability means a usable command/harness, at least one real example, and evidence it would catch a plausible broken case. Do not shrink below autonomous verification capability.
 
-Emit `Artifact source: <path or "conversation" or "artifact input">`. Ask, do not guess, if no artifact scores, top two are close, or chosen set lacks locality evidence.
+Branch:
+- Compute a valid Conventional Commit subject matching `^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9-]+\))?!?: [a-z].{0,70}[^.]$`.
+- Derive branch name as `<type>/<kebab-case-description>`, including scope when useful.
+- Create the branch from fresh default before implementation edits.
 
-## Pick chunk
-A chunk qualifies only if:
-- It is next in the artifact set or unblocks the next item.
-- It has not already been implemented (`git log -50 <remote>/<default-branch>`, `git branch -a`).
-- Expected diff is reviewable, usually about 1–10 files / 50–500 net lines; use artifact needs over numeric targets.
-- It delivers one user-visible behavior or internal capability wired into real entry points.
-- It has one concrete acceptance signal.
+Implement:
+- Read recent default commits, touched modules, existing tests, and remaining artifacts.
+- Build production behavior, wiring, tests, required docs/config, and rollout wrapper only if repo convention requires it.
+- If existing local tests cannot verify the capability, build the missing targeted path instead of rerunning unrelated green checks.
+- New tests must catch a named mutation or realistic regression.
+- Forbidden unless artifact requires it: suppressions, baselines, dependency bumps, build-config edits, test-infra edits.
 
-Reject vague cleanup, one-variable renames, helper/type/test/docs-only chunks, and huge rewrites. If multiple qualify, pick the one with the clearest acceptance signal and announce: `Chunk: <name>. Why: <artifact-set reason>`.
+Leave changes uncommitted. Do not add, commit, push, or open a PR.
 
-If artifacts track status, update the chosen chunk status in the relevant artifact.
-
-## Branch
-Before editing, compute a Conventional Commit subject `<type>(<optional-scope>): <description>` matching `^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9-]+\))?!?: [a-z].{0,70}[^.]$`.
-
-Derive the branch as `<type>/<kebab-case-description>` from that subject (include `<scope>` when useful, e.g. `feat/auth-add-pkce`). Use no ticket prefix, marketing language, or emojis. Create the branch with `git switch -c <branch-name>` from the fresh default-branch commit before making implementation edits.
-
-## Implement
-Now on the new branch, read recent default-branch commits, touched modules, and existing tests in parallel with any remaining artifact files.
-
-Match surrounding code: naming, error handling, test framework, comment density, dependencies. Build end to end: production behavior, wiring, tests catching at least one named mutation, required docs/config, rollout wrapper if the codebase already uses one for behavioral changes.
-
-Run local build/tests; fix application/test code until green. Disallowed: suppressions, lint baselines, dependency bumps, build-config edits, test-infra edits.
-
-## Output
-Leave changes uncommitted; do not add, commit, push, or open a pull request. Downstream `git-publish` can reuse this subject as the commit message and pull request title.
-
-Final response exactly:
-```
+Final response exactly, under 25 lines:
+```text
 Locality: <prefixes> (from <signal>)
 Artifact source: <path or "conversation" or "artifact input">
 Chunk: <name>
 Why: <one sentence tying it to the artifact set>
-Subject: <Conventional Commit subject for the chunk>
+Subject: <Conventional Commit subject>
 Branch: <branch-name>
 
 Files:
@@ -88,15 +81,3 @@ Checks: <command run> -> <pass/fail summary>
 
 Next: run the git-publish prompt to commit, push, and open or update the pull request.
 ```
-Under 25 lines. No preamble, summary, or sign-off.
-
-## Acceptance criteria
-- HEAD matched `<remote>/<default-branch>` before edits.
-- Locality emitted before artifact selection; artifact source before chunk selection.
-- Chosen artifact set passed locality verification.
-- Chunk fits qualification rules and scope.
-- Diff stays within locality/project_root and touches 1–10 files unless artifact justifies otherwise.
-- New tests catch named mutation.
-- Final build/tests pass.
-- Current branch is a new kebab-case branch derived from a valid Conventional Commit subject; working tree has changes; no commit.
-- Final message matches output shape.

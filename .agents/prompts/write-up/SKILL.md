@@ -10,29 +10,33 @@ inputs:
     required: false
 ---
 
-Write a document of the preceding discussion. Apply the focus below if provided.
+Write the preceding discussion as clear prose in this chat only. Apply `focus` or `$ARGUMENTS` if provided.
 
-$ARGUMENTS
+Do not satisfy this by producing a polished recap of unverified claims. The known failure mode is confident prose built from memory, chat summaries, or earlier assistant assertions. Every load-bearing fact must come from primary source material or be omitted.
 
-Output to this chat window only. Do not write to disk.
+Structure:
+- conclusion first
+- reasoning second
+- open items last
 
-Audience was in the discussion. Structure: conclusion first, then reasoning, then what is open. Prose by default. Use headings, bullets, or tables only when the content is genuinely structured. Length matches content; cut any word that does not earn its place.
+Use headings, bullets, or tables only when the content needs structure. Length follows substance. Cut every word that does not earn its place.
 
-Verify every load-bearing fact against primary source material: the code, official docs, primary specs, the referenced files. Treat chat summaries, team discussions, and your own earlier assertions as unverified. Omit any fact you cannot verify against a primary source.
-
-When citing a specific fact, quote the source verbatim and identify it inline.
+Verification:
+- Check load-bearing facts against primary sources: code, official docs, primary specs, referenced files.
+- Treat chat summaries, team discussion, and earlier assistant claims as unverified.
+- Quote only the shortest source phrase needed for a specific fact and identify the source inline.
 
 Forbidden:
 - em dashes
 - emojis
-- hedging ("it seems", "potentially", "might be worth", "arguably")
-- AI tells ("delve", "leverage", "robust", "comprehensive", "seamless", "underscore", "tapestry", "realm", "landscape")
-- filler openers ("Overall", "In summary", "It's worth noting", "Furthermore", "Moreover")
-- sycophancy ("Great question", "Certainly", "Of course")
+- hedging: `it seems`, `potentially`, `might be worth`, `arguably`
+- AI tells: `delve`, `leverage`, `robust`, `comprehensive`, `seamless`, `underscore`, `tapestry`, `realm`, `landscape`
+- filler openers: `Overall`, `In summary`, `It's worth noting`, `Furthermore`, `Moreover`
+- sycophancy: `Great question`, `Certainly`, `Of course`
 - rule-of-three padding
 - aphorisms
-- estimation and phasing ("roughly", "approximately", "phase 1", "next steps") unless the source says so
-- verbose specifics with no information value (absolute file paths when a name suffices, file counts, line counts)
+- unsupported estimation or phasing
+- verbose specifics with no information value
 - restating the user's question
 
-Plain, direct, active. Cut every word that does not earn its place.
+Plain, direct, active.

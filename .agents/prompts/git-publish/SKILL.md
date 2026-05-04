@@ -3,29 +3,31 @@ name: git-publish
 description: Commit current changes and push to origin; create a pull request only from the default branch.
 ---
 
-Commit the current staged, unstaged, and relevant untracked changes, then push to `origin`. Create a pull request only when starting from the default branch.
+Commit current staged, unstaged, and relevant untracked changes, then push to `origin`. Create a pull request only when starting from the default branch.
+
+Do not satisfy this by blindly pushing with a provider-generated title. The known failure mode is damaging review/history hygiene while doing a mechanically successful publish. The branch, commit, and PR title must reflect the actual diff through a valid Conventional Commit subject.
 
 Workflow:
-1. Determine the current branch, remote default branch, working-tree status, and enough diff context to choose one Conventional Commit subject. Do not inspect pull requests yet. Do not run tests, builds, linters, type checks, or full verification unless the user explicitly asks.
-2. If there are no staged, unstaged, or relevant untracked changes to commit, stop and say so.
-3. Stage the intended changes, including staged changes, unstaged tracked changes, and relevant untracked files unless the user explicitly excludes something.
-4. If the current branch is not `main`, not `master`, and not the remote default branch:
+1. Determine current branch, remote default branch, working-tree status, and enough diff context to choose one subject. Do not inspect PRs yet.
+2. Do not run tests, builds, linters, type checks, or full verification unless explicitly asked.
+3. If there are no staged, unstaged, or relevant untracked changes, stop and say so.
+4. Stage intended changes, preserving explicit user exclusions.
+5. If current branch is not `main`, not `master`, and not the remote default branch:
    - Do not create, switch, or rename branches.
-   - Do not create, inspect, or update pull requests unless the user explicitly asks.
-   - Commit using the validated subject as the commit message first line.
-   - Push the current branch to `origin`. If needed, set upstream tracking for the current branch on `origin`.
-   - Finish with a brief status summary.
-5. If the current branch is `main`, `master`, or the remote default branch:
+   - Do not create, inspect, or update PRs unless explicitly asked.
+   - Commit with the validated subject as the first line.
+   - Push current branch to `origin`, setting upstream if needed.
+   - Finish with brief status.
+6. If current branch is `main`, `master`, or the remote default branch:
    - Create a new appropriately named branch before committing.
-   - Choose a branch-level Conventional Commit subject for the pull request title.
-   - Commit using the validated commit subject as the commit message first line.
+   - Commit with the validated subject as the first line.
    - Push the new branch to `origin`.
-   - Create a pull request with the validated title and a concise description.
-   - Finish with the pull request URL and a brief status summary.
+   - Create a PR whose title is the validated subject and whose description is concise and diff-grounded.
+   - Finish with PR URL and brief status.
 
 Subject rules:
 - Match exactly: `^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9-]+\))?!?: [a-z].{0,70}[^.]$`.
 - Format: `<type>[optional scope][!]: <lowercase imperative description>`.
 - No trailing period.
-- Do not use a sentence-case summary, branch name, issue title, issue-key prefix, chat summary, or SCM/provider default.
-- If the subject fails validation, fix it before any commit, push, or pull request creation.
+- No sentence-case summary, issue title, issue-key prefix, branch name, chat summary, or SCM default.
+- If validation fails, fix the subject before any commit, push, or PR creation.

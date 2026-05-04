@@ -15,19 +15,27 @@ inputs:
     required: false
 ---
 
-Target pull request: the `pr_target` input, or the current branch's pull request if none was supplied. Apply the optional `focus` input only to narrow or clarify which comments to address; do not let it override the classification rules below.
+Address actionable review comments on `pr_target`, or on the current branch's pull request if none is supplied. Use `focus` only to narrow or clarify; it must not override the classification rules.
 
-Detect the repository host from the remote URL, then fetch all open review comments on the target pull request using the matching SCM/code-review integration or CLI for that host. Read the cumulative branch diff using three-dot syntax (`git diff base...HEAD`) for full context.
+Do not satisfy this by appeasing every reviewer sentence. The known failure mode is changing code for subjective preference, adding complexity, or replying instead of fixing. The deliverable is a small code diff that resolves real defects and leaves non-actionable comments alone.
 
-Classify every comment, then act:
-- **Address**: bugs, correctness issues, missing edge cases, security concerns, architectural problems, misleading naming that can cause misuse, missing tests for changed behavior, factual mistakes. Legitimate regardless of tone.
-- **Ignore**: subjective style preferences, rewrites that don't improve correctness or clarity, requests to add complexity, comments already satisfied by existing code, anything contradicting the branch's intent.
+Fetch all open review comments from the repository host. Read the cumulative branch diff with `git diff base...HEAD` and the relevant file context before editing.
 
-For each addressed comment, read the relevant file and surrounding context, then apply the smallest fix that resolves it. Keep the change scoped to the comment; leave unrelated code alone. After all fixes, run the build if a build command is available.
+Classify every comment:
+- Address: correctness bugs, missing edge cases, security concerns, architectural problems, misleading names that can cause misuse, missing tests for changed behavior, factual mistakes.
+- Ignore: subjective style, rewrites without correctness/clarity benefit, requests that add unjustified complexity, comments already satisfied, comments that contradict branch intent.
 
-Make code changes only. Do not post replies or explanations to the pull request.
+For each addressed comment:
+- Make the smallest code/test change that resolves it.
+- Keep the change scoped to that comment.
+- Do not post PR replies or explanations.
 
-Acceptance criteria:
-- Every comment appears in the final report exactly once.
-- Each entry uses the form `<file>:<line> [addressed]` or `<file>:<line> [ignored: <one-line reason>]`.
-- Build passes if a build command exists.
+Verification:
+- Run targeted checks for changed behavior.
+- Run the build if a build command is available.
+
+Final report: every comment exactly once, using only these forms:
+- `<file>:<line> [addressed]`
+- `<file>:<line> [ignored: <one-line reason>]`
+
+Also include `Checks: <command> -> <result>`.
