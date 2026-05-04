@@ -1,6 +1,6 @@
 ---
 name: write-up
-description: Document the preceding discussion as clear, fact-checked prose in chat
+description: Write a fact-checked summary
 argument-hint: "[optional: focus or angle]"
 inputs:
   - name: focus
@@ -10,33 +10,14 @@ inputs:
     required: false
 ---
 
-Write the preceding discussion as clear prose in this chat only. Apply `focus` or `$ARGUMENTS` if provided.
+Write the preceding discussion in chat only. Apply `focus` or `$ARGUMENTS` if provided.
 
-Do not satisfy this by producing a polished recap of unverified claims. The known failure mode is confident prose built from memory, chat summaries, or earlier assistant assertions. Every load-bearing fact must come from primary source material or be omitted.
+Do not recap unverified claims. Check load-bearing facts against primary sources: code, official docs, specs, referenced files. Omit facts you cannot verify.
 
-Structure:
-- conclusion first
-- reasoning second
-- open items last
+Structure: conclusion, reasoning, open items. Use bullets/tables only when useful. Cut filler.
 
-Use headings, bullets, or tables only when the content needs structure. Length follows substance. Cut every word that does not earn its place.
+Quote only the shortest source phrase needed and identify the source inline.
 
-Verification:
-- Check load-bearing facts against primary sources: code, official docs, primary specs, referenced files.
-- Treat chat summaries, team discussion, and earlier assistant claims as unverified.
-- Quote only the shortest source phrase needed for a specific fact and identify the source inline.
-
-Forbidden:
-- em dashes
-- emojis
-- hedging: `it seems`, `potentially`, `might be worth`, `arguably`
-- AI tells: `delve`, `leverage`, `robust`, `comprehensive`, `seamless`, `underscore`, `tapestry`, `realm`, `landscape`
-- filler openers: `Overall`, `In summary`, `It's worth noting`, `Furthermore`, `Moreover`
-- sycophancy: `Great question`, `Certainly`, `Of course`
-- rule-of-three padding
-- aphorisms
-- unsupported estimation or phasing
-- verbose specifics with no information value
-- restating the user's question
+Forbidden: em dashes, emojis, hedging, sycophancy, rule-of-three padding, aphorisms, filler openers, unsupported estimates, restating the user's question, and AI tells like `delve`, `leverage`, `robust`, `comprehensive`, `seamless`, `underscore`, `tapestry`, `realm`, `landscape`.
 
 Plain, direct, active.

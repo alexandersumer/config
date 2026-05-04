@@ -1,6 +1,6 @@
 ---
 name: review-tests
-description: Review and strengthen branch tests for meaningful coverage and regression resistance
+description: Strengthen branch tests
 argument-hint: "[optional: focus area]"
 inputs:
   - name: focus_area
@@ -10,22 +10,20 @@ inputs:
     required: false
 ---
 
-Review and strengthen tests for the current branch. Determine the base branch and inspect `git diff base...HEAD`. Read the production code before judging its tests. Narrow to `$ARGUMENTS` only if provided.
+Review tests for `git diff base...HEAD`, narrowed by `$ARGUMENTS` if provided. Read production code first.
 
-Do not satisfy this by adding more assertions that would pass under the same bug. The known failure mode is coverage theater: tests that check existence, mocks, snapshots, or implementation shape without proving behavior.
+Do not add coverage theater. A useful test catches a realistic bug: flipped branch, off-by-one, swapped argument, null vs empty, missing await, wrong exception, stale cache, auth bypass, schema drift.
 
-For each important changed behavior, name a plausible mutation or regression: flipped branch, off-by-one, swapped argument, null vs empty, missing await, wrong exception, stale cache, permission bypass, schema drift. A test is meaningful only if it would catch that bug.
+Strengthen only important changed behavior:
+- replace weak assertions with exact observable outcomes
+- prefer public behavior over private fields or mock call order
+- add edge/failure cases tied to real code paths
 
-Strengthen tests when useful:
-- Replace weak assertions with exact observable outcomes.
-- Prefer public-entry behavior over private fields or mock call order.
-- Add edge/failure cases tied to real code paths.
-- Do not add tests for trivial getters, generated code, framework boilerplate, or style conventions.
+Skip trivial getters, generated code, framework boilerplate, and style conventions.
 
-After edits, run the targeted test command and the broader build when available.
+Run targeted tests and the build when available.
 
-Final report, one touched test per line:
-`<file>::<test_name> — <what changed> — catches: <named mutation>`
+Final, one per touched test:
+`<file>::<test_name> — catches <named bug>`
 
-If no test should change, output exactly:
-`no test changes justified`
+If none: `no test changes justified`

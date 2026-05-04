@@ -1,6 +1,6 @@
 ---
 name: apply-changes
-description: Implement requested changes narrowly and consistently
+description: Apply a narrow requested change
 argument-hint: "[optional: changes to apply]"
 inputs:
   - name: changes
@@ -10,19 +10,14 @@ inputs:
     required: false
 ---
 
-Apply the requested change. Use `changes`, else `$ARGUMENTS`, else the preceding conversation. If the change is still ambiguous after reading the relevant files, ask one concise question and stop.
+Apply `changes`, else `$ARGUMENTS`, else the conversation request.
 
-Do not satisfy this by making a plausible-looking edit in isolation. The known failure mode is guessing the shape of the code from the request, adding a new abstraction, or changing nearby code because it feels cleaner.
+Do not guess from the prompt. Read the relevant files first, then make the smallest correct edit that matches existing naming, layering, error handling, tests, and comment density.
 
-Read the relevant files first. Match the existing naming, layering, error handling, test style, and comment density. Make the smallest correct change that preserves the surrounding design.
+Do not add dependencies, abstractions, broad refactors, or explanatory comments unless the request requires them.
 
-Required outcome:
-- The requested behavior or text change is present.
-- The diff contains only required lines and immediate consistency fixes.
-- Existing call sites and tests still compile in the same way.
-- No new dependency, abstraction, comment, or broad refactor appears unless the request itself requires it.
+If the change is still ambiguous after reading context, ask one question and stop.
 
-Final response:
+Final:
 - Changed: `<files>`
 - Checks: `<command or not run: reason>`
-- Notes: `<only if something remains unclear or blocked>`

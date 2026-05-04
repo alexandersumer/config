@@ -1,6 +1,6 @@
 prompts:
   - name: address-comments
-    description: "Address actionable pull request review comments with minimal code changes; skip subjective feedback"
+    description: "Address actionable PR comments"
     content_file: prompts/address-comments/SKILL.md
     inputs:
       - name: pr_target
@@ -15,7 +15,7 @@ prompts:
         required: false
 
   - name: apply-changes
-    description: "Implement requested changes narrowly and consistently"
+    description: "Apply a narrow requested change"
     content_file: prompts/apply-changes/SKILL.md
     inputs:
       - name: changes
@@ -25,7 +25,7 @@ prompts:
         required: false
 
   - name: clean-up-feature-flag
-    description: "Remove a fully rolled out feature flag and verify checks pass"
+    description: "Remove a rolled-out flag"
     content_file: prompts/clean-up-feature-flag/SKILL.md
     inputs:
       - name: flag_key
@@ -35,14 +35,15 @@ prompts:
         required: true
 
   - name: describe-branch
-    description: "Generate a Conventional Commits pull request title and description"
+    description: "Write PR title and description"
     content_file: prompts/describe-branch/SKILL.md
 
   - name: describe-diff
-    description: "Generate a ≤10 word phrase summarizing working changes"
+    description: "Summarize working changes"
     content_file: prompts/describe-diff/SKILL.md
+
   - name: fix-failures
-    description: "Run relevant build/tests and fix real failures without suppressions"
+    description: "Fix real check failures"
     content_file: prompts/fix-failures/SKILL.md
     inputs:
       - name: error_output
@@ -52,16 +53,16 @@ prompts:
         required: false
 
   - name: git-publish
-    description: "Commit current changes and push to origin; create a pull request only from the default branch."
+    description: "Commit, push, and maybe open PR"
     content_file: prompts/git-publish/SKILL.md
 
   - name: git-publish-to-origin
-    description: "Commit current changes and push to origin."
+    description: "Commit and push current branch"
     content_file: prompts/git-publish-to-origin/SKILL.md
 
-  - name: philosophy-of-software-design
-    description: "Review architectural shape, module boundaries, and interface depth through an Ousterhout lens; use for long-term complexity, not style-only or isolated correctness bugs"
-    content_file: prompts/philosophy-of-software-design/SKILL.md
+  - name: design-review
+    description: "Review software design"
+    content_file: prompts/design-review/SKILL.md
     inputs:
       - name: scope
         label: Design scope
@@ -69,9 +70,8 @@ prompts:
         type: string
         required: false
 
-
   - name: review-tests
-    description: "Review and strengthen branch tests for meaningful coverage and regression resistance"
+    description: "Strengthen branch tests"
     content_file: prompts/review-tests/SKILL.md
     inputs:
       - name: focus_area
@@ -81,7 +81,7 @@ prompts:
         required: false
 
   - name: create-plan
-    description: "Author a concise planning artifact plus a reviewable implementation plan"
+    description: "Write a spec and plan"
     content_file: prompts/create-plan/SKILL.md
     inputs:
       - name: topic
@@ -96,7 +96,7 @@ prompts:
         required: false
 
   - name: execute-plan
-    description: "Implement a planning artifact with repo patterns, tests, and verification"
+    description: "Implement a plan"
     content_file: prompts/execute-plan/SKILL.md
     inputs:
       - name: artifact
@@ -111,7 +111,7 @@ prompts:
         required: false
 
   - name: reconcile-plan
-    description: "Reconcile planning artifacts with current codebase and branch state"
+    description: "Reconcile plan with code"
     content_file: prompts/reconcile-plan/SKILL.md
     inputs:
       - name: artifact
@@ -126,11 +126,11 @@ prompts:
         required: false
 
   - name: resolve-conflict
-    description: "Resolve merge conflicts preserving branch intent"
+    description: "Resolve merge conflicts"
     content_file: prompts/resolve-conflict/SKILL.md
 
   - name: review-branch
-    description: "Review a branch for bugs, security issues, architecture risks, and test gaps"
+    description: "Review branch defects"
     content_file: prompts/review-branch/SKILL.md
     inputs:
       - name: focus_area
@@ -140,7 +140,7 @@ prompts:
         required: false
 
   - name: ship-next-chunk
-    description: "Sync to the default branch, choose the next artifact-backed chunk, implement it on a new branch, and leave changes uncommitted"
+    description: "Ship the next planned chunk"
     content_file: prompts/ship-next-chunk/SKILL.md
     inputs:
       - name: artifact
@@ -160,11 +160,11 @@ prompts:
         required: false
 
   - name: sync-main
-    description: "Fetch the latest default branch and merge it into the current branch"
+    description: "Merge latest default branch"
     content_file: prompts/sync-main/SKILL.md
 
   - name: verify-and-fix
-    description: "Perform adversarial formal and empirical verification of scoped behavior, then fix only proven defects"
+    description: "Verify behavior and fix proven defects"
     content_file: prompts/verify-and-fix/SKILL.md
     inputs:
       - name: scope
@@ -174,7 +174,7 @@ prompts:
         required: false
 
   - name: write-up
-    description: "Document the preceding discussion as clear, fact-checked prose in chat"
+    description: "Write a fact-checked summary"
     content_file: prompts/write-up/SKILL.md
     inputs:
       - name: focus
@@ -184,7 +184,7 @@ prompts:
         required: false
 
   - name: grill-me
-    description: "Stress-test a plan or design with focused questions until the important decisions are clear"
+    description: "Stress-test a plan"
     content_file: prompts/grill-me/SKILL.md
     inputs:
       - name: plan

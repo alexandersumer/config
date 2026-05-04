@@ -1,33 +1,21 @@
 ---
 name: sync-main
-description: Fetch the latest default branch and merge it into the current branch
+description: Merge latest default branch
 ---
 
 Fetch the latest default branch and merge it into the current branch.
 
-Do not satisfy this by merging stale refs or hiding local work. The known failure mode is assuming local refs are current, stashing/discarding without permission, or resolving conflicts by undoing default-branch cleanup.
+Stop if the working tree is dirty or the current branch is the default branch. Do not stash, discard, or guess.
 
-Preconditions. Stop and report if either fails:
-- Working tree has no uncommitted changes.
-- Current branch is not the default branch.
+Resolve remote/default branch from upstream HEAD, falling back to common names only if needed. Always fetch before merging.
 
-Determine the upstream remote and default branch, preferring the current branch's upstream remote and its HEAD, then common names such as `main`, `master`, or `develop`. Always fetch the resolved default branch first.
+Run `git merge <remote>/<default-branch>` and inspect status.
 
-Run `git merge <remote>/<default-branch>`, then `git status`.
+On conflicts, preserve current branch intent while incorporating default-branch changes. Accept default-branch removals of flags, dead code, deprecated APIs, or temporary constructs this branch did not introduce.
 
-If conflicts occur:
-- Resolve them so current branch intent remains intact and default-branch updates are incorporated.
-- If default branch intentionally removed feature flags, dead code, deprecated APIs, or temporary constructs that this branch did not introduce, accept the removal and adapt branch code.
-- Search for `<<<<<<<`, `=======`, `>>>>>>>` after editing.
-- Run the build if available.
-- Stage resolved files and complete the merge commit.
+Search for conflict markers. Run build if available. Stage resolved files and complete the merge commit.
 
-Done means:
-- no conflict markers remain
-- `git status` shows a clean fast-forward or committed merge
-- build passes if a build command exists
-
-Final response:
-- Synced: `<current branch>` with `<remote>/<default-branch>`
+Final:
+- Synced: `<branch>` with `<remote>/<default>`
 - Merge: `<fast-forward|merge commit|conflicts resolved>`
 - Checks: `<command>` -> `<result>`

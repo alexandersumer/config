@@ -1,18 +1,14 @@
 ---
 name: describe-diff
-description: Generate a ≤10 word phrase summarizing working changes
+description: Summarize working changes
 ---
 
-If the working tree is clean, output exactly `clean` and stop.
+If the working tree is clean, output `clean`.
 
-Otherwise inspect staged and unstaged changes and output one phrase naming the primary modification.
-
-Do not satisfy this by listing files. The known failure mode is a vague inventory instead of the change's intent.
-
-Output rules:
+Otherwise inspect staged and unstaged changes and output one phrase:
 - at most 10 words
 - no punctuation
-- names the primary change, not every touched file
+- primary change only, not file inventory
 
 Examples:
 - `add retry to http client`

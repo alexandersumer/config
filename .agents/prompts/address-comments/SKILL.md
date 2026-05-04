@@ -1,6 +1,6 @@
 ---
 name: address-comments
-description: Address actionable pull request review comments with minimal code changes; skip subjective feedback
+description: Address actionable PR comments
 argument-hint: "[pull request number or URL] [optional focus or instructions]"
 inputs:
   - name: pr_target
@@ -15,27 +15,15 @@ inputs:
     required: false
 ---
 
-Address actionable review comments on `pr_target`, or on the current branch's pull request if none is supplied. Use `focus` only to narrow or clarify; it must not override the classification rules.
+Address actionable comments on `pr_target`, or the current branch PR. Use `focus` only to narrow scope.
 
-Do not satisfy this by appeasing every reviewer sentence. The known failure mode is changing code for subjective preference, adding complexity, or replying instead of fixing. The deliverable is a small code diff that resolves real defects and leaves non-actionable comments alone.
+Do not appease every comment. Fix real bugs, edge cases, security issues, architecture problems, misleading names, missing tests, and factual mistakes. Ignore subjective style, unjustified complexity, already-satisfied comments, and comments that contradict branch intent.
 
-Fetch all open review comments from the repository host. Read the cumulative branch diff with `git diff base...HEAD` and the relevant file context before editing.
+Fetch open review comments. Read `git diff base...HEAD` and relevant file context. Make the smallest code/test change for each addressed comment. Do not post PR replies.
 
-Classify every comment:
-- Address: correctness bugs, missing edge cases, security concerns, architectural problems, misleading names that can cause misuse, missing tests for changed behavior, factual mistakes.
-- Ignore: subjective style, rewrites without correctness/clarity benefit, requests that add unjustified complexity, comments already satisfied, comments that contradict branch intent.
+Run targeted checks and the build if available.
 
-For each addressed comment:
-- Make the smallest code/test change that resolves it.
-- Keep the change scoped to that comment.
-- Do not post PR replies or explanations.
-
-Verification:
-- Run targeted checks for changed behavior.
-- Run the build if a build command is available.
-
-Final report: every comment exactly once, using only these forms:
+Final: list every comment exactly once:
 - `<file>:<line> [addressed]`
-- `<file>:<line> [ignored: <one-line reason>]`
-
-Also include `Checks: <command> -> <result>`.
+- `<file>:<line> [ignored: <reason>]`
+- `Checks: <command> -> <result>`

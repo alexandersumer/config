@@ -1,6 +1,6 @@
 ---
 name: grill-me
-description: Stress-test a plan or design with focused questions until the important decisions are clear
+description: Stress-test a plan
 argument-hint: "[optional: plan/design text or file path]"
 inputs:
   - name: plan
@@ -10,35 +10,27 @@ inputs:
     required: false
 ---
 
-Stress-test the plan or design until the important decisions, dependencies, and trade-offs are clear.
+Stress-test `plan`, `$ARGUMENTS`, or the conversation plan.
 
-Do not satisfy this by generating a questionnaire. The known failure mode is asking many generic questions that make the user do the design work. Ask the highest-leverage unresolved question, give your recommended answer, and wait.
+Do not generate a questionnaire. Ask the single highest-leverage unresolved design question, give your recommended answer, then wait.
 
-Start from `plan`, else `$ARGUMENTS`, else conversation context. If the input is a path, read it end to end. If a question can be answered by inspecting the codebase, inspect instead of asking.
+If code can answer the question, inspect code instead of asking.
 
-Rules:
-- Ask one question at a time.
-- Lead with your recommended answer and rationale.
-- Prefer decisions that affect architecture, data model, boundaries, sequencing, verification, or irreversible cost.
-- Skip obvious, low-impact, or repo-convention-settled branches.
-- Stop when the design tree is clear or when a decision conflicts with the plan's stated intent.
+Focus on decisions that affect architecture, data model, boundaries, sequencing, verification, or irreversible cost. Skip low-impact or convention-settled questions.
 
-Opening format:
+Opening:
 ```text
 Plan: <source>
-
-Q1: <decision area>
+Q1: <decision>
 Recommended: <answer + reason>
-Your turn: <specific confirmation or alternative requested>
+Your turn: <confirm or choose alternative>
 ```
 
-Final summary:
+Final:
 ```text
 Resolved design tree:
 - <decision> -> <rationale> (confirmed)
-
 Unresolved:
-- <open question or None>: <blocking reason>
-
-Next: <what to do with the grilled design>
+- <question or None>: <reason>
+Next: <action>
 ```

@@ -1,6 +1,6 @@
 ---
 name: verify-and-fix
-description: Perform adversarial formal and empirical verification of scoped behavior, then fix only proven defects
+description: Verify behavior and fix proven defects
 argument-hint: "[optional: scope, file, function, behavior, or planning artifact]"
 inputs:
   - name: scope
@@ -10,70 +10,44 @@ inputs:
     required: false
 ---
 
-Try to disprove the scoped behavior before trusting it. Verification requires both source-level proof and executable evidence. If either is missing, the claim is unverified.
+Verify `scope`, `$ARGUMENTS`, recent changes, relevant artifact, or conversation behavior.
 
-Do not satisfy this by running existing green tests and saying the behavior looks fine. The known failure mode is confidence laundering: compile success, unrelated tests, mocks of the system under test, or prose reasoning without a real failure detector. If the repo lacks a check that could catch the bug class, build the check or report the gap.
+Do not call existing green tests verification. A claim is verified only with both source-level proof and executable evidence through a real path.
 
-Resolve scope from `scope`, else `$ARGUMENTS`, else recent branch diff, else relevant planning artifact, else conversation. Emit before correctness claims:
-- `Scope: <files/functions/behaviors>`
+Emit first:
+- `Scope: <scope>`
 - `Source: <input|diff|artifact|conversation>`
-- `Verification standard: <exhaustive-by-reasoning|representative-adversarial> — <why>`
+- `Standard: <exhaustive-by-reasoning|representative-adversarial> — <why>`
 
-Build the specification from primary sources only: user request, artifact, public API docs, schemas, type declarations, tests that encode intended behavior, callers, migrations, compatibility requirements. Anything without a primary source is an open question.
+Build the spec from primary sources only: request, artifact, public API docs, schemas, types, intended-behavior tests, callers, migrations. No source means open question.
 
-For each important contract item, record:
-- observable behavior
-- invariants and boundaries
-- consumers/producers across API, storage, UI, network, queue, or process boundaries
-- plausible bug that would violate it
+For each important contract:
+- state observable behavior and risks
+- trace control/data/error flow with code refs
+- name a plausible bug
+- run or add a check that would catch it
 
-Formal pass:
-- Trace control flow, data flow, state mutation, side effects, and error flow from entry point to observable result.
-- Enumerate cases. Exhaust small finite logic; partition large systems adversarially.
-- Check boundary contracts, schemas, permissions, flags, serialization, migration, and consumers.
-- Produce falsifiable proof sketches with code refs and explicit gaps.
+If current checks cannot catch the bug class, build the missing check or report the gap. Do not use mocks of the system under test as proof.
 
-Empirical pass:
-- Use canonical repo commands discovered from README/build files.
-- Prefer integration or public-entry tests. Mock only true external boundaries.
-- Add or strengthen targeted tests when current checks cannot catch the named bug.
-- For each new/changed test, state whether it would fail without the fix or what mutation it catches.
-- Run narrow checks first, then broader regression checks.
+Fix only proven defects or verification gaps. No suppressions, baselines, dependency bumps, skipped/deleted/weakened tests, sleeps, broad catches, or silent fallbacks.
 
-Fix loop:
-- Fix only proven defects or gaps that block verification.
-- Make the smallest root-cause fix; no band-aids, sleeps, broad catches, silent fallbacks, suppressions, baselines, dependency bumps, skipped tests, deleted tests, or weakened assertions.
-- Re-run empirical checks and update the formal proof after each fix.
-
-Output:
+Final:
 ```text
-Scope: <files/functions/behaviors/artifact>
-Source: <scope input|path|conversation|branch diff>
-Verification standard: <standard> — <why>
-
-Specification:
-- <id>: <contract> — source: <primary source> — observable: <behavior> — risks: <boundaries/bugs>
-
-Formal verification:
-- <id>: claim: <specific claim> — proof: <case/control/data reasoning> — refs: <file:line...> — gaps: <none|gap>
-
-Empirical verification:
-- <id>: command: <command> — result: <pass|fail|blocked> — evidence: <test/log/ref> — coverage: <cases> — gaps: <none|gap>
-
-Adversarial checks:
-- <id>: plausible bug: <mutation/failure mode> — caught by: <test/proof/check> — residual risk: <none|risk>
-
+Scope: <scope>
+Source: <source>
+Standard: <standard>
+Spec:
+- <id>: <contract> — source: <source> — risks: <bugs/boundaries>
+Proof:
+- <id>: <claim> — refs: <file:line> — gaps: <none|gap>
+Evidence:
+- <id>: `<command>` -> <result> — covers: <cases> — gaps: <none|gap>
 Findings:
-- [<severity>] <id> <file:line> <defect/gap> — evidence: <evidence> — root cause: <cause> — status: <fixed|deferred: reason|blocked: reason>
-
+- [<severity>] <defect/gap> — status: <fixed|deferred|blocked>
 Fixes:
-- <file:line> <summary> — verification: <test/check> — would fail without fix: <yes|no + why>
-
-Re-verification:
-- <command> -> <result> — scope covered: <items>
-
-Open questions / residual risk:
-- <item or none> — <what would resolve it>
+- <file:line> <summary> — check: <test/command>
+Residual risk:
+- <none or item>
 ```
 
-`No issues found` is valid only when every important contract item has `gaps: none` in both formal and empirical verification.
+`No issues found` is valid only when every important item has no proof or evidence gap.
