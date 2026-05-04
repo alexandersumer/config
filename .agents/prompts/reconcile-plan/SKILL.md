@@ -15,7 +15,7 @@ inputs:
     required: false
 ---
 
-Update planning artifacts to match code reality. Do not edit product code.
+Update structured planning state to match code reality. Do not edit product code.
 
 Do not reconcile prose with prose. Complete means reachable implementation plus verification evidence.
 
@@ -25,7 +25,7 @@ Read the artifacts, branch diff/status, scoped code/tests/config/docs, nearby te
 
 Classify only what you can prove: `complete`, `partial`, `not-started`, `obsolete`, `superseded`, `blocked`, or `unknown`. Unknown is better than fake certainty.
 
-Edit only narrow evidence-backed planning facts: status, checkboxes, acceptance, next chunk, deferred items, file refs, supersession notes. Do not invent owners, dates, milestones, metrics, scope, or completion. Do not delete pending work unless code proves it obsolete or superseded.
+Preserve the artifact's structure. Update existing planning state in place: statuses, checkboxes, acceptance, next work, deferred/obsolete items, and stale refs. Do not add branch-evidence prose or reconciliation notes that do not belong to an existing task. Do not invent owners, dates, milestones, metrics, scope, or completion. Do not delete pending work unless code proves it obsolete or superseded.
 
 Name the next incomplete, relevant, reachable, reviewable chunk with one acceptance signal.
 
