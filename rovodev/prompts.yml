@@ -91,7 +91,7 @@ prompts:
         required: false
       - name: out_path
         label: Output path
-        description: Optional override for where the primary planning artifact is written. Leave empty to auto-pick from existing repo artifact conventions.
+        description: Optional path for the primary artifact. Leave empty to mirror repo artifact conventions.
         type: string
         required: false
 
@@ -160,7 +160,7 @@ prompts:
         required: false
 
   - name: sync-main
-    description: "Merge latest default branch"
+    description: "Merge latest origin default branch"
     content_file: prompts/sync-main/SKILL.md
 
   - name: verify-and-fix
@@ -169,7 +169,17 @@ prompts:
     inputs:
       - name: scope
         label: Verification scope
-        description: Optional path, function, behavior, or planning artifact to verify. Leave empty to infer the scope from conversation, recent changes, or the relevant planning artifact.
+        description: Path, function, behavior, or planning artifact to verify. Leave empty to infer from conversation, recent changes, or relevant artifact.
+        type: string
+        required: false
+
+  - name: prove-check
+    description: "Prove a local check catches regressions"
+    content_file: prompts/prove-check/SKILL.md
+    inputs:
+      - name: scope
+        label: Check scope
+        description: Optional check command, behavior, file, or bug class to prove. Leave empty to infer from recent changes or conversation context.
         type: string
         required: false
 
