@@ -7,9 +7,6 @@ export PYENV_ROOT="$HOME/.pyenv"
 export SDKMAN_DIR="$HOME/.sdkman"
 export GIT_MERGE_AUTOEDIT=no
 export ZSH_DISABLE_COMPFIX=true
-export PURE_PROMPT_SYMBOL="$"
-export PURE_PROMPT_VICMD_SYMBOL="$"
-
 # Cache setup
 DISABLE_LS_COLORS=true
 export ZSH_CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/oh-my-zsh"
