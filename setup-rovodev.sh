@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Setup skills as global Rovo Dev CLI prompts.
-# Symlinks prompts.yml and prompt content into ~/.rovodev/
-# so skills are available in every project.
+# Setup canonical agent skills globally for Rovo Dev CLI.
+# Symlinks .agents/skills into ~/.rovodev/skills for native skill discovery,
+# and keeps legacy /prompts compatibility backed by the same skill files.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SKILLS_DIR="$SCRIPT_DIR/.agents/skills"
 ROVODEV_DIR="$SCRIPT_DIR/rovodev"
 GLOBAL_DIR="$HOME/.rovodev"
 
@@ -23,9 +24,14 @@ link_file() {
     existing="$(readlink "$target")"
     existing_resolved="$(python3 -c 'import os, sys; print(os.path.realpath(os.path.join(os.path.dirname(sys.argv[1]), sys.argv[2])))' "$target" "$existing")"
     source_resolved="$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$source")"
+    legacy_prompts_resolved="$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$SCRIPT_DIR/.agents/prompts")"
 
     if [ "$existing_resolved" = "$source_resolved" ]; then
       echo "$label already linked correctly."
+    elif [ "$existing_resolved" = "$legacy_prompts_resolved" ] && [ "$source_resolved" = "$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$SKILLS_DIR")" ]; then
+      rm "$target"
+      ln -s "$source" "$target"
+      echo "Migrated $label from legacy prompts -> $source"
     else
       echo "Error: $target is already a symlink to $existing"
       echo "Remove it first if you want to replace it."
@@ -41,16 +47,17 @@ link_file() {
   fi
 }
 
-# --- prompt content ---
+# --- native skills ---
+link_file "$SKILLS_DIR" "$GLOBAL_DIR/skills" "skills"
+
+# --- legacy prompt compatibility ---
 # Rovo Dev may resolve content_file entries relative to either the symlink path
 # (~/.rovodev/prompts.yml) or the real prompts.yml path after resolving symlinks
-# (<repo>/rovodev/prompts.yml). Keep both bases valid.
-link_file "$SCRIPT_DIR/.agents/prompts" "$ROVODEV_DIR/prompts" "repo prompts"
-
-# --- prompts.yml ---
+# (<repo>/rovodev/prompts.yml). Keep both bases valid and backed by skills.
+link_file "$SKILLS_DIR" "$ROVODEV_DIR/prompts" "repo prompt adapter"
 link_file "$ROVODEV_DIR/prompts.yml" "$GLOBAL_DIR/prompts.yml" "prompts.yml"
-link_file "$SCRIPT_DIR/.agents/prompts" "$GLOBAL_DIR/prompts" "prompts"
+link_file "$SKILLS_DIR" "$GLOBAL_DIR/prompts" "prompt adapter"
 
 echo ""
 echo "Done. Skills are now available globally in Rovo Dev CLI."
-echo "Run /prompts in Rovo Dev to see them."
+echo "Run /skills to see native skills, or /prompts to use legacy prompt commands."

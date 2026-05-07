@@ -1,204 +1,202 @@
 prompts:
-  - name: address-comments
-    description: "Address actionable PR comments"
-    content_file: prompts/address-comments/SKILL.md
-    inputs:
-      - name: pr_target
-        label: Pull request number or URL
-        description: Pull request number or URL to address comments on. Leave empty to use the current branch's pull request.
-        type: string
-        required: false
-      - name: focus
-        label: Focus or instructions
-        description: Optional focus area or extra instructions for which comments to address.
-        type: string
-        required: false
-
-  - name: apply-changes
-    description: "Apply a narrow requested change"
-    content_file: prompts/apply-changes/SKILL.md
-    inputs:
-      - name: changes
-        label: Changes to apply
-        description: Describe the changes to apply. Leave empty to apply changes from conversation context.
-        type: string
-        required: false
-
-  - name: clean-up-feature-flag
-    description: "Remove a rolled-out flag"
-    content_file: prompts/clean-up-feature-flag/SKILL.md
-    inputs:
-      - name: flag_key
-        label: Flag key
-        description: The feature flag key to remove.
-        type: string
-        required: true
-
-  - name: describe-branch
-    description: "Write PR title and description"
-    content_file: prompts/describe-branch/SKILL.md
-
-  - name: describe-diff
-    description: "Summarize working changes"
-    content_file: prompts/describe-diff/SKILL.md
-
-  - name: fix-failures
-    description: "Fix real check failures"
-    content_file: prompts/fix-failures/SKILL.md
-    inputs:
-      - name: error_output
-        label: Error output or stack trace
-        description: Paste error output or stack trace to fix. Leave empty to run the build and test suite to discover failures.
-        type: string
-        required: false
-
-  - name: git-publish
-    description: "Commit and publish changes"
-    content_file: prompts/git-publish/SKILL.md
-
-  - name: git-publish-to-origin
-    description: "Commit and push current branch"
-    content_file: prompts/git-publish-to-origin/SKILL.md
-
-  - name: design-review
-    description: "Review software design"
-    content_file: prompts/design-review/SKILL.md
-    inputs:
-      - name: scope
-        label: Design scope
-        description: Optional design, diff, file, plan, or scope to evaluate. Leave empty to infer from conversation or current branch.
-        type: string
-        required: false
-
-  - name: review-tests
-    description: "Strengthen branch tests"
-    content_file: prompts/review-tests/SKILL.md
-    inputs:
-      - name: focus_area
-        label: Focus area
-        description: Optional text to narrow the review to specific tests or areas. Leave empty to review all tests in the branch.
-        type: string
-        required: false
-
-  - name: create-plan
-    description: "Write a spec and plan"
-    content_file: prompts/create-plan/SKILL.md
-    inputs:
-      - name: topic
-        label: Topic or seed
-        description: One-line feature/topic, problem statement, or path to seed notes/artifact. Leave empty to infer from conversation context.
-        type: string
-        required: false
-      - name: out_path
-        label: Output path
-        description: Optional path for the primary artifact. Leave empty to mirror repo artifact conventions.
-        type: string
-        required: false
-
-  - name: execute-plan
-    description: "Implement a plan"
-    content_file: prompts/execute-plan/SKILL.md
-    inputs:
-      - name: artifact
-        label: Planning artifact
-        description: Path/name/text for a spec, plan, design, proposal, roadmap, task artifact, or inline instructions. Leave empty to discover the most relevant recent artifact.
-        type: string
-        required: false
-      - name: spec
-        label: Planning artifact (legacy alias)
-        description: Backward-compatible alias for artifact. Prefer artifact for new usage.
-        type: string
-        required: false
-
-  - name: reconcile-plan
-    description: "Reconcile plan with code"
-    content_file: prompts/reconcile-plan/SKILL.md
-    inputs:
-      - name: artifact
-        label: Planning artifact
-        description: Optional spec, plan, project, task path/name/text, or discovery focus. Leave empty to discover relevant artifacts.
-        type: string
-        required: false
-      - name: scope
-        label: Reconciliation scope
-        description: Optional code path, branch diff, project root, behavior, or branch/default-branch comparison scope. Leave empty to infer from branch and artifact locality.
-        type: string
-        required: false
-
-  - name: resolve-conflict
-    description: "Resolve merge conflicts"
-    content_file: prompts/resolve-conflict/SKILL.md
-
-  - name: review-branch
-    description: "Review branch defects"
-    content_file: prompts/review-branch/SKILL.md
-    inputs:
-      - name: focus_area
-        label: Focus area
-        description: Optional text to narrow the review scope. Leave empty to review the entire branch.
-        type: string
-        required: false
-
-  - name: ship-next-chunk
-    description: "Ship the next planned chunk"
-    content_file: prompts/ship-next-chunk/SKILL.md
-    inputs:
-      - name: artifact
-        label: Project, plan, spec, or artifact
-        description: Optional project name, plan/spec/design/proposal/roadmap/task path or text, or focus for the next chunk. Leave empty to infer from repo/context.
-        type: string
-        required: false
-      - name: focus
-        label: Project/focus (legacy alias)
-        description: Backward-compatible alias for artifact. Prefer artifact for new usage.
-        type: string
-        required: false
-      - name: project_root
-        label: Project root path
-        description: Optional path that anchors artifact discovery in repos with multiple parallel plans. Leave empty to infer from the just-merged diff.
-        type: string
-        required: false
-
-  - name: sync-main
-    description: "Merge latest origin default branch"
-    content_file: prompts/sync-main/SKILL.md
-
-  - name: verify-and-fix
-    description: "Verify behavior and fix proven defects"
-    content_file: prompts/verify-and-fix/SKILL.md
-    inputs:
-      - name: scope
-        label: Verification scope
-        description: Path, function, behavior, or planning artifact to verify. Leave empty to infer from conversation, recent changes, or relevant artifact.
-        type: string
-        required: false
-
-  - name: prove-check
-    description: "Prove a local check catches regressions"
-    content_file: prompts/prove-check/SKILL.md
-    inputs:
-      - name: scope
-        label: Check scope
-        description: Optional check command, behavior, file, or bug class to prove. Leave empty to infer from recent changes or conversation context.
-        type: string
-        required: false
-
-  - name: write-up
-    description: "Write a fact-checked summary"
-    content_file: prompts/write-up/SKILL.md
-    inputs:
-      - name: focus
-        label: Focus or angle
-        description: Optional aspect of the discussion to emphasize. Leave empty to cover the whole discussion.
-        type: string
-        required: false
-
-  - name: grill-me
-    description: "Stress-test a plan"
-    content_file: prompts/grill-me/SKILL.md
-    inputs:
-      - name: plan
-        label: Plan or design
-        description: Inline plan/design text, a file path (e.g. `.plan/foo.md`), or leave empty to infer from conversation context.
-        type: string
-        required: false
+- name: address-comments
+  description: Address actionable PR comments
+  content_file: prompts/address-comments/SKILL.md
+  inputs:
+  - name: pr_target
+    label: Pull request number or URL
+    description: Pull request number or URL to address comments on. Leave empty to
+      use the current branch's pull request.
+    type: string
+    required: false
+  - name: focus
+    label: Focus or instructions
+    description: Optional focus area or extra instructions for which comments to address.
+    type: string
+    required: false
+- name: apply-changes
+  description: Apply a narrow requested change
+  content_file: prompts/apply-changes/SKILL.md
+  inputs:
+  - name: changes
+    label: Changes to apply
+    description: Describe the changes to apply. Leave empty to apply changes from
+      conversation context.
+    type: string
+    required: false
+- name: clean-up-feature-flag
+  description: Remove a rolled-out flag
+  content_file: prompts/clean-up-feature-flag/SKILL.md
+  inputs:
+  - name: flag_key
+    label: Flag key
+    description: The feature flag key to remove.
+    type: string
+    required: true
+- name: describe-branch
+  description: Write PR title and description
+  content_file: prompts/describe-branch/SKILL.md
+- name: describe-diff
+  description: Summarize working changes
+  content_file: prompts/describe-diff/SKILL.md
+- name: fix-failures
+  description: Fix real check failures
+  content_file: prompts/fix-failures/SKILL.md
+  inputs:
+  - name: error_output
+    label: Error output or stack trace
+    description: Paste error output or stack trace to fix. Leave empty to run the
+      build and test suite to discover failures.
+    type: string
+    required: false
+- name: git-publish
+  description: Commit and publish changes
+  content_file: prompts/git-publish/SKILL.md
+- name: git-publish-to-origin
+  description: Commit and push current branch
+  content_file: prompts/git-publish-to-origin/SKILL.md
+- name: design-review
+  description: Review software design
+  content_file: prompts/design-review/SKILL.md
+  inputs:
+  - name: scope
+    label: Design scope
+    description: Optional design, diff, file, plan, or scope to evaluate. Leave empty
+      to infer from conversation or current branch.
+    type: string
+    required: false
+- name: review-tests
+  description: Strengthen branch tests
+  content_file: prompts/review-tests/SKILL.md
+  inputs:
+  - name: focus_area
+    label: Focus area
+    description: Optional text to narrow the review to specific tests or areas. Leave
+      empty to review all tests in the branch.
+    type: string
+    required: false
+- name: create-plan
+  description: Write a spec and plan
+  content_file: prompts/create-plan/SKILL.md
+  inputs:
+  - name: topic
+    label: Topic or seed
+    description: One-line feature/topic, problem statement, or path to seed notes/artifact.
+      Leave empty to infer from conversation context.
+    type: string
+    required: false
+  - name: out_path
+    label: Output path
+    description: Optional path for the primary artifact. Leave empty to mirror repo
+      artifact conventions.
+    type: string
+    required: false
+- name: execute-plan
+  description: Implement a plan
+  content_file: prompts/execute-plan/SKILL.md
+  inputs:
+  - name: artifact
+    label: Planning artifact
+    description: Path/name/text for a spec, plan, design, proposal, roadmap, task
+      artifact, or inline instructions. Leave empty to discover the most relevant
+      recent artifact.
+    type: string
+    required: false
+  - name: spec
+    label: Planning artifact (legacy alias)
+    description: Backward-compatible alias for artifact. Prefer artifact for new usage.
+    type: string
+    required: false
+- name: reconcile-plan
+  description: Reconcile plan with code
+  content_file: prompts/reconcile-plan/SKILL.md
+  inputs:
+  - name: artifact
+    label: Planning artifact
+    description: Optional spec, plan, project, task path/name/text, or discovery focus.
+      Leave empty to discover relevant artifacts.
+    type: string
+    required: false
+  - name: scope
+    label: Reconciliation scope
+    description: Optional code path, branch diff, project root, behavior, or branch/default-branch
+      comparison scope. Leave empty to infer from branch and artifact locality.
+    type: string
+    required: false
+- name: resolve-conflict
+  description: Resolve merge conflicts
+  content_file: prompts/resolve-conflict/SKILL.md
+- name: review-branch
+  description: Review branch defects
+  content_file: prompts/review-branch/SKILL.md
+  inputs:
+  - name: focus_area
+    label: Focus area
+    description: Optional text to narrow the review scope. Leave empty to review the
+      entire branch.
+    type: string
+    required: false
+- name: ship-next-chunk
+  description: Ship the next planned chunk
+  content_file: prompts/ship-next-chunk/SKILL.md
+  inputs:
+  - name: artifact
+    label: Project, plan, spec, or artifact
+    description: Optional project name, plan/spec/design/proposal/roadmap/task path
+      or text, or focus for the next chunk. Leave empty to infer from repo/context.
+    type: string
+    required: false
+  - name: focus
+    label: Project/focus (legacy alias)
+    description: Backward-compatible alias for artifact. Prefer artifact for new usage.
+    type: string
+    required: false
+  - name: project_root
+    label: Project root path
+    description: Optional path that anchors artifact discovery in repos with multiple
+      parallel plans. Leave empty to infer from the just-merged diff.
+    type: string
+    required: false
+- name: sync-main
+  description: Merge latest origin default branch
+  content_file: prompts/sync-main/SKILL.md
+- name: verify-and-fix
+  description: Verify behavior and fix proven defects
+  content_file: prompts/verify-and-fix/SKILL.md
+  inputs:
+  - name: scope
+    label: Verification scope
+    description: Path, function, behavior, or planning artifact to verify. Leave empty
+      to infer from conversation, recent changes, or relevant artifact.
+    type: string
+    required: false
+- name: prove-check
+  description: Prove a local check catches regressions
+  content_file: prompts/prove-check/SKILL.md
+  inputs:
+  - name: scope
+    label: Check scope
+    description: Optional check command, behavior, file, or bug class to prove. Leave
+      empty to infer from recent changes or conversation context.
+    type: string
+    required: false
+- name: write-up
+  description: Write a fact-checked summary
+  content_file: prompts/write-up/SKILL.md
+  inputs:
+  - name: focus
+    label: Focus or angle
+    description: Optional aspect of the discussion to emphasize. Leave empty to cover
+      the whole discussion.
+    type: string
+    required: false
+- name: grill-me
+  description: Stress-test a plan
+  content_file: prompts/grill-me/SKILL.md
+  inputs:
+  - name: plan
+    label: Plan or design
+    description: Inline plan/design text, a file path (e.g. `.plan/foo.md`), or leave
+      empty to infer from conversation context.
+    type: string
+    required: false

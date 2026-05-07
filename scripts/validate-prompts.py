@@ -1,142 +1,43 @@
 #!/usr/bin/env python3
-"""Validate local Rovo Dev prompt registry and prompt files."""
+"""Validate canonical agent skills and generated Rovo Dev prompt compatibility."""
 
 from __future__ import annotations
 
 import argparse
-import re
 import sys
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-PROMPT_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-INPUT_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_DIR))
+
+from generate_prompts import (  # type: ignore[import-not-found]
+    SkillError,
+    collect_skills,
+    dump_registry,
+    generate_registry,
+    load_yaml_file,
+    normalize_inputs,
+    parse_front_matter,
+    validate_description,
+    validate_skill_name,
+)
+
 REQUIRED_PROMPT_KEYS = {"name", "description", "content_file"}
-INPUT_KEYS = {"name", "label", "description", "type", "required"}
+ALLOWED_PROMPT_KEYS = REQUIRED_PROMPT_KEYS | {"inputs"}
 
 
 class ValidationError(Exception):
-    """Raised when prompt validation fails."""
-
-
-def load_yaml_file(path: Path) -> Any:
-    try:
-        with path.open("r", encoding="utf-8") as handle:
-            return yaml.safe_load(handle)
-    except yaml.YAMLError as exc:
-        raise ValidationError(f"{path}: invalid YAML: {exc}") from exc
-    except OSError as exc:
-        raise ValidationError(f"{path}: cannot read file: {exc}") from exc
-
-
-def parse_front_matter(path: Path) -> dict[str, Any]:
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise ValidationError(f"{path}: cannot read prompt file: {exc}") from exc
-
-    lines = text.splitlines()
-    if not lines or lines[0] != "---":
-        raise ValidationError(f"{path}: missing opening front matter delimiter")
-
-    try:
-        closing_index = lines[1:].index("---") + 1
-    except ValueError as exc:
-        raise ValidationError(f"{path}: missing closing front matter delimiter") from exc
-
-    body = "\n".join(lines[closing_index + 1 :]).strip()
-    if not body:
-        raise ValidationError(f"{path}: prompt body must not be empty")
-
-    try:
-        metadata = yaml.safe_load("\n".join(lines[1:closing_index]))
-    except yaml.YAMLError as exc:
-        raise ValidationError(f"{path}: invalid front matter YAML: {exc}") from exc
-
-    if not isinstance(metadata, dict):
-        raise ValidationError(f"{path}: front matter must be a mapping")
-
-    return metadata
-
-
-def validate_prompt_name(name: Any, context: str) -> str:
-    if not isinstance(name, str) or not name:
-        raise ValidationError(f"{context}: name must be a non-empty string")
-    if not PROMPT_NAME_RE.fullmatch(name):
-        raise ValidationError(f"{context}: prompt name must be kebab-case: {name!r}")
-    return name
-
-
-def validate_input_name(name: Any, context: str) -> str:
-    if not isinstance(name, str) or not name:
-        raise ValidationError(f"{context}: input name must be a non-empty string")
-    if not INPUT_NAME_RE.fullmatch(name):
-        raise ValidationError(f"{context}: input name must be lower_snake_case: {name!r}")
-    return name
-
-
-def validate_description(description: Any, context: str) -> str:
-    if not isinstance(description, str) or not description.strip():
-        raise ValidationError(f"{context}: description must be a non-empty string")
-    if "\n" in description:
-        raise ValidationError(f"{context}: description must be a single line")
-    return description
-
-
-def normalize_inputs(inputs: Any, context: str) -> list[dict[str, Any]]:
-    if inputs is None:
-        return []
-    if not isinstance(inputs, list):
-        raise ValidationError(f"{context}: inputs must be a list")
-
-    normalized: list[dict[str, Any]] = []
-    seen_names: set[str] = set()
-    for index, item in enumerate(inputs):
-        item_context = f"{context}: inputs[{index}]"
-        if not isinstance(item, dict):
-            raise ValidationError(f"{item_context}: input must be a mapping")
-        missing = INPUT_KEYS - item.keys()
-        if missing:
-            raise ValidationError(f"{item_context}: missing keys: {sorted(missing)}")
-        extra = item.keys() - INPUT_KEYS
-        if extra:
-            raise ValidationError(f"{item_context}: unsupported keys: {sorted(extra)}")
-
-        name = validate_input_name(item.get("name"), item_context)
-        if name in seen_names:
-            raise ValidationError(f"{item_context}: duplicate input name: {name}")
-        seen_names.add(name)
-
-        label = item.get("label")
-        description = item.get("description")
-        input_type = item.get("type")
-        required = item.get("required")
-        if not isinstance(label, str) or not label.strip():
-            raise ValidationError(f"{item_context}: label must be a non-empty string")
-        validate_description(description, item_context)
-        if input_type != "string":
-            raise ValidationError(f"{item_context}: only string inputs are currently supported")
-        if not isinstance(required, bool):
-            raise ValidationError(f"{item_context}: required must be a boolean")
-
-        normalized.append(
-            {
-                "name": name,
-                "label": label,
-                "description": description,
-                "type": input_type,
-                "required": required,
-            }
-        )
-    return normalized
+    """Raised when validation fails."""
 
 
 def resolve_content_path(repo_root: Path, content_file: Any, context: str) -> Path:
     if not isinstance(content_file, str) or not content_file:
         raise ValidationError(f"{context}: content_file must be a non-empty string")
-    if Path(content_file).is_absolute() or ".." in Path(content_file).parts:
+    path = Path(content_file)
+    if path.is_absolute() or ".." in path.parts:
         raise ValidationError(f"{context}: content_file must be a relative path inside prompts/")
     if not content_file.startswith("prompts/"):
         raise ValidationError(f"{context}: content_file must start with prompts/")
@@ -145,19 +46,29 @@ def resolve_content_path(repo_root: Path, content_file: Any, context: str) -> Pa
     return repo_root / "rovodev" / content_file
 
 
-def validate_registry(repo_root: Path) -> list[str]:
+def validate_prompts_adapter(repo_root: Path) -> list[str]:
+    errors: list[str] = []
+    prompts_link = repo_root / "rovodev" / "prompts"
+    skills_root = repo_root / ".agents" / "skills"
+
+    if not prompts_link.is_symlink():
+        errors.append(f"{prompts_link}: must be a symlink to {skills_root}")
+    elif prompts_link.resolve() != skills_root.resolve():
+        errors.append(f"{prompts_link}: must resolve to {skills_root}; got {prompts_link.resolve()}")
+
     config_path = repo_root / "rovodev" / "prompts.yml"
-    config = load_yaml_file(config_path)
+    try:
+        config = load_yaml_file(config_path)
+    except SkillError as exc:
+        return errors + [str(exc)]
+
     if not isinstance(config, dict):
-        raise ValidationError(f"{config_path}: top-level document must be a mapping")
+        return errors + [f"{config_path}: top-level document must be a mapping"]
     prompts = config.get("prompts")
     if not isinstance(prompts, list) or not prompts:
-        raise ValidationError(f"{config_path}: prompts must be a non-empty list")
+        return errors + [f"{config_path}: prompts must be a non-empty list"]
 
-    errors: list[str] = []
     seen_names: set[str] = set()
-    registered_skill_files: set[Path] = set()
-
     for index, prompt in enumerate(prompts):
         context = f"{config_path}: prompts[{index}]"
         if not isinstance(prompt, dict):
@@ -168,12 +79,18 @@ def validate_registry(repo_root: Path) -> list[str]:
         if missing:
             errors.append(f"{context}: missing keys: {sorted(missing)}")
             continue
+        extra = prompt.keys() - ALLOWED_PROMPT_KEYS
+        if extra:
+            errors.append(f"{context}: unsupported keys: {sorted(extra)}")
 
         try:
-            name = validate_prompt_name(prompt.get("name"), context)
+            name = validate_skill_name(prompt.get("name"), context)
             description = validate_description(prompt.get("description"), context)
             registry_inputs = normalize_inputs(prompt.get("inputs"), context)
             content_path = resolve_content_path(repo_root, prompt.get("content_file"), context)
+        except SkillError as exc:
+            errors.append(str(exc))
+            continue
         except ValidationError as exc:
             errors.append(str(exc))
             continue
@@ -185,40 +102,51 @@ def validate_registry(repo_root: Path) -> list[str]:
 
         expected_content_file = f"prompts/{name}/SKILL.md"
         if prompt.get("content_file") != expected_content_file:
-            errors.append(
-                f"{context}: content_file must be {expected_content_file!r} for prompt {name!r}"
-            )
+            errors.append(f"{context}: content_file must be {expected_content_file!r} for prompt {name!r}")
 
         if not content_path.is_file():
             errors.append(f"{context}: content_file does not exist: {content_path}")
             continue
-        registered_skill_files.add(content_path.resolve())
 
         try:
             metadata = parse_front_matter(content_path)
-            front_matter_name = validate_prompt_name(metadata.get("name"), str(content_path))
+            front_matter_name = validate_skill_name(metadata.get("name"), str(content_path))
             front_matter_description = validate_description(metadata.get("description"), str(content_path))
             front_matter_inputs = normalize_inputs(metadata.get("inputs"), str(content_path))
-        except ValidationError as exc:
+        except SkillError as exc:
             errors.append(str(exc))
             continue
 
         if front_matter_name != name:
-            errors.append(
-                f"{content_path}: front matter name {front_matter_name!r} does not match registry name {name!r}"
-            )
+            errors.append(f"{content_path}: front matter name {front_matter_name!r} does not match registry name {name!r}")
         if front_matter_description != description:
-            errors.append(
-                f"{content_path}: front matter description does not match registry description"
-            )
+            errors.append(f"{content_path}: front matter description does not match registry description")
         if front_matter_inputs != registry_inputs:
             errors.append(f"{content_path}: front matter inputs do not match registry inputs")
 
-    prompt_root = repo_root / ".agents" / "prompts"
-    for skill_file in sorted(prompt_root.glob("*/SKILL.md")):
-        if skill_file.resolve() not in registered_skill_files:
-            errors.append(f"{skill_file}: prompt file is not registered in {config_path}")
+    return errors
 
+
+def validate_generated_registry(repo_root: Path) -> list[str]:
+    config_path = repo_root / "rovodev" / "prompts.yml"
+    try:
+        expected = dump_registry(generate_registry(repo_root))
+        actual = config_path.read_text(encoding="utf-8")
+    except (SkillError, OSError) as exc:
+        return [str(exc)]
+    if actual != expected:
+        return [f"{config_path}: generated content is not up to date; run scripts/generate-prompts.py"]
+    return []
+
+
+def validate_registry(repo_root: Path) -> list[str]:
+    errors: list[str] = []
+    try:
+        collect_skills(repo_root)
+    except SkillError as exc:
+        errors.append(str(exc))
+    errors.extend(validate_prompts_adapter(repo_root))
+    errors.extend(validate_generated_registry(repo_root))
     return errors
 
 
@@ -235,12 +163,12 @@ def main() -> int:
     repo_root = args.repo_root.resolve()
     errors = validate_registry(repo_root)
     if errors:
-        print("Prompt validation failed:", file=sys.stderr)
+        print("Skill validation failed:", file=sys.stderr)
         for error in errors:
             print(f"- {error}", file=sys.stderr)
         return 1
 
-    print("Prompt validation passed.")
+    print("Skill validation passed.")
     return 0
 
 
