@@ -10,7 +10,7 @@ inputs:
     required: false
 ---
 
-Review tests for `git diff base...HEAD`, narrowed by `$ARGUMENTS` if provided. Read production code first.
+Review tests for `git diff base...HEAD`, narrowed by `focus_area` or `$ARGUMENTS` if provided. Read production code first.
 
 Do not add coverage theater. A useful test catches a realistic bug: flipped branch, off-by-one, swapped argument, null vs empty, missing await, wrong exception, stale cache, auth bypass, schema drift.
 

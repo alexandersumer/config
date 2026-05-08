@@ -10,7 +10,7 @@ inputs:
     required: true
 ---
 
-Remove fully rolled out flag `$ARGUMENTS`. Keep enabled behavior. Delete disabled behavior.
+Remove fully rolled out flag `flag_key` or `$ARGUMENTS`. Keep enabled behavior. Delete disabled behavior.
 
 Do not stop at the first conditional. Remove the flag as a repo concept: checks, aliases, constants, config, tests, docs, fixtures, dead helpers.
 

@@ -12,18 +12,14 @@ inputs:
 
 Review the design in `scope`, `$ARGUMENTS`, conversation, artifact, file, or branch diff.
 
-This is not an architecture essay. Do the work before judging.
+Think like a long-term codebase steward, not a style reviewer. Read enough code to ground the judgment in domain vocabulary, boundaries, callers, data flow, ownership, invariants, persistence/API seams, change paths, and conventions.
 
-Read until you can explain the design pressure in concrete terms: callers, callees, data flow, ownership, domain terms, invariants, change paths, and local conventions. If code can answer the question, inspect code instead of guessing.
+Zoom out. Judge where this design pushes the codebase after the next few changes, not just whether the current diff works. Reward designs that reduce total complexity: deep modules, hidden decisions, clear ownership, preserved invariants, and fewer places to edit for one behavior change.
 
-Do not give abstract architecture advice. Do not praise or attack shapes in isolation. A design problem exists only when there is evidence: change amplification, cognitive load, hidden coupling, unknown unknowns, information leakage, shallow modules, pass-through APIs, conjoined responsibilities, temporal decomposition, overexposed APIs, or generic interfaces pretending to be reusable.
+Use APOSD judgment: penalize shallow wrappers, pass-through APIs, temporal decomposition, information leakage, configuration sprawl, generic non-abstractions, change amplification, cognitive load, and unknown unknowns.
 
-Preserve domain meaning. Do not collapse real concepts, erase useful invariants, or hide important distinctions to make code look simpler. Prefer deep interfaces only when they hide real complexity without lying about the domain.
+Use DDD only where it earns its keep: preserve ubiquitous language, bounded contexts, aggregate boundaries, and real domain invariants. Do not collapse distinct concepts or add enterprise layers for show.
 
-Be suspicious of abstraction churn. Compare the real choices, including doing nothing. Do not invent fake trade-offs. Recommend no change when the existing design is cheaper than the proposed cleanup.
+Be ambitious when the evidence supports it. Recommend structural moves if small fixes would entrench bad architecture: move a boundary, delete an abstraction, merge/split responsibilities, add/remove a domain concept, hide a decision, accept coupling, or create a seam for cheaper future change. Also recommend no change when that is cheaper.
 
-Your recommendation must be the smallest useful design move: the exact boundary to move, responsibility to merge or split, API to hide, invariant to expose, coupling to accept, or abstraction to delete. If the evidence is insufficient, say what you inspected and what would need to be inspected next.
-
-Write plainly and bluntly. No template. No checklist. No padded sections. Lead with the judgment, then give the evidence that makes it hard to dismiss.
-
-If the design is good, say why and stop. Do not manufacture a problem to justify the review.
+Write plainly and bluntly. Lead with the architectural judgment, then evidence and the precise design move. No template, checklist, praise sandwich, style nits, fake trade-offs, or manufactured problems.

@@ -10,7 +10,7 @@ inputs:
     required: false
 ---
 
-Review `git diff base...HEAD`, narrowed by `$ARGUMENTS` if provided.
+Review `git diff base...HEAD`, narrowed by `focus_area` or `$ARGUMENTS` if provided.
 
 Report only material issues: correctness, security, broken invariants, leaky architecture, missing tests for realistic regressions, or missing rollout safety for risky runtime behavior.
 
