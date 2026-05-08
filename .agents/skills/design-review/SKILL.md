@@ -1,13 +1,6 @@
 ---
 name: design-review
 description: Review software design
-argument-hint: "[optional: design, diff, file, plan, or scope]"
-inputs:
-  - name: scope
-    label: Design scope
-    description: Optional design, diff, file, plan, or scope to evaluate. Leave empty to infer from conversation or current branch.
-    type: string
-    required: false
 ---
 
 Review the design in `scope`, `$ARGUMENTS`, conversation, artifact, file, or branch diff.

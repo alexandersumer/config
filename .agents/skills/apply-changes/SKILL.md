@@ -1,13 +1,6 @@
 ---
 name: apply-changes
 description: Apply a narrow requested change
-argument-hint: "[optional: changes to apply]"
-inputs:
-  - name: changes
-    label: Changes to apply
-    description: Describe the changes to apply. Leave empty to apply changes from conversation context.
-    type: string
-    required: false
 ---
 
 Apply `changes`, else `$ARGUMENTS`, else the conversation request.

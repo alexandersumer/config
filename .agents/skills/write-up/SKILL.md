@@ -1,13 +1,6 @@
 ---
 name: write-up
 description: Write a fact-checked summary
-argument-hint: "[optional: focus or angle]"
-inputs:
-  - name: focus
-    label: Focus or angle
-    description: Optional aspect of the discussion to emphasize. Leave empty to cover the whole discussion.
-    type: string
-    required: false
 ---
 
 Write the preceding discussion in chat only. Apply `focus` or `$ARGUMENTS` if provided.

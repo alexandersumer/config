@@ -1,18 +1,6 @@
 ---
 name: execute-plan
 description: Implement a plan
-argument-hint: "[optional: artifact path, plan name, or inline instructions]"
-inputs:
-  - name: artifact
-    label: Planning artifact
-    description: Path/name/text for a spec, plan, design, proposal, roadmap, task artifact, or inline instructions. Leave empty to discover the most relevant recent artifact.
-    type: string
-    required: false
-  - name: spec
-    label: Planning artifact (legacy alias)
-    description: Backward-compatible alias for artifact. Prefer artifact for new usage.
-    type: string
-    required: false
 ---
 
 Implement `artifact`, `spec`, `$ARGUMENTS`, or the most relevant discovered planning artifact.

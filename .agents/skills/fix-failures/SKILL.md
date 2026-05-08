@@ -1,13 +1,6 @@
 ---
 name: fix-failures
 description: Fix real check failures
-argument-hint: "[optional: error output or stack trace]"
-inputs:
-  - name: error_output
-    label: Error output or stack trace
-    description: Paste error output or stack trace to fix. Leave empty to run the build and test suite to discover failures.
-    type: string
-    required: false
 ---
 
 Fix the failure from `error_output`, `$ARGUMENTS`, or the repo's normal checks.

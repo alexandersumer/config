@@ -1,18 +1,6 @@
 ---
 name: create-plan
 description: Write a spec and plan
-argument-hint: "[optional: feature/topic, problem statement, or path to seed notes/artifact]"
-inputs:
-  - name: topic
-    label: Topic or seed
-    description: One-line feature/topic, problem statement, or path to seed notes/artifact. Leave empty to infer from conversation context.
-    type: string
-    required: false
-  - name: out_path
-    label: Output path
-    description: Optional path for the primary artifact. Leave empty to mirror repo artifact conventions.
-    type: string
-    required: false
 ---
 
 Use `topic`, `$ARGUMENTS`, or the conversation context as the seed. Write the smallest useful artifact set: a primary spec/design/proposal and a companion implementation plan.

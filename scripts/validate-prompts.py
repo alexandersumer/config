@@ -19,6 +19,7 @@ from generate_prompts import (  # type: ignore[import-not-found]
     dump_registry,
     generate_registry,
     load_yaml_file,
+    load_prompt_metadata,
     normalize_inputs,
     parse_front_matter,
     validate_description,
@@ -68,6 +69,11 @@ def validate_prompts_adapter(repo_root: Path) -> list[str]:
     if not isinstance(prompts, list) or not prompts:
         return errors + [f"{config_path}: prompts must be a non-empty list"]
 
+    try:
+        prompt_metadata = load_prompt_metadata(repo_root)
+    except SkillError as exc:
+        return errors + [str(exc)]
+
     seen_names: set[str] = set()
     for index, prompt in enumerate(prompts):
         context = f"{config_path}: prompts[{index}]"
@@ -112,7 +118,10 @@ def validate_prompts_adapter(repo_root: Path) -> list[str]:
             metadata = parse_front_matter(content_path)
             front_matter_name = validate_skill_name(metadata.get("name"), str(content_path))
             front_matter_description = validate_description(metadata.get("description"), str(content_path))
-            front_matter_inputs = normalize_inputs(metadata.get("inputs"), str(content_path))
+            extra_keys = metadata.keys() - {"name", "description", "license", "compatibility", "metadata", "allowed-tools"}
+            if extra_keys:
+                raise SkillError(f"{content_path}: unsupported front matter keys: {sorted(extra_keys)}")
+            metadata_inputs = prompt_metadata.get(name, {}).get("inputs", [])
         except SkillError as exc:
             errors.append(str(exc))
             continue
@@ -121,8 +130,12 @@ def validate_prompts_adapter(repo_root: Path) -> list[str]:
             errors.append(f"{content_path}: front matter name {front_matter_name!r} does not match registry name {name!r}")
         if front_matter_description != description:
             errors.append(f"{content_path}: front matter description does not match registry description")
-        if front_matter_inputs != registry_inputs:
-            errors.append(f"{content_path}: front matter inputs do not match registry inputs")
+        if metadata_inputs != registry_inputs:
+            errors.append(f"{repo_root / 'rovodev' / 'prompt-metadata.yml'}: inputs for {name!r} do not match registry inputs")
+
+    unknown_metadata = set(prompt_metadata) - seen_names
+    if unknown_metadata:
+        errors.append(f"{repo_root / 'rovodev' / 'prompt-metadata.yml'}: metadata for unknown skills: {sorted(unknown_metadata)}")
 
     return errors
 

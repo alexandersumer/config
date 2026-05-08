@@ -14,6 +14,8 @@ import yaml
 SKILL_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 INPUT_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 INPUT_KEYS = {"name", "label", "description", "type", "required"}
+SKILL_FRONT_MATTER_KEYS = {"name", "description", "license", "compatibility", "metadata", "allowed-tools"}
+PROMPT_METADATA_KEYS = {"inputs"}
 
 
 class SkillError(Exception):
@@ -150,11 +152,40 @@ def existing_prompt_order(repo_root: Path) -> dict[str, int]:
     return order
 
 
+def load_prompt_metadata(repo_root: Path) -> dict[str, dict[str, Any]]:
+    metadata_path = repo_root / "rovodev" / "prompt-metadata.yml"
+    if not metadata_path.exists():
+        return {}
+    metadata = load_yaml_file(metadata_path)
+    if metadata is None:
+        return {}
+    if not isinstance(metadata, dict):
+        raise SkillError(f"{metadata_path}: top-level document must be a mapping")
+    prompts = metadata.get("prompts", {})
+    if not isinstance(prompts, dict):
+        raise SkillError(f"{metadata_path}: prompts must be a mapping")
+
+    normalized: dict[str, dict[str, Any]] = {}
+    for name, prompt_metadata in prompts.items():
+        context = f"{metadata_path}: prompts[{name!r}]"
+        skill_name = validate_skill_name(name, context)
+        if not isinstance(prompt_metadata, dict):
+            raise SkillError(f"{context}: metadata must be a mapping")
+        extra = prompt_metadata.keys() - PROMPT_METADATA_KEYS
+        if extra:
+            raise SkillError(f"{context}: unsupported keys: {sorted(extra)}")
+        normalized[skill_name] = {
+            "inputs": normalize_inputs(prompt_metadata.get("inputs"), context),
+        }
+    return normalized
+
+
 def collect_skills(repo_root: Path) -> list[dict[str, Any]]:
     skills_root = repo_root / ".agents" / "skills"
     if not skills_root.is_dir():
         raise SkillError(f"{skills_root}: canonical skills directory does not exist")
 
+    prompt_metadata = load_prompt_metadata(repo_root)
     skills: list[dict[str, Any]] = []
     seen_names: set[str] = set()
     for skill_file in sorted(skills_root.glob("*/SKILL.md")):
@@ -162,6 +193,9 @@ def collect_skills(repo_root: Path) -> list[dict[str, Any]]:
         context = str(skill_file)
         validate_skill_name(skill_dir, str(skill_file.parent))
         metadata = parse_front_matter(skill_file)
+        extra_keys = metadata.keys() - SKILL_FRONT_MATTER_KEYS
+        if extra_keys:
+            raise SkillError(f"{skill_file}: unsupported front matter keys: {sorted(extra_keys)}")
         name = validate_skill_name(metadata.get("name"), context)
         if name != skill_dir:
             raise SkillError(f"{skill_file}: front matter name {name!r} does not match directory {skill_dir!r}")
@@ -174,10 +208,14 @@ def collect_skills(repo_root: Path) -> list[dict[str, Any]]:
             "description": validate_description(metadata.get("description"), context),
             "content_file": f"prompts/{name}/SKILL.md",
         }
-        inputs = normalize_inputs(metadata.get("inputs"), context)
+        inputs = prompt_metadata.get(name, {}).get("inputs", [])
         if inputs:
             prompt["inputs"] = inputs
         skills.append(prompt)
+
+    unknown_metadata = set(prompt_metadata) - seen_names
+    if unknown_metadata:
+        raise SkillError(f"{repo_root / 'rovodev' / 'prompt-metadata.yml'}: metadata for unknown skills: {sorted(unknown_metadata)}")
 
     if not skills:
         raise SkillError(f"{skills_root}: no skills found")

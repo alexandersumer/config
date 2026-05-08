@@ -1,13 +1,6 @@
 ---
 name: prove-check
 description: Prove a local check catches regressions
-argument-hint: "[optional: check, behavior, file, or bug class]"
-inputs:
-  - name: scope
-    label: Check scope
-    description: Optional check command, behavior, file, or bug class to prove. Leave empty to infer from recent changes or conversation context.
-    type: string
-    required: false
 ---
 
 Prove `scope`, `$ARGUMENTS`, the relevant recent check, or conversation target catches the regression it claims to catch.

@@ -1,18 +1,6 @@
 ---
 name: reconcile-plan
 description: Reconcile plan with code
-argument-hint: "[optional: artifact path/name or scope]"
-inputs:
-  - name: artifact
-    label: Planning artifact
-    description: Optional spec, plan, project, task path/name/text, or discovery focus. Leave empty to discover relevant artifacts.
-    type: string
-    required: false
-  - name: scope
-    label: Reconciliation scope
-    description: Optional code path, branch diff, project root, behavior, or branch/default-branch comparison scope. Leave empty to infer from branch and artifact locality.
-    type: string
-    required: false
 ---
 
 Update structured planning state to match code reality. Do not edit product code.

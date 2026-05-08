@@ -1,23 +1,6 @@
 ---
 name: ship-next-chunk
 description: Ship the next planned chunk
-argument-hint: "[optional: project, plan, spec, artifact path, or inline artifact]"
-inputs:
-  - name: artifact
-    label: Project, plan, spec, or artifact
-    description: Optional project name, plan/spec/design/proposal/roadmap/task path or text, or focus for the next chunk. Leave empty to infer from repo/context.
-    type: string
-    required: false
-  - name: focus
-    label: Project/focus (legacy alias)
-    description: Backward-compatible alias for artifact. Prefer artifact for new usage.
-    type: string
-    required: false
-  - name: project_root
-    label: Project root path
-    description: Optional path that anchors artifact discovery in repos with multiple parallel plans. Leave empty to infer from the just-merged diff.
-    type: string
-    required: false
 ---
 
 Start from fresh default, choose the next artifact-backed chunk, implement it on a new branch, leave it uncommitted.

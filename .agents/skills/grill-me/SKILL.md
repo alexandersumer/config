@@ -1,13 +1,6 @@
 ---
 name: grill-me
 description: Stress-test a plan
-argument-hint: "[optional: plan/design text or file path]"
-inputs:
-  - name: plan
-    label: Plan or design
-    description: Inline plan/design text, a file path (e.g. `.plan/foo.md`), or leave empty to infer from conversation context.
-    type: string
-    required: false
 ---
 
 Stress-test `plan`, `$ARGUMENTS`, or the conversation plan.

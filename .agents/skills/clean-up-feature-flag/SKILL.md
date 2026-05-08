@@ -1,13 +1,6 @@
 ---
 name: clean-up-feature-flag
 description: Remove a rolled-out flag
-argument-hint: "[flag key]"
-inputs:
-  - name: flag_key
-    label: Flag key
-    description: The feature flag key to remove.
-    type: string
-    required: true
 ---
 
 Remove fully rolled out flag `flag_key` or `$ARGUMENTS`. Keep enabled behavior. Delete disabled behavior.

@@ -1,13 +1,6 @@
 ---
 name: verify-and-fix
 description: Verify behavior and fix proven defects
-argument-hint: "[optional: scope, file, function, behavior, or planning artifact]"
-inputs:
-  - name: scope
-    label: Verification scope
-    description: Path, function, behavior, or planning artifact to verify. Leave empty to infer from conversation, recent changes, or relevant artifact.
-    type: string
-    required: false
 ---
 
 Verify `scope`, `$ARGUMENTS`, recent changes, relevant artifact, or conversation behavior.

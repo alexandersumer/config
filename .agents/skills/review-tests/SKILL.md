@@ -1,13 +1,6 @@
 ---
 name: review-tests
 description: Strengthen branch tests
-argument-hint: "[optional: focus area]"
-inputs:
-  - name: focus_area
-    label: Focus area
-    description: Optional text to narrow the review to specific tests or areas. Leave empty to review all tests in the branch.
-    type: string
-    required: false
 ---
 
 Review tests for `git diff base...HEAD`, narrowed by `focus_area` or `$ARGUMENTS` if provided. Read production code first.

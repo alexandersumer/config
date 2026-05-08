@@ -1,18 +1,6 @@
 ---
 name: address-comments
 description: Address actionable PR comments
-argument-hint: "[pull request number or URL] [optional focus or instructions]"
-inputs:
-  - name: pr_target
-    label: Pull request number or URL
-    description: Pull request number or URL to address comments on. Leave empty to use the current branch's pull request.
-    type: string
-    required: false
-  - name: focus
-    label: Focus or instructions
-    description: Optional focus area or extra instructions for which comments to address.
-    type: string
-    required: false
 ---
 
 Address actionable comments on `pr_target`, or the current branch PR. Use `focus` only to narrow scope.
