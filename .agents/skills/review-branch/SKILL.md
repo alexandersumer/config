@@ -1,17 +1,32 @@
 ---
 name: review-branch
-description: Review branch defects
+description: Use when reviewing a pull request, diff, branch, or any set of code changes.
 ---
 
-Review `git diff base...HEAD`, narrowed by `focus_area` or `$ARGUMENTS` if provided.
+# Review Branch
 
-Look past the patch shape: trace changed invariants, edge inputs, failure paths, concurrency/idempotency, auth/data boundaries, persistence/API contracts, rollout paths, and whether new seams violate existing architecture.
+You do not review the code directly. Subagents do the reviewing in fresh context because session history biases the reviewer toward the author's framing and burns tokens on noise. Your job is dispatching and aggregating.
 
-Report only material, actionable issues: correctness, security, broken invariants, serious architecture leaks, missing tests for likely regressions, or missing rollout safety for risky runtime behavior. Prefer one high-confidence severe finding over many minor notes.
+1. **Get the diff.** Use `git diff $(git merge-base origin/main HEAD)..HEAD`. If the diff is empty, draft-only, formatter-only, version-bump-only, or already reviewed in this thread, stop with a one-line note.
 
-Do not report style, formatting, import order, naming taste, speculative risks, or mitigated issues.
+2. **Read conventions yourself.** Find every `CLAUDE.md`, `AGENTS.md`, or `REVIEW.md` whose directory is an ancestor of any changed file. Read them and paste the relevant convention text into reviewer prompts.
 
-Output one finding per line:
-`<file>:<line> <problem> -> <fix>`
+3. **Dispatch four reviewers in parallel via the Task tool.** Each reviewer gets this prompt verbatim, with `{ROLE}`, `{DIFF}`, and `{CONVENTIONS}` filled in. No session context — only what you paste:
 
-If none: `no issues found`
+   > You are reviewing a code change as **{ROLE}**. Diff: {DIFF}. Conventions: {CONVENTIONS}. Return candidate issues with `file:line`, severity, and a one-paragraph rationale grounded in the diff or files you read. One issue = one root cause. Skip nitpicks, style, "consider also". If it is not a real defect or risk, drop it.
+
+   Roles:
+   - **Correctness** — logic errors, wrong returns, violated contracts
+   - **Failure modes** — null/boundary inputs, races, swallowed errors, leaks, regressions in adjacent code the diff touches
+   - **Security** — injection, auth, secrets, unsafe deserialization, missing validation
+   - **Conventions** — rules scoped to changed files; skip what a linter catches
+
+4. **Validate every candidate.** Use one fresh Task subagent per candidate issue. Each validator gets this prompt verbatim, with `{ISSUE}`, `{FILES}`, and `{CONVENTIONS}` filled in:
+
+   > Issue: {ISSUE}. Relevant files in full: {FILES}. Conventions: {CONVENTIONS}. Confirm or refute. State concrete evidence — triggering input, line that executes wrong, rule violated. Score 0–100; anything you cannot demonstrate concretely scores under 80.
+
+   Drop every candidate below 80.
+
+5. **Report.** Dedupe by root cause, then rank Critical, High, Medium, Low. For each issue, include severity, `path:line`, what is wrong, why it matters, and the fix — one sentence each. End with **Ready to merge**, **Needs attention**, or **Needs work**. If zero candidates survive validation, say so in one line.
+
+Never approve, never merge, never invent line numbers. Subagents see only what you paste.

@@ -56,7 +56,9 @@ prompts:
   description: Commit and push current branch
   content_file: prompts/git-publish-to-origin/SKILL.md
 - name: design-review
-  description: Review software design
+  description: Use when reviewing software design, architecture, a technical proposal,
+    refactor plan, API boundary, module split, data model, or design-sensitive branch
+    diff.
   content_file: prompts/design-review/SKILL.md
   inputs:
   - name: scope
@@ -66,7 +68,8 @@ prompts:
     type: string
     required: false
 - name: review-tests
-  description: Strengthen branch tests
+  description: Use when reviewing, strengthening, or adding tests for a pull request,
+    branch, diff, bug fix, feature, or changed behavior.
   content_file: prompts/review-tests/SKILL.md
   inputs:
   - name: focus_area
@@ -127,7 +130,8 @@ prompts:
   description: Resolve merge conflicts
   content_file: prompts/resolve-conflict/SKILL.md
 - name: review-branch
-  description: Review branch defects
+  description: Use when reviewing a pull request, diff, branch, or any set of code
+    changes.
   content_file: prompts/review-branch/SKILL.md
   inputs:
   - name: focus_area
