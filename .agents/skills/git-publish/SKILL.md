@@ -3,7 +3,7 @@ name: git-publish
 description: Commit and publish changes
 ---
 
-Commit current staged, unstaged, and relevant untracked changes, then push to `origin`. Create a PR only when starting from the default branch.
+Commit current staged, unstaged, and relevant untracked changes, then push to `origin`. Create a PR only when starting from the default branch. If the user did not explicitly request publishing, ask before any git write.
 
 Do not publish with a provider-generated title or branch-name subject.
 

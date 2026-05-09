@@ -7,11 +7,11 @@ description: Use when reviewing, strengthening, or adding tests for a pull reque
 
 You do not strengthen tests by guessing from the patch. Fresh-context subagents identify realistic regressions and weak assertions; your job is to provide the changed behavior, relevant production/test code, conventions, and then make only validated test improvements.
 
-1. **Get the diff and behavior surface.** Review `git diff $(git merge-base origin/main HEAD)..HEAD`, narrowed by `focus_area` or `$ARGUMENTS` if provided. If the diff is empty, generated-only, formatter-only, version-bump-only, or has no behavior/test relevance, stop with `no test changes justified` and one short reason.
+1. **Get the diff and behavior surface.** Resolve the remote default branch from `origin/HEAD`, falling back to `origin/main` or `origin/master` only if needed. Review `git diff $(git merge-base <remote-default> HEAD)..HEAD`, narrowed by `focus_area` or `$ARGUMENTS` if provided. If the diff is empty, generated-only, formatter-only, version-bump-only, or has no behavior/test relevance, stop with `no test changes justified` and one short reason.
 
 2. **Read production code first.** Identify the changed observable behaviors, contracts, public entry points, failure paths, and nearby tests before editing. Find every `CLAUDE.md`, `AGENTS.md`, or `REVIEW.md` whose directory is an ancestor of any changed production or test file and include those conventions in reviewer prompts.
 
-3. **Dispatch four test reviewers in parallel via the Task tool.** Each reviewer gets this prompt verbatim, with `{ROLE}`, `{DIFF}`, `{PRODUCTION_CONTEXT}`, `{TEST_CONTEXT}`, and `{CONVENTIONS}` filled in. No session context — only what you paste:
+3. **Dispatch four fresh-context test reviewers in parallel.** Each reviewer gets this prompt verbatim, with `{ROLE}`, `{DIFF}`, `{PRODUCTION_CONTEXT}`, `{TEST_CONTEXT}`, and `{CONVENTIONS}` filled in. No session context — only what you paste:
 
    > You are reviewing tests as **{ROLE}**. Diff: {DIFF}. Production context: {PRODUCTION_CONTEXT}. Test context: {TEST_CONTEXT}. Conventions: {CONVENTIONS}. Return candidate test improvements with file/test location, the realistic bug each would catch, and why existing tests miss it. One issue = one missing or weak regression signal. Skip coverage theater, style, private implementation details, and mock-call-order assertions unless the public contract is the call.
 

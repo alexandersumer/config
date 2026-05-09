@@ -3,7 +3,7 @@ name: git-publish-to-origin
 description: Commit and push current branch
 ---
 
-Commit current staged, unstaged, and relevant untracked changes, then push current branch to `origin`.
+Commit current staged, unstaged, and relevant untracked changes, then push current branch to `origin`. If the user did not explicitly request publishing, ask before any git write.
 
 Do not create branches, open PRs, run unrequested checks, or use an invalid subject.
 

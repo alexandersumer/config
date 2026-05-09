@@ -15,7 +15,8 @@ prompts:
     type: string
     required: false
 - name: apply-changes
-  description: Apply a narrow requested change
+  description: Apply a narrow requested code change. Use when the user asks to edit,
+    tweak, add, remove, or rename specific behavior without a broader plan.
   content_file: prompts/apply-changes/SKILL.md
   inputs:
   - name: changes
@@ -34,13 +35,16 @@ prompts:
     type: string
     required: true
 - name: describe-branch
-  description: Write PR title and description
+  description: Write PR title and description. Use when the user wants a pull request
+    title, PR body, branch summary, or Conventional Commit description.
   content_file: prompts/describe-branch/SKILL.md
 - name: describe-diff
-  description: Summarize working changes
+  description: Summarize working changes. Use when the user wants a short diff summary,
+    change phrase, or clean/dirty working-tree description.
   content_file: prompts/describe-diff/SKILL.md
 - name: fix-failures
-  description: Fix real check failures
+  description: Fix real check failures. Use when tests, builds, linters, CI, or pasted
+    error output fail and the user wants the root cause fixed.
   content_file: prompts/fix-failures/SKILL.md
   inputs:
   - name: error_output
@@ -79,7 +83,8 @@ prompts:
     type: string
     required: false
 - name: create-plan
-  description: Write a spec and plan
+  description: Write a spec and implementation plan artifact. Use when the user asks
+    to create planning files, a proposal, design doc, or implementation plan.
   content_file: prompts/create-plan/SKILL.md
   inputs:
   - name: topic
@@ -165,7 +170,8 @@ prompts:
   description: Merge latest origin default branch
   content_file: prompts/sync-main/SKILL.md
 - name: verify-and-fix
-  description: Verify behavior and fix proven defects
+  description: Verify behavior and fix proven defects. Use when the user asks to check,
+    validate, audit, or confirm behavior and repair only real gaps.
   content_file: prompts/verify-and-fix/SKILL.md
   inputs:
   - name: scope
@@ -175,7 +181,8 @@ prompts:
     type: string
     required: false
 - name: prove-check
-  description: Prove a local check catches regressions
+  description: Prove a local check catches regressions. Use when validating that a
+    test, script, lint, or gate fails on the bug it claims to catch.
   content_file: prompts/prove-check/SKILL.md
   inputs:
   - name: scope
@@ -185,7 +192,8 @@ prompts:
     type: string
     required: false
 - name: write-up
-  description: Write a fact-checked summary
+  description: Write a fact-checked summary. Use when the user asks for a concise
+    recap, decision summary, investigation write-up, or verified synthesis.
   content_file: prompts/write-up/SKILL.md
   inputs:
   - name: focus

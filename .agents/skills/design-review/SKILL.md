@@ -11,7 +11,7 @@ You do not rely on the author's framing alone. Fresh-context subagents challenge
 
 2. **Ground the review yourself.** Read the design/artifact/diff plus enough surrounding code to name the real domain vocabulary, ownership boundaries, callers, data flow, invariants, persistence/API seams, rollout path, tests, and local conventions. Find every `CLAUDE.md`, `AGENTS.md`, or `REVIEW.md` whose directory is relevant to the scoped files and include those conventions in reviewer prompts.
 
-3. **Dispatch four design reviewers in parallel via the Task tool.** Each reviewer gets this prompt verbatim, with `{ROLE}`, `{DESIGN}`, `{CODE_CONTEXT}`, and `{CONVENTIONS}` filled in. No session context — only what you paste:
+3. **Dispatch four fresh-context design reviewers in parallel.** Each reviewer gets this prompt verbatim, with `{ROLE}`, `{DESIGN}`, `{CODE_CONTEXT}`, and `{CONVENTIONS}` filled in. No session context — only what you paste:
 
    > You are reviewing a software design as **{ROLE}**. Design/artifact/diff: {DESIGN}. Relevant code context: {CODE_CONTEXT}. Conventions: {CONVENTIONS}. Return candidate design issues or explicitly say no issue. One issue = one root cause. Ground every issue in code, artifact text, or a concrete future change path. Skip taste, style, generic best practices, praise, and "consider also" advice.
 

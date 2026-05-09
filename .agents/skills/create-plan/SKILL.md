@@ -1,6 +1,6 @@
 ---
 name: create-plan
-description: Write a spec and plan
+description: Write a spec and implementation plan artifact. Use when the user asks to create planning files, a proposal, design doc, or implementation plan.
 ---
 
 Use `topic`, `$ARGUMENTS`, or the conversation context as the seed. Write the smallest useful artifact set: a primary spec/design/proposal and a companion implementation plan.

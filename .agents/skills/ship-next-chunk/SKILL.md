@@ -3,7 +3,7 @@ name: ship-next-chunk
 description: Ship the next planned chunk
 ---
 
-Start from fresh default, choose the next artifact-backed chunk, implement it on a new branch, leave it uncommitted.
+Start from fresh default, choose the next artifact-backed chunk, implement it on a new branch, leave it uncommitted. If the user did not explicitly request shipping a chunk, ask before any git write.
 
 Do not pick cleanup or helper-only work. Ship the next real behavior/capability through real entry points with local verification.
 

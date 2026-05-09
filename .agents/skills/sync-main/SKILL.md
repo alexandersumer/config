@@ -3,7 +3,7 @@ name: sync-main
 description: Merge latest origin default branch
 ---
 
-Fetch the latest default branch from `origin` and merge that remote-tracking branch into the current branch.
+Fetch the latest default branch from `origin` and merge that remote-tracking branch into the current branch. If the user did not explicitly request syncing, ask before any git write.
 
 Stop if the working tree is dirty or the current branch is the default branch. Do not stash, discard, or guess.
 

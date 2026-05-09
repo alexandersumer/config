@@ -1,6 +1,6 @@
 ---
 name: apply-changes
-description: Apply a narrow requested change
+description: Apply a narrow requested code change. Use when the user asks to edit, tweak, add, remove, or rename specific behavior without a broader plan.
 ---
 
 Apply `changes`, else `$ARGUMENTS`, else the conversation request.

@@ -7,11 +7,11 @@ description: Use when reviewing a pull request, diff, branch, or any set of code
 
 You do not review the code directly. Subagents do the reviewing in fresh context because session history biases the reviewer toward the author's framing and burns tokens on noise. Your job is dispatching and aggregating.
 
-1. **Get the diff.** Use `git diff $(git merge-base origin/main HEAD)..HEAD`. If the diff is empty, draft-only, formatter-only, version-bump-only, or already reviewed in this thread, stop with a one-line note.
+1. **Get the diff.** Resolve the remote default branch from `origin/HEAD`, falling back to `origin/main` or `origin/master` only if needed. Use `git diff $(git merge-base <remote-default> HEAD)..HEAD`. If the diff is empty, draft-only, formatter-only, version-bump-only, or already reviewed in this thread, stop with a one-line note.
 
 2. **Read conventions yourself.** Find every `CLAUDE.md`, `AGENTS.md`, or `REVIEW.md` whose directory is an ancestor of any changed file. Read them and paste the relevant convention text into reviewer prompts.
 
-3. **Dispatch four reviewers in parallel via the Task tool.** Each reviewer gets this prompt verbatim, with `{ROLE}`, `{DIFF}`, and `{CONVENTIONS}` filled in. No session context — only what you paste:
+3. **Dispatch four fresh-context reviewers in parallel.** Each reviewer gets this prompt verbatim, with `{ROLE}`, `{DIFF}`, and `{CONVENTIONS}` filled in. No session context — only what you paste:
 
    > You are reviewing a code change as **{ROLE}**. Diff: {DIFF}. Conventions: {CONVENTIONS}. Return candidate issues with `file:line`, severity, and a one-paragraph rationale grounded in the diff or files you read. One issue = one root cause. Skip nitpicks, style, "consider also". If it is not a real defect or risk, drop it.
 
