@@ -8,7 +8,7 @@ Commit current staged, unstaged, and relevant untracked changes, then push curre
 Do not create branches, open PRs, run unrequested checks, or use an invalid subject.
 
 Workflow:
-1. Inspect branch, status, and enough diff for one subject.
+1. Inspect branch, status, and the effective publish diff for one subject: staged changes, unstaged changes, and relevant untracked files from `git ls-files --others --exclude-standard` rendered as new-file diffs.
 2. If no changes, stop.
 3. Stage intended changes unless explicitly excluded.
 4. Commit with a valid Conventional Commit subject.

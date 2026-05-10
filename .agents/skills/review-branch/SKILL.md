@@ -7,7 +7,7 @@ description: Use when reviewing a pull request, diff, branch, or any set of code
 
 You do not review the code directly. Subagents do the reviewing in fresh context because session history biases the reviewer toward the author's framing and burns tokens on noise. Your job is dispatching and aggregating.
 
-1. **Get the diff.** Resolve the remote default branch from `origin/HEAD`, falling back to `origin/main` or `origin/master` only if needed. Use `git diff $(git merge-base <remote-default> HEAD)..HEAD`. If the diff is empty, draft-only, formatter-only, version-bump-only, or already reviewed in this thread, stop with a one-line note.
+1. **Get the effective review diff.** Resolve the remote default branch from `origin/HEAD`, falling back to `origin/main` or `origin/master` only if needed. Review the union of committed branch changes, staged changes, unstaged changes, and untracked files: `git diff $(git merge-base <remote-default> HEAD)..HEAD`, `git diff --cached`, `git diff`, and `git ls-files --others --exclude-standard` rendered as new-file diffs. If the committed branch diff is empty but the working tree has staged, unstaged, or untracked changes, review those working-tree changes instead of stopping. If the effective review diff is empty, draft-only, formatter-only, version-bump-only, or already reviewed in this thread, stop with a one-line note.
 
 2. **Read conventions yourself.** Find every `CLAUDE.md`, `AGENTS.md`, or `REVIEW.md` whose directory is an ancestor of any changed file. Read them and paste the relevant convention text into reviewer prompts.
 

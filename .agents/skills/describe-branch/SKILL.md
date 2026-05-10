@@ -7,7 +7,7 @@ Write the canonical PR title and description for the current branch.
 
 Do not use the branch name, issue title, provider default, or a vague summary. First line must be a valid Conventional Commit subject usable verbatim as the PR title.
 
-Inspect base branch, `git diff base...HEAD`, `git log base..HEAD --oneline`, and meaningful hunks. Ignore generated files, lockfiles, and formatting noise unless they are the change.
+Inspect base branch, `git log base..HEAD --oneline`, and the effective branch/worktree diff: `git diff base...HEAD`, `git diff --cached`, `git diff`, and untracked files from `git ls-files --others --exclude-standard` rendered as new-file diffs. If the committed branch diff is empty but the working tree has staged, unstaged, or untracked changes, describe those changes instead of treating the branch as empty. Ignore generated files, lockfiles, and formatting noise unless they are the change.
 
 Output exactly:
 ```text

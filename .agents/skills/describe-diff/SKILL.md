@@ -5,7 +5,7 @@ description: Summarize working changes. Use when the user wants a short diff sum
 
 If the working tree is clean, output `clean`.
 
-Otherwise inspect staged and unstaged changes and output one phrase:
+Otherwise inspect staged, unstaged, and untracked working-tree changes and output one phrase:
 - at most 10 words
 - no punctuation
 - primary change only, not file inventory

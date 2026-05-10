@@ -7,7 +7,7 @@ description: Use when reviewing software design, architecture, a technical propo
 
 You do not rely on the author's framing alone. Fresh-context subagents challenge the design from different angles; your job is to provide the design artifact, relevant code context, conventions, and then aggregate only validated architectural findings.
 
-1. **Resolve the scope.** Use `scope`, `$ARGUMENTS`, the conversation, artifact, file, or branch diff. If the design target is unclear after reading available context, ask one precise question and stop.
+1. **Resolve the scope.** Use `scope`, `$ARGUMENTS`, the conversation, artifact, file, or effective branch/worktree diff. When reviewing a diff, resolve the remote default branch from `origin/HEAD`, falling back to `origin/main` or `origin/master` only if needed, then review the union of committed branch changes, staged changes, unstaged changes, and untracked files: `git diff $(git merge-base <remote-default> HEAD)..HEAD`, `git diff --cached`, `git diff`, and `git ls-files --others --exclude-standard` rendered as new-file diffs. If the committed branch diff is empty but the working tree has staged, unstaged, or untracked changes, review those working-tree changes instead of stopping. If the design target is unclear after reading available context, ask one precise question and stop.
 
 2. **Ground the review yourself.** Read the design/artifact/diff plus enough surrounding code to name the real domain vocabulary, ownership boundaries, callers, data flow, invariants, persistence/API seams, rollout path, tests, and local conventions. Find every `CLAUDE.md`, `AGENTS.md`, or `REVIEW.md` whose directory is relevant to the scoped files and include those conventions in reviewer prompts.
 

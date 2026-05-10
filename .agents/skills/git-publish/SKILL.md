@@ -8,7 +8,7 @@ Commit current staged, unstaged, and relevant untracked changes, then push to `o
 Do not publish with a provider-generated title or branch-name subject.
 
 Workflow:
-1. Inspect current branch, remote default branch, status, and enough diff for one subject.
+1. Inspect current branch, remote default branch, status, and the effective publish diff for one subject: staged changes, unstaged changes, and relevant untracked files from `git ls-files --others --exclude-standard` rendered as new-file diffs.
 2. If no changes, stop.
 3. Stage intended changes unless explicitly excluded.
 4. If already on a non-default branch: commit and push current branch only. Do not inspect or update PRs unless asked.
