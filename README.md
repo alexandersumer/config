@@ -8,12 +8,22 @@ Repo tooling is implemented in Rust via the `config-tools` binary.
 
 ```bash
 cargo run -- check
+cargo run -- prepare
+cargo run -- pre-commit
 cargo run -- generate --check
 cargo run -- validate
 cargo run -- test-validate
 cargo run -- repair-repo
 cargo run -- install
 ```
+
+Command roles:
+
+- `check`: non-mutating verification for formatting, build, generated registry, validation, and regression tests.
+- `prepare`: intentional repo-local mutation; repairs `rovodev/prompts`, regenerates `rovodev/prompts.yml`, then checks.
+- `pre-commit`: safe hook entrypoint; runs `prepare`, then fails if repo-local generated files are left unstaged.
+- `install`: intentional home-directory mutation for `~/.agents` and `~/.rovodev` symlinks.
+- `install-git-hooks`: intentional local Git config mutation for `core.hooksPath`.
 
 ## Git hooks
 
@@ -32,7 +42,7 @@ cargo run -- install-git-hooks
 The pre-commit hook delegates to Rust:
 
 ```bash
-cargo run -- check
+cargo run -- pre-commit
 ```
 
 Git intentionally does not auto-enable arbitrary hooks from a freshly cloned repository for security reasons. A fresh checkout therefore needs one local setup step (`cargo run -- install-git-hooks`) before hooks will run. After that, hooks are enabled for that checkout.
@@ -45,12 +55,13 @@ A change is accepted only if all of these pass locally:
 cargo fmt --check
 cargo check
 cargo run -- check
+cargo run -- pre-commit
 ```
 
-Repo-internal symlink repair and home install behavior must also be verified without touching the real home directory:
+Repo-internal preparation and home install behavior must also be verified without touching the real home directory:
 
 ```bash
-cargo run -- repair-repo
+cargo run -- prepare
 
 tmp_home="$(mktemp -d)"
 cargo run -- install --home "$tmp_home"
@@ -69,7 +80,7 @@ Expected symlink behavior:
 
 ## Executable-code check
 
-The only tracked non-Rust executable should be `.githooks/pre-commit`, because Git hooks must be executable files. It delegates to Rust and should contain no repo logic beyond `cargo run -- check`.
+The only tracked non-Rust executable should be `.githooks/pre-commit`, because Git hooks must be executable files. It delegates to Rust and should contain no repo logic beyond `cargo run -- pre-commit`.
 
 Verify with:
 

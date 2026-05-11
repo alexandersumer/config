@@ -69,6 +69,14 @@ fn run() -> Result<()> {
             args.remove(0);
             check_command(&args)
         }
+        "prepare" => {
+            args.remove(0);
+            prepare_command(&args)
+        }
+        "pre-commit" => {
+            args.remove(0);
+            pre_commit_command(&args)
+        }
         "install-git-hooks" => {
             args.remove(0);
             install_git_hooks_command(&args)
@@ -94,7 +102,7 @@ fn print_help() {
 }
 
 fn help_text() -> &'static str {
-    "Usage: config-tools <command> [options]\n\nCommands:\n  generate [--repo-root PATH] [--check]\n  validate [--repo-root PATH]\n  test-validate\n  check [--repo-root PATH]\n  install-git-hooks [--repo-root PATH]\n  repair-repo [--repo-root PATH]\n  install [--repo-root PATH] [--home PATH]\n"
+    "Usage: config-tools <command> [options]\n\nCommands:\n  generate [--repo-root PATH] [--check]\n  validate [--repo-root PATH]\n  test-validate\n  check [--repo-root PATH]\n  prepare [--repo-root PATH]\n  pre-commit [--repo-root PATH]\n  install-git-hooks [--repo-root PATH]\n  repair-repo [--repo-root PATH]\n  install [--repo-root PATH] [--home PATH]\n"
 }
 
 fn parse_repo_args(args: &[String], allow_check: bool) -> Result<(PathBuf, bool)> {
@@ -208,6 +216,89 @@ fn check_command(args: &[String]) -> Result<()> {
     validate_command(&["--repo-root".to_string(), repo_root.display().to_string()])?;
     test_validate_command(&[])?;
     Ok(())
+}
+
+fn prepare_command(args: &[String]) -> Result<()> {
+    let (repo_root, _) = parse_repo_args(args, false)?;
+    repair_repo_command(&["--repo-root".to_string(), repo_root.display().to_string()])?;
+    generate_command(&["--repo-root".to_string(), repo_root.display().to_string()])?;
+    check_command(&["--repo-root".to_string(), repo_root.display().to_string()])?;
+    Ok(())
+}
+
+fn pre_commit_command(args: &[String]) -> Result<()> {
+    let (repo_root, _) = parse_repo_args(args, false)?;
+    let before = repo_generated_snapshot(&repo_root)?;
+    prepare_command(&["--repo-root".to_string(), repo_root.display().to_string()])?;
+    let after = repo_generated_snapshot(&repo_root)?;
+    if before != after {
+        return Err(
+            "pre-commit updated repo-local generated files. Review and stage rovodev/prompts and rovodev/prompts.yml, then commit again."
+                .to_string(),
+        );
+    }
+    ensure_no_unstaged_repo_generated_changes(&repo_root)
+}
+
+fn repo_generated_snapshot(repo_root: &Path) -> Result<Vec<(String, String)>> {
+    ["rovodev/prompts", "rovodev/prompts.yml"]
+        .iter()
+        .map(|path| {
+            let full_path = repo_root.join(path);
+            let metadata = fs::symlink_metadata(&full_path).map_err(|err| {
+                format!(
+                    "{}: cannot inspect generated path: {err}",
+                    full_path.display()
+                )
+            })?;
+            let value = if metadata.file_type().is_symlink() {
+                format!(
+                    "symlink:{}",
+                    fs::read_link(&full_path)
+                        .map_err(|err| format!(
+                            "{}: cannot read symlink: {err}",
+                            full_path.display()
+                        ))?
+                        .display()
+                )
+            } else if metadata.is_file() {
+                format!(
+                    "file:{}",
+                    fs::read_to_string(&full_path).map_err(|err| format!(
+                        "{}: cannot read file: {err}",
+                        full_path.display()
+                    ))?
+                )
+            } else if metadata.is_dir() {
+                "directory".to_string()
+            } else {
+                "other".to_string()
+            };
+            Ok((path.to_string(), value))
+        })
+        .collect()
+}
+
+fn ensure_no_unstaged_repo_generated_changes(repo_root: &Path) -> Result<()> {
+    let paths = ["rovodev/prompts", "rovodev/prompts.yml"];
+    let status = std::process::Command::new("git")
+        .arg("diff")
+        .arg("--quiet")
+        .arg("--")
+        .args(paths)
+        .current_dir(repo_root)
+        .status()
+        .map_err(|err| format!("cannot run git diff: {err}"))?;
+    if status.success() {
+        Ok(())
+    } else if status.code() == Some(1) {
+        Err(
+            "pre-commit updated or found unstaged repo-local generated files. Review and stage rovodev/prompts and rovodev/prompts.yml, then commit again."
+                .to_string(),
+        )
+    } else {
+        Err(format!("git diff failed with {status}"))
+    }
 }
 
 fn install_git_hooks_command(args: &[String]) -> Result<()> {
