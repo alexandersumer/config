@@ -65,6 +65,14 @@ fn run() -> Result<()> {
             args.remove(0);
             test_validate_command(&args)
         }
+        "check" => {
+            args.remove(0);
+            check_command(&args)
+        }
+        "install-git-hooks" => {
+            args.remove(0);
+            install_git_hooks_command(&args)
+        }
         "install" => {
             args.remove(0);
             install_command(&args)
@@ -86,7 +94,7 @@ fn print_help() {
 }
 
 fn help_text() -> &'static str {
-    "Usage: config-tools <command> [options]\n\nCommands:\n  generate [--repo-root PATH] [--check]\n  validate [--repo-root PATH]\n  test-validate\n  repair-repo [--repo-root PATH]\n  install [--repo-root PATH] [--home PATH]\n"
+    "Usage: config-tools <command> [options]\n\nCommands:\n  generate [--repo-root PATH] [--check]\n  validate [--repo-root PATH]\n  test-validate\n  check [--repo-root PATH]\n  install-git-hooks [--repo-root PATH]\n  repair-repo [--repo-root PATH]\n  install [--repo-root PATH] [--home PATH]\n"
 }
 
 fn parse_repo_args(args: &[String], allow_check: bool) -> Result<(PathBuf, bool)> {
@@ -186,6 +194,59 @@ fn test_validate_command(args: &[String]) -> Result<()> {
     test_command_failures()?;
     println!("Skill validator regression tests passed.");
     Ok(())
+}
+
+fn check_command(args: &[String]) -> Result<()> {
+    let (repo_root, _) = parse_repo_args(args, false)?;
+    run_cargo(&repo_root, &["fmt", "--check"])?;
+    run_cargo(&repo_root, &["check"])?;
+    generate_command(&[
+        "--repo-root".to_string(),
+        repo_root.display().to_string(),
+        "--check".to_string(),
+    ])?;
+    validate_command(&["--repo-root".to_string(), repo_root.display().to_string()])?;
+    test_validate_command(&[])?;
+    Ok(())
+}
+
+fn install_git_hooks_command(args: &[String]) -> Result<()> {
+    let (repo_root, _) = parse_repo_args(args, false)?;
+    let hooks_dir = repo_root.join(".githooks");
+    let hook_path = hooks_dir.join("pre-commit");
+    if !hook_path.is_file() {
+        return Err(format!(
+            "{}: tracked pre-commit hook is missing",
+            hook_path.display()
+        ));
+    }
+    run_git(&repo_root, &["config", "core.hooksPath", ".githooks"])?;
+    println!(
+        "Configured core.hooksPath=.githooks for {}",
+        repo_root.display()
+    );
+    Ok(())
+}
+
+fn run_cargo(repo_root: &Path, args: &[&str]) -> Result<()> {
+    run_command(repo_root, "cargo", args)
+}
+
+fn run_git(repo_root: &Path, args: &[&str]) -> Result<()> {
+    run_command(repo_root, "git", args)
+}
+
+fn run_command(repo_root: &Path, program: &str, args: &[&str]) -> Result<()> {
+    let status = std::process::Command::new(program)
+        .args(args)
+        .current_dir(repo_root)
+        .status()
+        .map_err(|err| format!("cannot run {program} {}: {err}", args.join(" ")))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("{program} {} failed with {status}", args.join(" ")))
+    }
 }
 
 fn repair_repo_command(args: &[String]) -> Result<()> {
