@@ -11,9 +11,11 @@ use std::os::unix::fs as unix_fs;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
+type Mutation = fn(&Path) -> Result<&'static str>;
+
 pub(crate) fn run_regression_tests() -> Result<()> {
     assert_clean_fixture_passes()?;
-    let mutations: &[(&str, fn(&Path) -> Result<&'static str>)] = &[
+    let mutations: &[(&str, Mutation)] = &[
         ("missing skill file", mutate_missing_skill_file),
         (
             "front matter name mismatch",
@@ -343,7 +345,7 @@ fn assert_symlink_resolves_to(link: &Path, expected: &Path) -> Result<()> {
     Ok(())
 }
 
-fn assert_mutation_fails(name: &str, mutate: fn(&Path) -> Result<&'static str>) -> Result<()> {
+fn assert_mutation_fails(name: &str, mutate: Mutation) -> Result<()> {
     let fixture = copy_fixture()?;
     let expected = mutate(fixture.path())?;
     let errors = validate_registry(fixture.path());

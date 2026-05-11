@@ -4,6 +4,7 @@ use serde_yaml::{Mapping, Value};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 const INPUT_KEYS: &[&str] = &["name", "label", "description", "type", "required"];
 const SKILL_FRONT_MATTER_KEYS: &[&str] = &[
@@ -79,13 +80,12 @@ fn validate_skill_name(value: Option<&Value>, context: &str) -> Result<String> {
     if name.is_empty() {
         return Err(format!("{context}: name must be a non-empty string"));
     }
-    let re = Regex::new(r"^[a-z0-9]+(?:-[a-z0-9]+)*$").expect("valid regex");
-    if !re.is_match(name) {
+    if !skill_name_regex().is_match(name) {
         return Err(format!(
             "{context}: skill name must be kebab-case: {name:?}"
         ));
     }
-    Ok(name.to_string())
+    Ok(name.to_owned())
 }
 
 fn validate_input_name(value: Option<&Value>, context: &str) -> Result<String> {
@@ -95,13 +95,22 @@ fn validate_input_name(value: Option<&Value>, context: &str) -> Result<String> {
     if name.is_empty() {
         return Err(format!("{context}: input name must be a non-empty string"));
     }
-    let re = Regex::new(r"^[a-z][a-z0-9_]*$").expect("valid regex");
-    if !re.is_match(name) {
+    if !input_name_regex().is_match(name) {
         return Err(format!(
             "{context}: input name must be lower_snake_case: {name:?}"
         ));
     }
-    Ok(name.to_string())
+    Ok(name.to_owned())
+}
+
+fn skill_name_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| Regex::new(r"^[a-z0-9]+(?:-[a-z0-9]+)*$").expect("valid regex"))
+}
+
+fn input_name_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| Regex::new(r"^[a-z][a-z0-9_]*$").expect("valid regex"))
 }
 
 fn validate_description(value: Option<&Value>, context: &str) -> Result<String> {
@@ -114,7 +123,7 @@ fn validate_description(value: Option<&Value>, context: &str) -> Result<String> 
     if description.contains('\n') {
         return Err(format!("{context}: description must be a single line"));
     }
-    Ok(description.to_string())
+    Ok(description.to_owned())
 }
 
 pub(crate) fn string_key(key: &str) -> Value {
@@ -298,14 +307,17 @@ fn collect_skills(config_root: &Path) -> Result<Vec<Prompt>> {
     let mut skills = Vec::new();
     let mut seen_names = HashSet::new();
     for skill_file in skill_files {
-        let skill_dir = skill_file
+        let skill_parent = skill_file
             .parent()
-            .and_then(Path::file_name)
+            .ok_or_else(|| format!("{}: invalid skill path", skill_file.display()))?;
+        let skill_dir = skill_parent
+            .file_name()
             .and_then(|name| name.to_str())
             .ok_or_else(|| format!("{}: invalid skill directory", skill_file.display()))?;
+        let skill_dir_context = skill_parent.display().to_string();
         validate_skill_name(
-            Some(&Value::String(skill_dir.to_string())),
-            &skill_file.parent().unwrap().display().to_string(),
+            Some(&Value::String(skill_dir.to_owned())),
+            &skill_dir_context,
         )?;
         let metadata = parse_front_matter(&skill_file)?;
         require_known_keys(

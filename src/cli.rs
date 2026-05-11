@@ -10,45 +10,22 @@ use std::env;
 use std::path::PathBuf;
 
 pub(crate) fn run() -> Result<()> {
-    let mut args: Vec<String> = env::args().skip(1).collect();
-    let command = args.first().map(String::as_str).unwrap_or("help");
-    match command {
-        "generate" => {
-            args.remove(0);
-            generate_command(&args)
-        }
-        "validate" => {
-            args.remove(0);
-            validate_command(&args)
-        }
-        "test-validate" => {
-            args.remove(0);
-            test_validate_command(&args)
-        }
-        "check" => {
-            args.remove(0);
-            check_command(&args)
-        }
-        "prepare" => {
-            args.remove(0);
-            prepare_command(&args)
-        }
-        "pre-commit" => {
-            args.remove(0);
-            pre_commit_command(&args)
-        }
-        "install-git-hooks" => {
-            args.remove(0);
-            install_git_hooks_command(&args)
-        }
-        "install" => {
-            args.remove(0);
-            install_command(&args)
-        }
-        "repair-config" => {
-            args.remove(0);
-            repair_config_command(&args)
-        }
+    let args: Vec<String> = env::args().skip(1).collect();
+    let Some((command, command_args)) = args.split_first() else {
+        print_help();
+        return Ok(());
+    };
+
+    match command.as_str() {
+        "generate" => generate_command(command_args),
+        "validate" => validate_command(command_args),
+        "test-validate" => test_validate_command(command_args),
+        "check" => check_command(command_args),
+        "prepare" => prepare_command(command_args),
+        "pre-commit" => pre_commit_command(command_args),
+        "install-git-hooks" => install_git_hooks_command(command_args),
+        "install" => install_command(command_args),
+        "repair-config" => repair_config_command(command_args),
         "help" | "--help" | "-h" => {
             print_help();
             Ok(())
