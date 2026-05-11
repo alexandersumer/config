@@ -188,3 +188,59 @@ fn symlink_source(source: &Path, target: &Path, config_root: &Path) -> PathBuf {
     }
     source.to_path_buf()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn symlink_source_uses_relative_path_inside_config_root() {
+        let config_root = Path::new("/config");
+        let source = Path::new("/config/.agents/skills");
+        let target = Path::new("/config/rovodev/prompts");
+
+        assert_eq!(
+            symlink_source(source, target, config_root),
+            PathBuf::from("../.agents/skills")
+        );
+    }
+
+    #[test]
+    fn symlink_source_counts_parent_components_for_nested_targets() {
+        let config_root = Path::new("/config");
+        let source = Path::new("/config/.agents/skills");
+        let target = Path::new("/config/a/b/c/prompts");
+
+        assert_eq!(
+            symlink_source(source, target, config_root),
+            PathBuf::from("../../../.agents/skills")
+        );
+    }
+
+    #[test]
+    fn symlink_source_preserves_absolute_path_outside_config_root() {
+        let config_root = Path::new("/config");
+        let source = Path::new("/other/.agents/skills");
+        let target = Path::new("/config/rovodev/prompts");
+
+        assert_eq!(symlink_source(source, target, config_root), source);
+    }
+
+    #[test]
+    fn normalize_existing_ancestor_resolves_existing_prefix_and_keeps_missing_tail() {
+        let temp_dir = tempfile::Builder::new()
+            .prefix("tmp_rovodev_links_test_")
+            .tempdir()
+            .expect("create temp dir");
+        let existing = temp_dir.path().join("existing");
+        fs::create_dir(&existing).expect("create existing dir");
+
+        let normalized = normalize_existing_ancestor(&existing.join("missing/child"));
+        let expected = existing
+            .canonicalize()
+            .expect("canonicalize existing dir")
+            .join("missing/child");
+
+        assert_eq!(normalized, expected);
+    }
+}

@@ -684,3 +684,121 @@ pub(crate) fn validate_registry(config_root: &Path) -> Vec<String> {
     errors.extend(validate_generated_registry(config_root));
     errors
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn yaml_value(text: &str) -> Value {
+        serde_yaml::from_str(text).expect("valid test YAML")
+    }
+
+    #[test]
+    fn validate_skill_name_accepts_kebab_case_and_rejects_other_shapes() {
+        assert_eq!(
+            validate_skill_name(
+                Some(&Value::String("clean-up-feature-flag".to_string())),
+                "skill"
+            )
+            .expect("valid skill name"),
+            "clean-up-feature-flag"
+        );
+        assert!(validate_skill_name(Some(&Value::String("CleanUp".to_string())), "skill").is_err());
+        assert!(validate_skill_name(Some(&Value::String("".to_string())), "skill").is_err());
+    }
+
+    #[test]
+    fn normalize_inputs_accepts_valid_input_values() {
+        let value = yaml_value(
+            r#"
+- name: ticket_id
+  label: Ticket ID
+  description: Jira ticket ID
+  type: string
+  required: true
+"#,
+        );
+
+        assert_eq!(
+            normalize_inputs(Some(&value), "metadata").expect("valid inputs"),
+            vec![Input {
+                name: "ticket_id".to_string(),
+                label: "Ticket ID".to_string(),
+                description: "Jira ticket ID".to_string(),
+                input_type: "string".to_string(),
+                required: true,
+            }]
+        );
+    }
+
+    #[test]
+    fn normalize_inputs_rejects_duplicate_names() {
+        let value = yaml_value(
+            r#"
+- name: ticket_id
+  label: Ticket ID
+  description: Jira ticket ID
+  type: string
+  required: true
+- name: ticket_id
+  label: Duplicate ticket ID
+  description: Duplicate Jira ticket ID
+  type: string
+  required: false
+"#,
+        );
+
+        assert!(normalize_inputs(Some(&value), "metadata").is_err());
+    }
+
+    #[test]
+    fn normalize_inputs_rejects_non_lower_snake_case_names() {
+        for name in ["TicketId", "_ticket_id", "ticket-id"] {
+            let value = yaml_value(&format!(
+                r#"
+- name: {name}
+  label: Ticket ID
+  description: Jira ticket ID
+  type: string
+  required: true
+"#
+            ));
+
+            assert!(normalize_inputs(Some(&value), "metadata").is_err());
+        }
+    }
+
+    #[test]
+    fn normalize_inputs_requires_supported_string_type() {
+        let value = yaml_value(
+            r#"
+- name: ticket_id
+  label: Ticket ID
+  description: Jira ticket ID
+  type: number
+  required: true
+"#,
+        );
+
+        assert!(normalize_inputs(Some(&value), "metadata").is_err());
+    }
+
+    #[test]
+    fn resolve_content_path_accepts_prompt_skill_paths_only() {
+        let config_root = Path::new("/config");
+        let valid = Value::String("prompts/apply-changes/SKILL.md".to_string());
+        assert_eq!(
+            resolve_content_path(config_root, Some(&valid), "prompt").expect("valid content path"),
+            PathBuf::from("/config/rovodev/prompts/apply-changes/SKILL.md")
+        );
+
+        let absolute = Value::String("/tmp/prompts/apply-changes/SKILL.md".to_string());
+        assert!(resolve_content_path(config_root, Some(&absolute), "prompt").is_err());
+
+        let traversal = Value::String("prompts/../secret/SKILL.md".to_string());
+        assert!(resolve_content_path(config_root, Some(&traversal), "prompt").is_err());
+
+        let wrong_suffix = Value::String("prompts/apply-changes/README.md".to_string());
+        assert!(resolve_content_path(config_root, Some(&wrong_suffix), "prompt").is_err());
+    }
+}
