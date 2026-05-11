@@ -205,8 +205,8 @@ fn normalize_inputs(value: Option<&Value>, context: &str) -> Result<Vec<Input>> 
     Ok(normalized)
 }
 
-fn existing_prompt_order(repo_root: &Path) -> Result<HashMap<String, usize>> {
-    let config_path = repo_root.join("rovodev/prompts.yml");
+fn existing_prompt_order(config_root: &Path) -> Result<HashMap<String, usize>> {
+    let config_path = config_root.join("rovodev/prompts.yml");
     if !config_path.exists() {
         return Ok(HashMap::new());
     }
@@ -231,8 +231,8 @@ fn existing_prompt_order(repo_root: &Path) -> Result<HashMap<String, usize>> {
     Ok(order)
 }
 
-fn load_prompt_metadata(repo_root: &Path) -> Result<HashMap<String, Vec<Input>>> {
-    let metadata_path = repo_root.join("rovodev/prompt-metadata.yml");
+fn load_prompt_metadata(config_root: &Path) -> Result<HashMap<String, Vec<Input>>> {
+    let metadata_path = config_root.join("rovodev/prompt-metadata.yml");
     if !metadata_path.exists() {
         return Ok(HashMap::new());
     }
@@ -269,15 +269,15 @@ fn load_prompt_metadata(repo_root: &Path) -> Result<HashMap<String, Vec<Input>>>
     Ok(normalized)
 }
 
-fn collect_skills(repo_root: &Path) -> Result<Vec<Prompt>> {
-    let skills_root = repo_root.join(".agents/skills");
+fn collect_skills(config_root: &Path) -> Result<Vec<Prompt>> {
+    let skills_root = config_root.join(".agents/skills");
     if !skills_root.is_dir() {
         return Err(format!(
             "{}: canonical skills directory does not exist",
             skills_root.display()
         ));
     }
-    let prompt_metadata = load_prompt_metadata(repo_root)?;
+    let prompt_metadata = load_prompt_metadata(config_root)?;
     let mut skill_files = Vec::new();
     for entry in fs::read_dir(&skills_root)
         .map_err(|err| format!("{}: cannot read directory: {err}", skills_root.display()))?
@@ -347,7 +347,7 @@ fn collect_skills(repo_root: &Path) -> Result<Vec<Prompt>> {
     if !unknown.is_empty() {
         return Err(format!(
             "{}: metadata for unknown skills: {unknown:?}",
-            repo_root.join("rovodev/prompt-metadata.yml").display()
+            config_root.join("rovodev/prompt-metadata.yml").display()
         ));
     }
     if skills.is_empty() {
@@ -356,13 +356,13 @@ fn collect_skills(repo_root: &Path) -> Result<Vec<Prompt>> {
     Ok(skills)
 }
 
-pub(crate) fn render_registry(repo_root: &Path) -> Result<String> {
-    dump_registry(&generate_registry(repo_root)?)
+pub(crate) fn render_registry(config_root: &Path) -> Result<String> {
+    dump_registry(&generate_registry(config_root)?)
 }
 
-fn generate_registry(repo_root: &Path) -> Result<Vec<Prompt>> {
-    let order = existing_prompt_order(repo_root)?;
-    let mut prompts = collect_skills(repo_root)?;
+fn generate_registry(config_root: &Path) -> Result<Vec<Prompt>> {
+    let order = existing_prompt_order(config_root)?;
+    let mut prompts = collect_skills(config_root)?;
     let default_order = order.len();
     prompts.sort_by(|left, right| {
         let left_key = (*order.get(&left.name).unwrap_or(&default_order), &left.name);
@@ -421,7 +421,7 @@ fn dump_registry(prompts: &[Prompt]) -> Result<String> {
 }
 
 fn resolve_content_path(
-    repo_root: &Path,
+    config_root: &Path,
     content_file: Option<&Value>,
     context: &str,
 ) -> Result<PathBuf> {
@@ -453,13 +453,13 @@ fn resolve_content_path(
             "{context}: content_file must point to a SKILL.md file"
         ));
     }
-    Ok(repo_root.join("rovodev").join(content_file))
+    Ok(config_root.join("rovodev").join(content_file))
 }
 
-fn validate_prompts_adapter(repo_root: &Path) -> Vec<String> {
+fn validate_prompts_adapter(config_root: &Path) -> Vec<String> {
     let mut errors = Vec::new();
-    let prompts_link = repo_root.join("rovodev/prompts");
-    let skills_root = repo_root.join(".agents/skills");
+    let prompts_link = config_root.join("rovodev/prompts");
+    let skills_root = config_root.join(".agents/skills");
 
     match fs::symlink_metadata(&prompts_link) {
         Ok(metadata) if metadata.file_type().is_symlink() => {
@@ -488,7 +488,7 @@ fn validate_prompts_adapter(repo_root: &Path) -> Vec<String> {
         )),
     }
 
-    let config_path = repo_root.join("rovodev/prompts.yml");
+    let config_path = config_root.join("rovodev/prompts.yml");
     let config = match load_yaml_file(&config_path) {
         Ok(config) => config,
         Err(err) => {
@@ -517,7 +517,7 @@ fn validate_prompts_adapter(repo_root: &Path) -> Vec<String> {
         ));
         return errors;
     }
-    let prompt_metadata = match load_prompt_metadata(repo_root) {
+    let prompt_metadata = match load_prompt_metadata(config_root) {
         Ok(metadata) => metadata,
         Err(err) => {
             errors.push(err);
@@ -560,14 +560,17 @@ fn validate_prompts_adapter(repo_root: &Path) -> Vec<String> {
                 continue;
             }
         };
-        let content_path =
-            match resolve_content_path(repo_root, get(prompt_mapping, "content_file"), &context) {
-                Ok(path) => path,
-                Err(err) => {
-                    errors.push(err);
-                    continue;
-                }
-            };
+        let content_path = match resolve_content_path(
+            config_root,
+            get(prompt_mapping, "content_file"),
+            &context,
+        ) {
+            Ok(path) => path,
+            Err(err) => {
+                errors.push(err);
+                continue;
+            }
+        };
         if !seen_names.insert(name.clone()) {
             errors.push(format!("{context}: duplicate prompt name: {name}"));
             continue;
@@ -618,7 +621,7 @@ fn validate_prompts_adapter(repo_root: &Path) -> Vec<String> {
                 if metadata_inputs != registry_inputs {
                     errors.push(format!(
                         "{}: inputs for {name:?} do not match registry inputs",
-                        repo_root.join("rovodev/prompt-metadata.yml").display()
+                        config_root.join("rovodev/prompt-metadata.yml").display()
                     ));
                 }
             }
@@ -634,15 +637,15 @@ fn validate_prompts_adapter(repo_root: &Path) -> Vec<String> {
     if !unknown_metadata.is_empty() {
         errors.push(format!(
             "{}: metadata for unknown skills: {unknown_metadata:?}",
-            repo_root.join("rovodev/prompt-metadata.yml").display()
+            config_root.join("rovodev/prompt-metadata.yml").display()
         ));
     }
     errors
 }
 
-fn validate_generated_registry(repo_root: &Path) -> Vec<String> {
-    let config_path = repo_root.join("rovodev/prompts.yml");
-    match generate_registry(repo_root)
+fn validate_generated_registry(config_root: &Path) -> Vec<String> {
+    let config_path = config_root.join("rovodev/prompts.yml");
+    match generate_registry(config_root)
         .and_then(|registry| dump_registry(&registry))
         .and_then(|expected| {
             let actual = fs::read_to_string(&config_path).map_err(|err| err.to_string())?;
@@ -660,12 +663,12 @@ fn validate_generated_registry(repo_root: &Path) -> Vec<String> {
     }
 }
 
-pub(crate) fn validate_registry(repo_root: &Path) -> Vec<String> {
+pub(crate) fn validate_registry(config_root: &Path) -> Vec<String> {
     let mut errors = Vec::new();
-    if let Err(err) = collect_skills(repo_root) {
+    if let Err(err) = collect_skills(config_root) {
         errors.push(err);
     }
-    errors.extend(validate_prompts_adapter(repo_root));
-    errors.extend(validate_generated_registry(repo_root));
+    errors.extend(validate_prompts_adapter(config_root));
+    errors.extend(validate_generated_registry(config_root));
     errors
 }

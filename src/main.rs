@@ -1,12 +1,12 @@
 mod cli;
 mod commands;
+mod config_root;
 mod error;
 mod install;
 mod links;
 mod registry;
 mod regression;
 mod repair;
-mod repo;
 
 fn main() {
     if let Err(err) = cli::run() {

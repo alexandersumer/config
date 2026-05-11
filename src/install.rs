@@ -1,20 +1,20 @@
+use crate::config_root::discover_config_root;
 use crate::error::Result;
 use crate::links::{link_path, require_dir};
-use crate::repo::discover_repo_root;
 use std::env;
 use std::fs;
 use std::path::PathBuf;
 
 pub(crate) fn install_command(args: &[String]) -> Result<()> {
-    let (repo_root, home_dir) = parse_install_args(args)?;
-    let agents_dir = repo_root.join(".agents");
+    let (config_root, home_dir) = parse_install_args(args)?;
+    let agents_dir = config_root.join(".agents");
     let skills_dir = agents_dir.join("skills");
-    let rovodev_dir = repo_root.join("rovodev");
+    let rovodev_dir = config_root.join("rovodev");
     let global_agents_dir = home_dir.join(".agents");
     let global_dir = home_dir.join(".rovodev");
 
-    require_dir(&agents_dir, "repo agents directory")?;
-    require_dir(&skills_dir, "repo skills directory")?;
+    require_dir(&agents_dir, "config agents directory")?;
+    require_dir(&skills_dir, "config skills directory")?;
     fs::create_dir_all(&global_dir).map_err(|err| {
         format!(
             "{}: cannot create Rovo Dev config directory: {err}",
@@ -26,35 +26,35 @@ pub(crate) fn install_command(args: &[String]) -> Result<()> {
         &agents_dir,
         &global_agents_dir,
         "global agents directory",
-        &repo_root,
+        &config_root,
         &skills_dir,
     )?;
     link_path(
         &skills_dir,
         &global_dir.join("skills"),
         "skills",
-        &repo_root,
+        &config_root,
         &skills_dir,
     )?;
     link_path(
         &rovodev_dir.join("prompts.yml"),
         &global_dir.join("prompts.yml"),
         "prompts.yml",
-        &repo_root,
+        &config_root,
         &skills_dir,
     )?;
     link_path(
         &skills_dir,
         &global_dir.join("prompts"),
         "prompt adapter",
-        &repo_root,
+        &config_root,
         &skills_dir,
     )?;
 
     println!();
     println!(
         "Done. Agent config is now managed from {}.",
-        repo_root.display()
+        config_root.display()
     );
     println!(
         "~/.agents points at {}, and Rovo Dev skills point at {}.",
@@ -66,15 +66,15 @@ pub(crate) fn install_command(args: &[String]) -> Result<()> {
 }
 
 fn parse_install_args(args: &[String]) -> Result<(PathBuf, PathBuf)> {
-    let mut repo_root: Option<PathBuf> = None;
+    let mut config_root: Option<PathBuf> = None;
     let mut home_dir: Option<PathBuf> = None;
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
-            "--repo-root" => {
+            "--config-root" => {
                 index += 1;
-                repo_root = Some(PathBuf::from(
-                    args.get(index).ok_or("--repo-root requires a path")?,
+                config_root = Some(PathBuf::from(
+                    args.get(index).ok_or("--config-root requires a path")?,
                 ));
             }
             "--home" => {
@@ -88,20 +88,20 @@ fn parse_install_args(args: &[String]) -> Result<(PathBuf, PathBuf)> {
         index += 1;
     }
 
-    let repo_root = match repo_root {
+    let config_root = match config_root {
         Some(path) => path,
-        None => discover_repo_root(
+        None => discover_config_root(
             &env::current_exe()
                 .map_err(|err| format!("cannot determine current executable: {err}"))?,
         )?,
     }
     .canonicalize()
-    .map_err(|err| format!("cannot resolve repository root: {err}"))?;
+    .map_err(|err| format!("cannot resolve config root: {err}"))?;
 
     let home_dir = match home_dir {
         Some(path) => path,
         None => PathBuf::from(env::var("HOME").map_err(|_| "HOME is not set".to_string())?),
     };
 
-    Ok((repo_root, home_dir))
+    Ok((config_root, home_dir))
 }

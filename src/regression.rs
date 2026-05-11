@@ -1,9 +1,9 @@
 use crate::commands::{generate_command, validate_command};
+use crate::config_root::config_root_from_exe;
 use crate::error::Result;
 use crate::install::install_command;
 use crate::registry::{get, load_yaml_file, string_key, validate_registry};
-use crate::repair::repair_repo_command;
-use crate::repo::repo_root_from_exe;
+use crate::repair::repair_config_command;
 use serde_yaml::Value;
 use std::fs;
 #[cfg(unix)]
@@ -26,15 +26,15 @@ pub(crate) fn run_regression_tests() -> Result<()> {
     for (name, mutate) in mutations {
         assert_mutation_fails(name, *mutate)?;
     }
-    test_repair_repo_command()?;
+    test_repair_config_command()?;
     test_install_command()?;
     test_link_safety()?;
     test_command_failures()?;
     Ok(())
 }
 
-fn test_repair_repo_command() -> Result<()> {
-    // Test the public behavior of repair-repo: empty rovodev/prompts directory
+fn test_repair_config_command() -> Result<()> {
+    // Test the public behavior of repair-config: empty rovodev/prompts directory
     // should be replaced with a relative symlink to ../.agents/skills
     let fixture = copy_fixture()?;
     let prompts_link = fixture.path().join("rovodev/prompts");
@@ -58,9 +58,9 @@ fn test_repair_repo_command() -> Result<()> {
         return Err("Setup failed: rovodev/prompts should be a directory".to_string());
     }
 
-    // Run repair-repo command
-    repair_repo_command(&[
-        "--repo-root".to_string(),
+    // Run repair-config command
+    repair_config_command(&[
+        "--config-root".to_string(),
         fixture.path().display().to_string(),
     ])?;
 
@@ -122,7 +122,7 @@ pub(crate) fn test_install_command() -> Result<()> {
         .map_err(|err| format!("cannot create temp install home: {err}"))?;
 
     install_command(&[
-        "--repo-root".to_string(),
+        "--config-root".to_string(),
         fixture.path().display().to_string(),
         "--home".to_string(),
         home.path().display().to_string(),
@@ -168,17 +168,17 @@ pub(crate) fn test_link_safety() -> Result<()> {
             prompts_link.display()
         )
     })?;
-    let repair_error = repair_repo_command(&[
-        "--repo-root".to_string(),
+    let repair_error = repair_config_command(&[
+        "--config-root".to_string(),
         repair_fixture.path().display().to_string(),
     ])
-    .expect_err("repair-repo should reject non-empty repo prompt adapter directories");
+    .expect_err("repair-config should reject non-empty config prompt adapter directories");
     if !repair_error.contains("not an empty directory") {
-        return Err(format!("unexpected repair-repo error: {repair_error}"));
+        return Err(format!("unexpected repair-config error: {repair_error}"));
     }
     if !prompts_link.join("keep").is_file() {
         return Err(
-            "repair-repo removed data from non-empty repo prompt adapter directory".to_string(),
+            "repair-config removed data from non-empty config prompt adapter directory".to_string(),
         );
     }
 
@@ -192,7 +192,7 @@ pub(crate) fn test_link_safety() -> Result<()> {
     fs::write(home.path().join(".agents/keep"), "do not delete")
         .map_err(|err| format!("cannot write fixture .agents file: {err}"))?;
     let install_error = install_command(&[
-        "--repo-root".to_string(),
+        "--config-root".to_string(),
         install_fixture.path().display().to_string(),
         "--home".to_string(),
         home.path().display().to_string(),
@@ -225,7 +225,7 @@ pub(crate) fn test_command_failures() -> Result<()> {
     );
     write_config(drift_fixture.path(), &config)?;
     let generate_error = generate_command(&[
-        "--repo-root".to_string(),
+        "--config-root".to_string(),
         drift_fixture.path().display().to_string(),
         "--check".to_string(),
     ])
@@ -239,7 +239,7 @@ pub(crate) fn test_command_failures() -> Result<()> {
     let invalid_fixture = copy_fixture()?;
     mutate_missing_skill_file(invalid_fixture.path())?;
     let validate_error = validate_command(&[
-        "--repo-root".to_string(),
+        "--config-root".to_string(),
         invalid_fixture.path().display().to_string(),
     ])
     .expect_err("validate should fail when validation errors exist");
@@ -250,13 +250,19 @@ pub(crate) fn test_command_failures() -> Result<()> {
 }
 
 fn copy_fixture() -> Result<TempDir> {
-    let repo_root = repo_root_from_exe()?;
+    let config_root = config_root_from_exe()?;
     let temp_dir = tempfile::Builder::new()
         .prefix("tmp_rovodev_skill_validation_")
         .tempdir()
         .map_err(|err| format!("cannot create temp fixture: {err}"))?;
-    copy_tree(&repo_root.join(".agents"), &temp_dir.path().join(".agents"))?;
-    copy_tree(&repo_root.join("rovodev"), &temp_dir.path().join("rovodev"))?;
+    copy_tree(
+        &config_root.join(".agents"),
+        &temp_dir.path().join(".agents"),
+    )?;
+    copy_tree(
+        &config_root.join("rovodev"),
+        &temp_dir.path().join("rovodev"),
+    )?;
     Ok(temp_dir)
 }
 
@@ -299,7 +305,7 @@ fn copy_tree(source: &Path, target: &Path) -> Result<()> {
 pub(crate) fn assert_clean_fixture_passes() -> Result<()> {
     let fixture = copy_fixture()?;
     generate_command(&[
-        "--repo-root".to_string(),
+        "--config-root".to_string(),
         fixture.path().display().to_string(),
     ])?;
     let errors = validate_registry(fixture.path());
@@ -351,22 +357,22 @@ fn assert_mutation_fails(name: &str, mutate: fn(&Path) -> Result<&'static str>) 
     Ok(())
 }
 
-fn load_config(repo_root: &Path) -> Result<Value> {
-    load_yaml_file(&repo_root.join("rovodev/prompts.yml"))
+fn load_config(config_root: &Path) -> Result<Value> {
+    load_yaml_file(&config_root.join("rovodev/prompts.yml"))
 }
 
-fn write_config(repo_root: &Path, config: &Value) -> Result<()> {
+fn write_config(config_root: &Path, config: &Value) -> Result<()> {
     let text = serde_yaml::to_string(config)
         .map_err(|err| format!("cannot render fixture config: {err}"))?;
     fs::write(
-        repo_root.join("rovodev/prompts.yml"),
+        config_root.join("rovodev/prompts.yml"),
         text.replace("---\n", ""),
     )
     .map_err(|err| format!("cannot write fixture config: {err}"))
 }
 
-fn first_prompt_name(repo_root: &Path) -> Result<String> {
-    let config = load_config(repo_root)?;
+fn first_prompt_name(config_root: &Path) -> Result<String> {
+    let config = load_config(config_root)?;
     config
         .as_mapping()
         .and_then(|mapping| get(mapping, "prompts"))
@@ -379,16 +385,21 @@ fn first_prompt_name(repo_root: &Path) -> Result<String> {
         .ok_or_else(|| "fixture prompts.yml is missing prompts[0].name".to_string())
 }
 
-fn mutate_missing_skill_file(repo_root: &Path) -> Result<&'static str> {
-    let name = first_prompt_name(repo_root)?;
-    fs::remove_file(repo_root.join(".agents/skills").join(name).join("SKILL.md"))
-        .map_err(|err| format!("cannot remove fixture skill file: {err}"))?;
+fn mutate_missing_skill_file(config_root: &Path) -> Result<&'static str> {
+    let name = first_prompt_name(config_root)?;
+    fs::remove_file(
+        config_root
+            .join(".agents/skills")
+            .join(name)
+            .join("SKILL.md"),
+    )
+    .map_err(|err| format!("cannot remove fixture skill file: {err}"))?;
     Ok("content_file does not exist")
 }
 
-fn mutate_front_matter_name_mismatch(repo_root: &Path) -> Result<&'static str> {
-    let name = first_prompt_name(repo_root)?;
-    let skill_path = repo_root
+fn mutate_front_matter_name_mismatch(config_root: &Path) -> Result<&'static str> {
+    let name = first_prompt_name(config_root)?;
+    let skill_path = config_root
         .join(".agents/skills")
         .join(&name)
         .join("SKILL.md");
@@ -407,8 +418,8 @@ fn mutate_front_matter_name_mismatch(repo_root: &Path) -> Result<&'static str> {
     Ok("does not match directory")
 }
 
-fn mutate_generated_registry_drift(repo_root: &Path) -> Result<&'static str> {
-    let mut config = load_config(repo_root)?;
+fn mutate_generated_registry_drift(config_root: &Path) -> Result<&'static str> {
+    let mut config = load_config(config_root)?;
     let prompts = config
         .as_mapping_mut()
         .and_then(|mapping| mapping.get_mut(string_key("prompts")))
@@ -434,12 +445,12 @@ fn mutate_generated_registry_drift(repo_root: &Path) -> Result<&'static str> {
         .and_then(Value::as_mapping_mut)
         .ok_or_else(|| "fixture apply-changes prompt is missing input mapping".to_string())?;
     first_input.insert(string_key("required"), Value::Bool(true));
-    write_config(repo_root, &config)?;
+    write_config(config_root, &config)?;
     Ok("generated content is not up to date")
 }
 
-fn mutate_unregistered_skill_file(repo_root: &Path) -> Result<&'static str> {
-    let extra_dir = repo_root.join(".agents/skills/unregistered-skill");
+fn mutate_unregistered_skill_file(config_root: &Path) -> Result<&'static str> {
+    let extra_dir = config_root.join(".agents/skills/unregistered-skill");
     fs::create_dir_all(&extra_dir).map_err(|err| {
         format!(
             "{}: cannot create fixture skill: {err}",
@@ -454,8 +465,8 @@ fn mutate_unregistered_skill_file(repo_root: &Path) -> Result<&'static str> {
     Ok("generated content is not up to date")
 }
 
-fn mutate_prompt_adapter_broken(repo_root: &Path) -> Result<&'static str> {
-    let prompts_link = repo_root.join("rovodev/prompts");
+fn mutate_prompt_adapter_broken(config_root: &Path) -> Result<&'static str> {
+    let prompts_link = config_root.join("rovodev/prompts");
     fs::remove_file(&prompts_link).map_err(|err| {
         format!(
             "{}: cannot remove fixture symlink: {err}",

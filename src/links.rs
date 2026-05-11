@@ -16,7 +16,7 @@ pub(crate) fn link_path(
     source: &Path,
     target: &Path,
     label: &str,
-    repo_root: &Path,
+    config_root: &Path,
     skills_dir: &Path,
 ) -> Result<()> {
     if !source.exists() {
@@ -36,7 +36,7 @@ pub(crate) fn link_path(
                 .map_err(|err| format!("{}: cannot read symlink: {err}", target.display()))?;
             let existing_resolved = resolve_link_target(target, &existing)?;
             let legacy_prompts_resolved =
-                normalize_existing_ancestor(&repo_root.join(".agents/prompts"));
+                normalize_existing_ancestor(&config_root.join(".agents/prompts"));
             if existing_resolved == normalize_path(&source_resolved) {
                 println!("{label} already linked correctly.");
             } else if existing_resolved == legacy_prompts_resolved
@@ -51,7 +51,7 @@ pub(crate) fn link_path(
                 fs::remove_file(target).map_err(|err| {
                     format!("{}: cannot remove legacy symlink: {err}", target.display())
                 })?;
-                create_symlink(source, target, repo_root)?;
+                create_symlink(source, target, config_root)?;
                 println!(
                     "Migrated {label} from legacy prompts -> {}",
                     source.display()
@@ -73,7 +73,7 @@ pub(crate) fn link_path(
                 fs::remove_dir(target).map_err(|err| {
                     format!("{}: cannot remove empty directory: {err}", target.display())
                 })?;
-                create_symlink(source, target, repo_root)?;
+                create_symlink(source, target, config_root)?;
                 println!(
                     "Replaced empty {label} directory with symlink -> {}",
                     source.display()
@@ -92,7 +92,7 @@ pub(crate) fn link_path(
             ));
         }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            create_symlink(source, target, repo_root)?;
+            create_symlink(source, target, config_root)?;
             println!("Linked {label} -> {}", source.display());
         }
         Err(err) => {
@@ -154,26 +154,26 @@ fn normalize_path(path: &Path) -> PathBuf {
     normalized
 }
 
-fn create_symlink(source: &Path, target: &Path, repo_root: &Path) -> Result<()> {
+fn create_symlink(source: &Path, target: &Path, config_root: &Path) -> Result<()> {
     #[cfg(unix)]
     {
-        let link_source = symlink_source(source, target, repo_root);
+        let link_source = symlink_source(source, target, config_root);
         unix_fs::symlink(&link_source, target)
             .map_err(|err| format!("{}: cannot create symlink: {err}", target.display()))
     }
     #[cfg(not(unix))]
     {
-        let _ = (source, target, repo_root);
+        let _ = (source, target, config_root);
         Err("install requires unix symlink support".to_string())
     }
 }
 
-fn symlink_source(source: &Path, target: &Path, repo_root: &Path) -> PathBuf {
-    if source.starts_with(repo_root) && target.starts_with(repo_root) {
+fn symlink_source(source: &Path, target: &Path, config_root: &Path) -> PathBuf {
+    if source.starts_with(config_root) && target.starts_with(config_root) {
         if let Some(target_parent) = target.parent() {
             if let (Ok(source_rel), Ok(parent_rel)) = (
-                source.strip_prefix(repo_root),
-                target_parent.strip_prefix(repo_root),
+                source.strip_prefix(config_root),
+                target_parent.strip_prefix(config_root),
             ) {
                 let mut relative = PathBuf::new();
                 for component in parent_rel.components() {

@@ -4,7 +4,7 @@ Personal configuration and agent-skill registry.
 
 ## Tooling
 
-Repo tooling is implemented in Rust via the `config-tools` binary.
+Config tooling is implemented in Rust via the `config-tools` binary.
 
 ```bash
 cargo run -- check
@@ -13,21 +13,21 @@ cargo run -- pre-commit
 cargo run -- generate --check
 cargo run -- validate
 cargo run -- test-validate
-cargo run -- repair-repo
+cargo run -- repair-config
 cargo run -- install
 ```
 
 Command roles:
 
 - `check`: non-mutating verification for formatting, build, generated registry, validation, and regression tests.
-- `prepare`: intentional repo-local mutation; repairs `rovodev/prompts`, regenerates `rovodev/prompts.yml`, then checks.
-- `pre-commit`: safe hook entrypoint; runs `prepare`, then fails if repo-local generated files are left unstaged.
+- `prepare`: intentional config-local mutation; repairs `rovodev/prompts`, regenerates `rovodev/prompts.yml`, then checks.
+- `pre-commit`: safe hook entrypoint; runs `prepare`, then fails if config-local generated files are left unstaged.
 - `install`: intentional home-directory mutation for `~/.agents` and `~/.rovodev` symlinks.
 - `install-git-hooks`: intentional local Git config mutation for `core.hooksPath`.
 
 ## Git hooks
 
-This repo uses Git's native tracked-hooks convention: `.githooks/pre-commit` is tracked, and the local checkout is configured with:
+This config checkout uses Git's native tracked-hooks convention: `.githooks/pre-commit` is tracked, and the local checkout is configured with:
 
 ```bash
 git config core.hooksPath .githooks
@@ -45,7 +45,7 @@ The pre-commit hook delegates to Rust:
 cargo run -- pre-commit
 ```
 
-Git intentionally does not auto-enable arbitrary hooks from a freshly cloned repository for security reasons. A fresh checkout therefore needs one local setup step (`cargo run -- install-git-hooks`) before hooks will run. After that, hooks are enabled for that checkout.
+Git intentionally does not auto-enable arbitrary hooks from a freshly cloned checkout for security reasons. A fresh checkout therefore needs one local setup step (`cargo run -- install-git-hooks`) before hooks will run. After that, hooks are enabled for that checkout.
 
 ## Acceptance criteria
 
@@ -58,7 +58,7 @@ cargo run -- check
 cargo run -- pre-commit
 ```
 
-Repo-internal preparation and home install behavior must also be verified without touching the real home directory:
+Config-internal preparation and home install behavior must also be verified without touching the real home directory:
 
 ```bash
 cargo run -- prepare
@@ -72,15 +72,15 @@ rm -rf "$tmp_home"
 Expected symlink behavior:
 
 - `rovodev/prompts` remains a symlink to `../.agents/skills`.
-- `~/.agents` links to this repo's `.agents` directory.
-- `~/.rovodev/skills` links to this repo's `.agents/skills` directory.
-- `~/.rovodev/prompts` links to this repo's `.agents/skills` directory for legacy prompt compatibility.
-- `~/.rovodev/prompts.yml` links to this repo's `rovodev/prompts.yml`.
+- `~/.agents` links to this config checkout's `.agents` directory.
+- `~/.rovodev/skills` links to this config checkout's `.agents/skills` directory.
+- `~/.rovodev/prompts` links to this config checkout's `.agents/skills` directory for legacy prompt compatibility.
+- `~/.rovodev/prompts.yml` links to this config checkout's `rovodev/prompts.yml`.
 - Existing non-empty files/directories or unrelated symlinks are not replaced automatically.
 
 ## Executable-code check
 
-The only tracked non-Rust executable should be `.githooks/pre-commit`, because Git hooks must be executable files. It delegates to Rust and should contain no repo logic beyond `cargo run -- pre-commit`.
+The only tracked non-Rust executable should be `.githooks/pre-commit`, because Git hooks must be executable files. It delegates to Rust and should contain no config-tool logic beyond `cargo run -- pre-commit`.
 
 Verify with:
 

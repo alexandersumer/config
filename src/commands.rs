@@ -1,15 +1,15 @@
-use crate::cli::parse_repo_args;
+use crate::cli::parse_config_args;
 use crate::error::Result;
 use crate::registry::{render_registry, validate_registry};
 use crate::regression::run_regression_tests;
-use crate::repair::repair_repo_command;
+use crate::repair::repair_config_command;
 use std::fs;
 use std::path::Path;
 
 pub(crate) fn generate_command(args: &[String]) -> Result<()> {
-    let (repo_root, check) = parse_repo_args(args, true)?;
-    let output_path = repo_root.join("rovodev/prompts.yml");
-    let rendered = render_registry(&repo_root)?;
+    let (config_root, check) = parse_config_args(args, true)?;
+    let output_path = config_root.join("rovodev/prompts.yml");
+    let rendered = render_registry(&config_root)?;
 
     if check {
         let current = fs::read_to_string(&output_path).map_err(|err| {
@@ -35,8 +35,8 @@ pub(crate) fn generate_command(args: &[String]) -> Result<()> {
 }
 
 pub(crate) fn validate_command(args: &[String]) -> Result<()> {
-    let (repo_root, _) = parse_repo_args(args, false)?;
-    let errors = validate_registry(&repo_root);
+    let (config_root, _) = parse_config_args(args, false)?;
+    let errors = validate_registry(&config_root);
     if !errors.is_empty() {
         let mut output = String::from("Skill validation failed:");
         for error in errors {
@@ -59,46 +59,61 @@ pub(crate) fn test_validate_command(args: &[String]) -> Result<()> {
 }
 
 pub(crate) fn check_command(args: &[String]) -> Result<()> {
-    let (repo_root, _) = parse_repo_args(args, false)?;
-    run_cargo(&repo_root, &["fmt", "--check"])?;
-    run_cargo(&repo_root, &["check"])?;
+    let (config_root, _) = parse_config_args(args, false)?;
+    run_cargo(&config_root, &["fmt", "--check"])?;
+    run_cargo(&config_root, &["check"])?;
     generate_command(&[
-        "--repo-root".to_string(),
-        repo_root.display().to_string(),
+        "--config-root".to_string(),
+        config_root.display().to_string(),
         "--check".to_string(),
     ])?;
-    validate_command(&["--repo-root".to_string(), repo_root.display().to_string()])?;
+    validate_command(&[
+        "--config-root".to_string(),
+        config_root.display().to_string(),
+    ])?;
     test_validate_command(&[])?;
     Ok(())
 }
 
 pub(crate) fn prepare_command(args: &[String]) -> Result<()> {
-    let (repo_root, _) = parse_repo_args(args, false)?;
-    repair_repo_command(&["--repo-root".to_string(), repo_root.display().to_string()])?;
-    generate_command(&["--repo-root".to_string(), repo_root.display().to_string()])?;
-    check_command(&["--repo-root".to_string(), repo_root.display().to_string()])?;
+    let (config_root, _) = parse_config_args(args, false)?;
+    repair_config_command(&[
+        "--config-root".to_string(),
+        config_root.display().to_string(),
+    ])?;
+    generate_command(&[
+        "--config-root".to_string(),
+        config_root.display().to_string(),
+    ])?;
+    check_command(&[
+        "--config-root".to_string(),
+        config_root.display().to_string(),
+    ])?;
     Ok(())
 }
 
 pub(crate) fn pre_commit_command(args: &[String]) -> Result<()> {
-    let (repo_root, _) = parse_repo_args(args, false)?;
-    let before = repo_generated_snapshot(&repo_root)?;
-    prepare_command(&["--repo-root".to_string(), repo_root.display().to_string()])?;
-    let after = repo_generated_snapshot(&repo_root)?;
+    let (config_root, _) = parse_config_args(args, false)?;
+    let before = config_generated_snapshot(&config_root)?;
+    prepare_command(&[
+        "--config-root".to_string(),
+        config_root.display().to_string(),
+    ])?;
+    let after = config_generated_snapshot(&config_root)?;
     if before != after {
         return Err(
-            "pre-commit updated repo-local generated files. Review and stage rovodev/prompts and rovodev/prompts.yml, then commit again."
+            "pre-commit updated config-local generated files. Review and stage rovodev/prompts and rovodev/prompts.yml, then commit again."
                 .to_string(),
         );
     }
-    ensure_no_unstaged_repo_generated_changes(&repo_root)
+    ensure_no_unstaged_config_generated_changes(&config_root)
 }
 
-fn repo_generated_snapshot(repo_root: &Path) -> Result<Vec<(String, String)>> {
+fn config_generated_snapshot(config_root: &Path) -> Result<Vec<(String, String)>> {
     ["rovodev/prompts", "rovodev/prompts.yml"]
         .iter()
         .map(|path| {
-            let full_path = repo_root.join(path);
+            let full_path = config_root.join(path);
             let metadata = fs::symlink_metadata(&full_path).map_err(|err| {
                 format!(
                     "{}: cannot inspect generated path: {err}",
@@ -133,21 +148,21 @@ fn repo_generated_snapshot(repo_root: &Path) -> Result<Vec<(String, String)>> {
         .collect()
 }
 
-fn ensure_no_unstaged_repo_generated_changes(repo_root: &Path) -> Result<()> {
+fn ensure_no_unstaged_config_generated_changes(config_root: &Path) -> Result<()> {
     let paths = ["rovodev/prompts", "rovodev/prompts.yml"];
     let status = std::process::Command::new("git")
         .arg("diff")
         .arg("--quiet")
         .arg("--")
         .args(paths)
-        .current_dir(repo_root)
+        .current_dir(config_root)
         .status()
         .map_err(|err| format!("cannot run git diff: {err}"))?;
     if status.success() {
         Ok(())
     } else if status.code() == Some(1) {
         Err(
-            "pre-commit updated or found unstaged repo-local generated files. Review and stage rovodev/prompts and rovodev/prompts.yml, then commit again."
+            "pre-commit updated or found unstaged config-local generated files. Review and stage rovodev/prompts and rovodev/prompts.yml, then commit again."
                 .to_string(),
         )
     } else {
@@ -156,8 +171,8 @@ fn ensure_no_unstaged_repo_generated_changes(repo_root: &Path) -> Result<()> {
 }
 
 pub(crate) fn install_git_hooks_command(args: &[String]) -> Result<()> {
-    let (repo_root, _) = parse_repo_args(args, false)?;
-    let hooks_dir = repo_root.join(".githooks");
+    let (config_root, _) = parse_config_args(args, false)?;
+    let hooks_dir = config_root.join(".githooks");
     let hook_path = hooks_dir.join("pre-commit");
     if !hook_path.is_file() {
         return Err(format!(
@@ -165,26 +180,26 @@ pub(crate) fn install_git_hooks_command(args: &[String]) -> Result<()> {
             hook_path.display()
         ));
     }
-    run_git(&repo_root, &["config", "core.hooksPath", ".githooks"])?;
+    run_git(&config_root, &["config", "core.hooksPath", ".githooks"])?;
     println!(
         "Configured core.hooksPath=.githooks for {}",
-        repo_root.display()
+        config_root.display()
     );
     Ok(())
 }
 
-fn run_cargo(repo_root: &Path, args: &[&str]) -> Result<()> {
-    run_command(repo_root, "cargo", args)
+fn run_cargo(config_root: &Path, args: &[&str]) -> Result<()> {
+    run_command(config_root, "cargo", args)
 }
 
-fn run_git(repo_root: &Path, args: &[&str]) -> Result<()> {
-    run_command(repo_root, "git", args)
+fn run_git(config_root: &Path, args: &[&str]) -> Result<()> {
+    run_command(config_root, "git", args)
 }
 
-fn run_command(repo_root: &Path, program: &str, args: &[&str]) -> Result<()> {
+fn run_command(config_root: &Path, program: &str, args: &[&str]) -> Result<()> {
     let status = std::process::Command::new(program)
         .args(args)
-        .current_dir(repo_root)
+        .current_dir(config_root)
         .status()
         .map_err(|err| format!("cannot run {program} {}: {err}", args.join(" ")))?;
     if status.success() {
