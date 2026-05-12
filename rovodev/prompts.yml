@@ -174,7 +174,7 @@ prompts:
     type: string
     required: false
 - name: grill-me
-  description: Stress-test a plan
+  description: Stress-test a plan against code, domain language, and existing decisions. Use when the user wants to be grilled on a design, proposal, implementation plan, or architectural choice.
   content_file: prompts/grill-me/SKILL.md
   inputs:
   - name: plan
@@ -182,3 +182,9 @@ prompts:
     description: Inline plan/design text, a file path (e.g. `.plan/foo.md`), or leave empty to infer from conversation context.
     type: string
     required: false
+- name: diagnose
+  description: Diagnose hard bugs and performance regressions. Use when the failure is unclear, flaky, not yet reproduced, or needs a disciplined debug loop before fixing.
+  content_file: prompts/diagnose/SKILL.md
+- name: improve-codebase-architecture
+  description: Find high-leverage architecture improvements. Use when the user wants refactoring opportunities, deeper modules, better seams, less coupling, or a more testable codebase.
+  content_file: prompts/improve-codebase-architecture/SKILL.md
