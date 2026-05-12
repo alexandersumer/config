@@ -5,7 +5,7 @@ description: Fix real check failures. Use when tests, builds, linters, CI, or pa
 
 Fix the failure from `error_output`, `$ARGUMENTS`, or the repo's normal checks.
 
-Do not keep rerunning the same command. Each run must change the code, the hypothesis, or the next diagnostic step.
+Do not keep rerunning the same command. Each run must change the code, the hypothesis, or the next diagnostic step. Evidence before claims: do not say fixed, clean, ready, or passing without fresh command output from this turn.
 
 Read the local check instructions. Reproduce the failure with the smallest useful command. Fix the root cause in application code or in a test that asserts intended behavior incorrectly.
 

@@ -13,6 +13,8 @@ Before changing code, write 3-5 ranked falsifiable hypotheses. Each must predict
 
 For performance regressions, measure first: baseline, profiler/timing/query plan, then bisect or isolate. Do not guess from code shape.
 
+Red flags: stop and return to the loop if you think "probably", "quick fix", "try this", "obvious", "test is wrong", or "clean it up later".
+
 Fix the proven root cause only. Add or preserve a regression check at the seam that exercises the real bug pattern. If no correct seam exists, say the architecture prevents a durable regression check and name the gap.
 
 Before final: rerun the original loop, rerun the regression check, remove all `[DEBUG-...]` instrumentation and throwaway harnesses.

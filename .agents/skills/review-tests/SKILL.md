@@ -27,7 +27,7 @@ You do not strengthen tests by guessing from the patch. Fresh-context subagents 
 
    Drop every candidate below 80.
 
-5. **Implement only validated improvements.** Prefer public behavior over private fields or mock call order. Replace weak assertions with exact observable outcomes. Add edge/failure cases only when tied to real changed paths. Skip trivial getters, generated code, framework boilerplate, style conventions, and broad coverage goals.
+5. **Implement only validated improvements.** Prefer public behavior over private fields or mock call order. Replace weak assertions with exact observable outcomes. Add edge/failure cases only when tied to real changed paths. Reject tests that only prove mocks, test-only production APIs, or implementation details. If a mock becomes more complex than the behavior, prefer a public seam or integration path. Skip trivial getters, generated code, framework boilerplate, style conventions, and broad coverage goals.
 
 6. **Run checks.** Run the targeted tests that prove each improvement, then the broader relevant check when available. If no check applies, say why.
 

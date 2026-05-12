@@ -32,6 +32,6 @@ Implement code, wiring, tests, and required docs/config. Tests must catch a name
 
 No suppressions, baselines, dependency bumps, skipped tests, or build/test infra edits unless the artifact requires them.
 
-Run targeted checks and broader checks when available. Do not commit, push, or open a PR.
+Run targeted checks and broader checks when available. Evidence before claims: no fixed, complete, ready, or passing language without fresh proof in this turn. Do not commit, push, or open a PR.
 
 Final response should be short: locality, artifact source, chosen chunk, why that slice was right, branch, changed files, tests with the bug they catch, checks, and the next command. No padded shipping report.

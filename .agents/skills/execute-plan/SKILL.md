@@ -10,6 +10,7 @@ Do not stop at scaffolding, types, TODOs, docs, or unrelated green tests. Delive
 Before editing:
 - read the artifact set end to end
 - read README/CONTRIBUTING, touched modules, nearest tests, and 2-3 sibling features
+- stop instead of improvising if the plan has a blocking contradiction, stale path, impossible check, or unsafe sequence
 - emit `Artifact: <path or inline>` and `Canonical patterns: <path> for <aspect>`
 
 Use update_todo. Every task must be an observable behavior or capability with a checkable signal.
@@ -18,7 +19,7 @@ Build production code, wiring, tests, and required docs/config together. Tests m
 
 Test infra/build config changes are allowed only when the artifact asks for verification infrastructure. Otherwise no suppressions, baselines, dependency bumps, build config edits, skipped tests, or fake TODO placeholders.
 
-Run targeted checks, then broader checks when available. Re-read the artifact and account for every requirement as implemented or deferred.
+Run targeted checks, then broader checks when available. Re-read the artifact and account for every requirement as implemented or deferred. Evidence before claims: no fixed, complete, ready, or passing language without fresh proof in this turn.
 
 Final under 25 lines:
 ```text

@@ -5,7 +5,9 @@ description: Verify behavior and fix proven defects. Use when the user asks to c
 
 Verify `scope`, `$ARGUMENTS`, recent changes, relevant artifact, or conversation behavior.
 
-Do not rubber-stamp green tests. Verification means you can prove the behavior from source and exercise it through a real path.
+Do not rubber-stamp green tests. Evidence before claims: do not say verified, fixed, clean, ready, or passing unless you inspected the source proof and ran the executable proof in this turn. If you cannot run it, say not proven and why.
+
+Verification means you can prove the behavior from source and exercise it through a real path.
 
 Build expected behavior from primary sources only: request, artifact, public API docs, schemas, types, intended-behavior tests, callers, migrations. If there is no source, say the question is open.
 
