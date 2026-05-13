@@ -44,9 +44,9 @@ Do not hunt architecture improvements alone. Use fresh-context subagents because
 
 6. **Validate with fresh-context subagents.** One validator per candidate, in parallel when possible. Prompt each validator:
 
-   > Candidate: {CANDIDATE}. Relevant files/artifacts in full or focused excerpts: {FILES_OR_EXCERPTS}. Conventions and domain vocabulary: {CONVENTIONS}. Confirm or refute. State concrete evidence: current friction, future change path, why the current module/interface/seam/invariant is costly, smallest safe design move, locality/leverage/testability payoff, and accepted trade-off. Score 0-100. Score >=80 requires file-backed evidence, a concrete future change path, and a move smaller than a rewrite.
+   > Candidate: {CANDIDATE}. Relevant files/artifacts in full or focused excerpts: {FILES_OR_EXCERPTS}. Conventions and domain vocabulary: {CONVENTIONS}. Confirm or refute. State concrete evidence: current friction, future change path, why the current module/interface/seam/invariant is costly, smallest safe design move, locality/leverage/testability payoff, and accepted trade-off. Score 0-100. Score >=70 requires file-backed evidence, a concrete future change path, and a move smaller than a rewrite.
 
-   Drop every candidate below 80.
+   Drop every candidate below 70.
 
 7. **Report validated moves only.** Rank by confidence, payoff, and smallness. For each survivor include: `Files`, `Friction`, `Future change path`, `Move`, `Payoff`, `Trade-off`, `Confidence`. If none survive, say no high-leverage architecture improvement was found in the reviewed scope. Stop after candidates and ask which one to investigate, plan, or implement. Ask before updating `CONTEXT.md` or ADRs.
 

@@ -24,9 +24,9 @@ You do not rely on the author's framing alone. Fresh-context subagents challenge
 
 4. **Validate every candidate.** Use one fresh Task subagent per candidate issue. Each validator gets this prompt verbatim, with `{ISSUE}`, `{FILES_OR_ARTIFACTS}`, and `{CONVENTIONS}` filled in:
 
-   > Issue: {ISSUE}. Relevant files/artifacts in full or as focused excerpts: {FILES_OR_ARTIFACTS}. Conventions: {CONVENTIONS}. Confirm or refute. State concrete evidence: boundary crossed, invariant weakened, change path made expensive, compatibility risk introduced, or convention violated. Score 0–100; anything you cannot demonstrate concretely scores under 80.
+   > Issue: {ISSUE}. Relevant files/artifacts in full or as focused excerpts: {FILES_OR_ARTIFACTS}. Conventions: {CONVENTIONS}. Confirm or refute. State concrete evidence: boundary crossed, invariant weakened, change path made expensive, compatibility risk introduced, or convention violated. Score 0–100; anything you cannot demonstrate concretely scores under 70.
 
-   Drop every candidate below 80. Do not keep a finding merely because it sounds architecturally sophisticated.
+   Drop every candidate below 70. Do not keep a finding merely because it sounds architecturally sophisticated.
 
 5. **Report.** Dedupe by root cause and rank Critical, High, Medium, Low. For each surviving issue, include severity, location/artifact section if available, architectural judgment, evidence, design move, and accepted trade-off — one concise paragraph each. If the cheapest good design is no change, say so. If zero candidates survive validation, say in one line that no material design issue was found and name the review surface.
 
