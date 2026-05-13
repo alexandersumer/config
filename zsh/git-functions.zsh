@@ -1,6 +1,15 @@
 # shellcheck shell=zsh
 # Git helper functions used across interactive shells.
 
+function _branch_from_remote_head_ref() {
+    local remote="$1"
+    local remote_head_ref="$2"
+    local prefix="refs/remotes/$remote/"
+
+    [[ "$remote_head_ref" == "$prefix"* ]] || return 1
+    echo "${remote_head_ref#$prefix}"
+}
+
 function _get_default_branch() {
     local remote="${1:-origin}"
     local remote_head_ref
@@ -9,8 +18,10 @@ function _get_default_branch() {
     # First try to get from remote HEAD
     remote_head_ref=$(git symbolic-ref --quiet "refs/remotes/$remote/HEAD" 2>/dev/null)
     if [[ -n "$remote_head_ref" ]]; then
-        echo "${remote_head_ref##*/}"
-        return 0
+        if branch_candidate=$(_branch_from_remote_head_ref "$remote" "$remote_head_ref"); then
+            echo "$branch_candidate"
+            return 0
+        fi
     fi
 
     # Fall back to checking for main or master
@@ -283,7 +294,7 @@ function _reset_to_remote_default_single() {
         if (( branch_from_arg == 0 )); then
             remote_head_ref=$(git symbolic-ref --quiet "refs/remotes/$remote/HEAD" 2>/dev/null)
             if [[ -n "$remote_head_ref" ]]; then
-                branch=${remote_head_ref##*/}
+                branch=$(_branch_from_remote_head_ref "$remote" "$remote_head_ref")
             fi
         fi
 
