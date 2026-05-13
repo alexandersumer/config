@@ -1,2 +1,6 @@
 .DS_Store
 target/
+
+# Relay runtime data (not config)
+.relay/logs/
+.relay/prompt-history.jsonl
