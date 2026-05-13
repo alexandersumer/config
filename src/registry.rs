@@ -14,6 +14,7 @@ const SKILL_FRONT_MATTER_KEYS: &[&str] = &[
     "compatibility",
     "metadata",
     "allowed-tools",
+    "register_cmd",
 ];
 const PROMPT_REQUIRED_KEYS: &[&str] = &["name", "description", "content_file"];
 const PROMPT_KEYS: &[&str] = &["name", "description", "content_file", "inputs"];
@@ -781,6 +782,21 @@ mod tests {
         );
 
         assert!(normalize_inputs(Some(&value), "metadata").is_err());
+    }
+
+    #[test]
+    fn skill_front_matter_allows_relay_command_registration_key() {
+        let value = yaml_value(
+            r#"
+name: apply-changes
+description: Apply a narrow requested code change.
+register_cmd: true
+"#,
+        );
+        let metadata = value.as_mapping().expect("front matter mapping");
+
+        require_known_keys(metadata, SKILL_FRONT_MATTER_KEYS, "skill")
+            .expect("register_cmd is supported skill metadata");
     }
 
     #[test]
