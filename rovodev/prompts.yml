@@ -186,5 +186,5 @@ prompts:
   description: Diagnose hard bugs and performance regressions. Use when the failure is unclear, flaky, not yet reproduced, or needs a disciplined debug loop before fixing.
   content_file: prompts/diagnose/SKILL.md
 - name: improve-codebase-architecture
-  description: Find high-leverage architecture improvements. Use when the user wants refactoring opportunities, deeper modules, better seams, less coupling, or a more testable codebase.
+  description: Find high-leverage architecture improvements. Use when the user wants refactoring opportunities, deeper modules, better seams, less coupling, clearer ownership, stronger domain boundaries, AI-navigability, or a more testable codebase.
   content_file: prompts/improve-codebase-architecture/SKILL.md

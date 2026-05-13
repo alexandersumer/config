@@ -22,6 +22,9 @@ pub(crate) fn run_regression_tests() -> Result<()> {
             mutate_front_matter_name_mismatch,
         ),
         ("generated registry drift", mutate_generated_registry_drift),
+        ("front matter only skill", mutate_front_matter_only_skill),
+        ("thin skill body", mutate_thin_skill_body),
+        ("placeholder skill body", mutate_placeholder_skill_body),
         ("unregistered skill file", mutate_unregistered_skill_file),
         ("broken prompt adapter", mutate_prompt_adapter_broken),
     ];
@@ -451,6 +454,110 @@ fn mutate_generated_registry_drift(config_root: &Path) -> Result<&'static str> {
     Ok("generated content is not up to date")
 }
 
+fn mutate_front_matter_only_skill(config_root: &Path) -> Result<&'static str> {
+    let name = first_prompt_name(config_root)?;
+    let skill_path = config_root
+        .join(".agents/skills")
+        .join(&name)
+        .join("SKILL.md");
+    let text = fs::read_to_string(&skill_path)
+        .map_err(|err| format!("{}: cannot read fixture skill: {err}", skill_path.display()))?;
+    let closing = text
+        .lines()
+        .enumerate()
+        .skip(1)
+        .find_map(|(index, line)| (line == "---").then_some(index))
+        .ok_or_else(|| {
+            format!(
+                "{}: fixture skill missing front matter",
+                skill_path.display()
+            )
+        })?;
+    let front_matter = text
+        .lines()
+        .take(closing + 1)
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(&skill_path, format!("{front_matter}\n\n")).map_err(|err| {
+        format!(
+            "{}: cannot write fixture skill: {err}",
+            skill_path.display()
+        )
+    })?;
+    Ok("skill body must not be empty")
+}
+
+fn mutate_thin_skill_body(config_root: &Path) -> Result<&'static str> {
+    let name = first_prompt_name(config_root)?;
+    let skill_path = config_root
+        .join(".agents/skills")
+        .join(&name)
+        .join("SKILL.md");
+    let text = fs::read_to_string(&skill_path)
+        .map_err(|err| format!("{}: cannot read fixture skill: {err}", skill_path.display()))?;
+    let closing = text
+        .lines()
+        .enumerate()
+        .skip(1)
+        .find_map(|(index, line)| (line == "---").then_some(index))
+        .ok_or_else(|| {
+            format!(
+                "{}: fixture skill missing front matter",
+                skill_path.display()
+            )
+        })?;
+    let front_matter = text
+        .lines()
+        .take(closing + 1)
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(
+        &skill_path,
+        format!("{front_matter}\n\nUse conversation context.\n"),
+    )
+    .map_err(|err| {
+        format!(
+            "{}: cannot write fixture skill: {err}",
+            skill_path.display()
+        )
+    })?;
+    Ok("skill body must contain at least")
+}
+
+fn mutate_placeholder_skill_body(config_root: &Path) -> Result<&'static str> {
+    let name = first_prompt_name(config_root)?;
+    let skill_path = config_root
+        .join(".agents/skills")
+        .join(&name)
+        .join("SKILL.md");
+    let text = fs::read_to_string(&skill_path)
+        .map_err(|err| format!("{}: cannot read fixture skill: {err}", skill_path.display()))?;
+    let closing = text
+        .lines()
+        .enumerate()
+        .skip(1)
+        .find_map(|(index, line)| (line == "---").then_some(index))
+        .ok_or_else(|| {
+            format!(
+                "{}: fixture skill missing front matter",
+                skill_path.display()
+            )
+        })?;
+    let front_matter = text
+        .lines()
+        .take(closing + 1)
+        .collect::<Vec<_>>()
+        .join("\n");
+    let body = "TODO\nTODO\nTODO\nTODO\nTODO\nTODO\nTODO\nTODO\nTODO\nTODO\nTODO\nTODO\nTODO\nTODO\nTODO\nTODO\nTODO\nTODO\nTODO\nTODO\nTODO\nTODO\nTODO\nTODO\nTODO\nTODO\nTODO\nTODO\nTODO\nTODO\nTODO\nTODO\nTODO\nTODO\nTODO\nTODO\nTODO\nTODO\nTODO\nTODO\n";
+    fs::write(&skill_path, format!("{front_matter}\n\n{body}")).map_err(|err| {
+        format!(
+            "{}: cannot write fixture skill: {err}",
+            skill_path.display()
+        )
+    })?;
+    Ok("not a placeholder")
+}
+
 fn mutate_unregistered_skill_file(config_root: &Path) -> Result<&'static str> {
     let extra_dir = config_root.join(".agents/skills/unregistered-skill");
     fs::create_dir_all(&extra_dir).map_err(|err| {
@@ -461,7 +568,7 @@ fn mutate_unregistered_skill_file(config_root: &Path) -> Result<&'static str> {
     })?;
     fs::write(
         extra_dir.join("SKILL.md"),
-        "---\nname: unregistered-skill\ndescription: Unregistered skill\n---\n\nThis skill is intentionally not listed in the generated registry.\n",
+        "---\nname: unregistered-skill\ndescription: Unregistered skill used by registry drift tests\n---\n\nRead the relevant fixture files and behave like a real skill so body validation succeeds before registry drift is checked.\nUse this body only to prove that adding a valid skill file without regenerating prompts.yml is rejected.\nKeep the instructions concrete enough that the failure comes from generated registry drift, not content quality.\n",
     )
     .map_err(|err| format!("cannot write fixture skill: {err}"))?;
     Ok("generated content is not up to date")

@@ -21,6 +21,8 @@ const PROMPT_KEYS: &[&str] = &["name", "description", "content_file", "inputs"];
 const PROMPT_METADATA_KEYS: &[&str] = &["inputs"];
 const CONTENT_FILE_PREFIX: &str = "prompts/";
 const CONTENT_FILE_SUFFIX: &str = "/SKILL.md";
+const MIN_SKILL_BODY_WORDS: usize = 40;
+const MIN_SKILL_BODY_LINES: usize = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Input {
@@ -62,16 +64,90 @@ fn parse_front_matter(path: &Path) -> Result<Mapping> {
         .find_map(|(index, line)| (*line == "---").then_some(index))
         .ok_or_else(|| format!("{}: missing closing front matter delimiter", path.display()))?;
     let body = lines[closing_index + 1..].join("\n");
-    if body.trim().is_empty() {
-        return Err(format!("{}: skill body must not be empty", path.display()));
-    }
     let yaml_text = lines[1..closing_index].join("\n");
     let value: Value = serde_yaml::from_str(&yaml_text)
         .map_err(|err| format!("{}: invalid front matter YAML: {err}", path.display()))?;
-    value
+    let metadata = value
         .as_mapping()
         .cloned()
-        .ok_or_else(|| format!("{}: front matter must be a mapping", path.display()))
+        .ok_or_else(|| format!("{}: front matter must be a mapping", path.display()))?;
+    validate_skill_body(path, &metadata, &body)?;
+    Ok(metadata)
+}
+
+fn validate_skill_body(path: &Path, metadata: &Mapping, body: &str) -> Result<()> {
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        return Err(format!("{}: skill body must not be empty", path.display()));
+    }
+
+    let meaningful_lines = trimmed
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with("<!--") && !line.starts_with("-->"))
+        .count();
+    if meaningful_lines < MIN_SKILL_BODY_LINES {
+        return Err(format!(
+            "{}: skill body must contain at least {MIN_SKILL_BODY_LINES} meaningful instruction lines",
+            path.display()
+        ));
+    }
+
+    let words: Vec<String> = trimmed
+        .split(|ch: char| !ch.is_alphanumeric() && ch != '-')
+        .filter(|word| word.chars().any(char::is_alphabetic))
+        .map(str::to_lowercase)
+        .collect();
+    let word_count = words.len();
+    if word_count < MIN_SKILL_BODY_WORDS {
+        return Err(format!(
+            "{}: skill body looks too thin ({word_count} words); expected at least {MIN_SKILL_BODY_WORDS} words of real instructions",
+            path.display()
+        ));
+    }
+
+    let normalized_body = normalize_for_body_comparison(trimmed);
+    for key in ["name", "description"] {
+        if let Some(value) = get(metadata, key).and_then(Value::as_str) {
+            let normalized_value = normalize_for_body_comparison(value);
+            if !normalized_value.is_empty() && normalized_body == normalized_value {
+                return Err(format!(
+                    "{}: skill body must not merely repeat front matter {key}",
+                    path.display()
+                ));
+            }
+        }
+    }
+
+    let lower_body = normalized_body.to_lowercase();
+    let placeholder_markers = [
+        "todo",
+        "tbd",
+        "placeholder",
+        "coming soon",
+        "to be written",
+        "intentionally blank",
+    ];
+    let placeholder_word_count = words
+        .iter()
+        .filter(|word| placeholder_markers.contains(&word.as_str()))
+        .count();
+    if placeholder_markers
+        .iter()
+        .any(|marker| lower_body == *marker)
+        || placeholder_word_count * 2 >= word_count
+    {
+        return Err(format!(
+            "{}: skill body must contain real instructions, not a placeholder",
+            path.display()
+        ));
+    }
+
+    Ok(())
+}
+
+fn normalize_for_body_comparison(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn validate_skill_name(value: Option<&Value>, context: &str) -> Result<String> {
@@ -797,6 +873,46 @@ register_cmd: true
 
         require_known_keys(metadata, SKILL_FRONT_MATTER_KEYS, "skill")
             .expect("register_cmd is supported skill metadata");
+    }
+
+    #[test]
+    fn validate_skill_body_rejects_non_instructional_stubs() {
+        let value = yaml_value(
+            r#"
+name: apply-changes
+description: Apply a narrow requested code change.
+register_cmd: true
+"#,
+        );
+        let metadata = value.as_mapping().expect("front matter mapping");
+        let path = Path::new(".agents/skills/apply-changes/SKILL.md");
+
+        assert!(validate_skill_body(path, metadata, "").is_err());
+        assert!(validate_skill_body(path, metadata, "TODO").is_err());
+        assert!(validate_skill_body(path, metadata, "Use conversation context.").is_err());
+        assert!(
+            validate_skill_body(path, metadata, "Apply a narrow requested code change.").is_err()
+        );
+    }
+
+    #[test]
+    fn validate_skill_body_accepts_concise_real_instructions() {
+        let value = yaml_value(
+            r#"
+name: apply-changes
+description: Apply a narrow requested code change.
+register_cmd: true
+"#,
+        );
+        let metadata = value.as_mapping().expect("front matter mapping");
+        let path = Path::new(".agents/skills/apply-changes/SKILL.md");
+        let body = r#"
+Read the relevant files before editing, then make the smallest correct change that matches the existing naming, layering, error handling, and tests.
+Do not add dependencies, abstractions, broad refactors, or explanatory comments unless the requested change requires them.
+If the request remains ambiguous after reading context, ask one focused question and stop instead of guessing.
+"#;
+
+        validate_skill_body(path, metadata, body).expect("real instructions are valid");
     }
 
     #[test]
