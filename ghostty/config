@@ -14,3 +14,9 @@ window-padding-balance = true
 # Treat the left Option key as Alt/Meta for shell shortcuts while keeping
 # right Option available for macOS text input and special characters.
 macos-option-as-alt = left
+
+# Shell
+working-directory = home
+window-inherit-working-directory = false
+tab-inherit-working-directory = false
+split-inherit-working-directory = false
