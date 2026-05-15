@@ -80,7 +80,7 @@ Expected symlink behavior:
 
 ## Executable-code check
 
-The only tracked non-Rust executable should be `.githooks/pre-commit`, because Git hooks must be executable files. It delegates to Rust and should contain no config-tool logic beyond `cargo run -- pre-commit`.
+Tracked non-Rust executables should be limited to repository wiring scripts and skill-owned helper scripts that are invoked directly by their skill documentation.
 
 Verify with:
 
@@ -89,4 +89,12 @@ find . -path './.git' -prune -o -path './target' -prune -o -type f -perm -111 -p
 git grep -n -E '^#!|python3|/usr/bin/env|cargo run --quiet --manifest-path' -- ':!README.md'
 ```
 
-The executable-file check should print only `./.githooks/pre-commit`.
+The executable-file check should print only:
+
+```text
+./.agents/skills/brainstorming/scripts/start-server.sh
+./.agents/skills/brainstorming/scripts/stop-server.sh
+./.githooks/pre-commit
+```
+
+`.githooks/pre-commit` delegates to Rust and should contain no config-tool logic beyond `cargo run -- pre-commit`.
