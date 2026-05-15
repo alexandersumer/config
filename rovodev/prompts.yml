@@ -188,3 +188,6 @@ prompts:
 - name: improve-codebase-architecture
   description: Find high-leverage architecture improvements. Use when the user wants refactoring opportunities, deeper modules, better seams, less coupling, clearer ownership, stronger domain boundaries, AI-navigability, or a more testable codebase.
   content_file: prompts/improve-codebase-architecture/SKILL.md
+- name: brainstorming
+  description: You MUST use this before any creative work - creating features, building components, adding functionality, or modifying behavior. Explores user intent, requirements and design before implementation.
+  content_file: prompts/brainstorming/SKILL.md
