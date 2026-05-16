@@ -219,7 +219,7 @@ prompts:
     type: string
     required: false
 - name: real-e2e
-  description: Add or harden true engine end-to-end tests. Use when the user wants a real E2E that boots the system, hits top public APIs, rejects mocks/fakes/workarounds, and proves behavior in CI.
+  description: 'Implement real engine end-to-end tests to completion. Use when the user wants a real E2E, true E2E, smoke test, acceptance test, CI proof, or asks to boot the system and hit public APIs while rejecting mocks/fakes/workarounds. This is an execution skill: it must create or harden the test, wire it into the right lane, run it, and prove it catches real regressions unless blocked by unavailable infrastructure.'
   content_file: prompts/real-e2e/SKILL.md
   inputs:
   - name: scope
