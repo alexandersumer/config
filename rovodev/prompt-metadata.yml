@@ -28,6 +28,14 @@ prompts:
       description: The feature flag key to remove.
       type: string
       required: true
+  create-chat-plan:
+    inputs:
+    - name: topic
+      label: Topic or seed
+      description: Optional feature, bug, refactor, design, file path, or implementation
+        concern to plan in chat. Leave empty to infer from conversation context.
+      type: string
+      required: false
   create-plan:
     inputs:
     - name: topic
@@ -138,6 +146,22 @@ prompts:
       label: Project root path
       description: Optional path that anchors artifact discovery in repos with multiple
         parallel plans. Leave empty to infer from the just-merged diff.
+      type: string
+      required: false
+  study-code-atlassian:
+    inputs:
+    - name: aspect
+      label: Aspect to study
+      description: Optional aspect, repo, path, pattern, or implementation concern to
+        study in ~/atlassian. Leave empty to infer from conversation context.
+      type: string
+      required: false
+  study-code-oss:
+    inputs:
+    - name: aspect
+      label: Aspect to study
+      description: Optional aspect, repo, path, pattern, or implementation concern to
+        study in ~/oss. Leave empty to infer from conversation context.
       type: string
       required: false
   verify-and-fix:

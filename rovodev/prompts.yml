@@ -191,3 +191,30 @@ prompts:
 - name: brainstorming
   description: You MUST use this before any creative work - creating features, building components, adding functionality, or modifying behavior. Explores user intent, requirements and design before implementation.
   content_file: prompts/brainstorming/SKILL.md
+- name: study-code-atlassian
+  description: Study local Atlassian repositories in ~/atlassian with the current agent to extract excellent, evidence-backed internal implementation and architecture patterns for a requested or inferred aspect.
+  content_file: prompts/study-code-atlassian/SKILL.md
+  inputs:
+  - name: aspect
+    label: Aspect to study
+    description: Optional aspect, repo, path, pattern, or implementation concern to study in ~/atlassian. Leave empty to infer from conversation context.
+    type: string
+    required: false
+- name: study-code-oss
+  description: Study local OSS repositories in ~/oss with the current agent to extract excellent, evidence-backed implementation and architecture patterns for a requested or inferred aspect.
+  content_file: prompts/study-code-oss/SKILL.md
+  inputs:
+  - name: aspect
+    label: Aspect to study
+    description: Optional aspect, repo, path, pattern, or implementation concern to study in ~/oss. Leave empty to infer from conversation context.
+    type: string
+    required: false
+- name: create-chat-plan
+  description: Create a lightweight implementation-ready plan directly in chat. Use when planning should be robust, interrogated, and verified upfront without writing plan files.
+  content_file: prompts/create-chat-plan/SKILL.md
+  inputs:
+  - name: topic
+    label: Topic or seed
+    description: Optional feature, bug, refactor, design, file path, or implementation concern to plan in chat. Leave empty to infer from conversation context.
+    type: string
+    required: false
