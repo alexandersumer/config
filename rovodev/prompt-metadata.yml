@@ -69,8 +69,9 @@ prompts:
     inputs:
     - name: error_output
       label: Error output or stack trace
-      description: Paste error output or stack trace to fix. Leave empty to run the
-        build and test suite to discover failures.
+      description: Paste error output or stack trace to fix. Leave empty to inspect
+        the current branch's CI/check status first, then fall back to documented local
+        checks if needed.
       type: string
       required: false
   grill-me:

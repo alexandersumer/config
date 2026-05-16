@@ -38,12 +38,12 @@ prompts:
   description: Summarize working changes. Use when the user wants a short diff summary, change phrase, or clean/dirty working-tree description.
   content_file: prompts/describe-diff/SKILL.md
 - name: fix-failures
-  description: Fix real check failures. Use when tests, builds, linters, CI, or pasted error output fail and the user wants the root cause fixed.
+  description: Fix real check failures from arguments, pasted errors, local checks, or CI. Use when tests, builds, linters, CI, pipelines, checks, validation, or error output fail and the user wants the root cause fixed with proof.
   content_file: prompts/fix-failures/SKILL.md
   inputs:
   - name: error_output
     label: Error output or stack trace
-    description: Paste error output or stack trace to fix. Leave empty to run the build and test suite to discover failures.
+    description: Paste error output or stack trace to fix. Leave empty to inspect the current branch's CI/check status first, then fall back to documented local checks if needed.
     type: string
     required: false
 - name: git-publish
