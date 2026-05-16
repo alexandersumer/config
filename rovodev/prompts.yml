@@ -147,7 +147,7 @@ prompts:
   description: Merge latest origin default branch
   content_file: prompts/sync-main/SKILL.md
 - name: verify-and-fix
-  description: Verify behavior and fix proven defects. Use when the user asks to check, validate, audit, or confirm behavior and repair only real gaps.
+  description: Verify behavior with acceptance-level proof and fix only proven defects. Use when the user asks to check, validate, audit, verify, confirm, reproduce, prove, or end-to-end test behavior, especially when they want certainty that a change works rather than a routine CI check.
   content_file: prompts/verify-and-fix/SKILL.md
   inputs:
   - name: scope

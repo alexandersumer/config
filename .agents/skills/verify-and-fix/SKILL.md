@@ -1,38 +1,50 @@
 ---
 name: verify-and-fix
-description: Verify behavior and fix proven defects. Use when the user asks to check, validate, audit, or confirm behavior and repair only real gaps.
+description: Verify behavior with acceptance-level proof and fix only proven defects. Use when the user asks to check, validate, audit, verify, confirm, reproduce, prove, or end-to-end test behavior, especially when they want certainty that a change works rather than a routine CI check.
 register_cmd: true
 ---
 
-Verify `scope`, `$ARGUMENTS`, recent changes, relevant artifact, or conversation behavior.
+Verify `scope`, `$ARGUMENTS`, recent changes, relevant artifact, or conversation behavior by proving the user-visible contract through the real product path.
 
-Do not rubber-stamp. A verdict needs both source proof and executable proof from this turn. If either is missing, say **not proven** and name the missing artifact, path, command, environment, or seam.
+Do not rubber-stamp. **Verified** and **Fixed** require source proof plus acceptance-level executable proof from this turn. Vanilla CI, typechecks, linters, broad green suites, mocked unit tests, and helper-level assertions are supporting evidence only unless they exercise the real public contract.
+
+Mental model: be a skeptical release owner. Try to make the feature or fix fail in the most realistic available environment. Prefer running the app, service, or tool and observing behavior at its public boundary. Spin up dependencies, seed data, call APIs, use the CLI/UI, inspect persisted state, and check logs/events when those are part of the contract. If the real path cannot be exercised, say **not proven** or **blocked**.
 
 Follow this loop:
 
-1. **State the contract.** Derive expected behavior from primary sources only: user request, artifact/spec, public API docs, schemas, types, intended-behavior tests, callers, migrations. If no source defines the behavior, stop with **not proven**.
+1. **Define the acceptance contract.** Use primary sources only: user request, spec, public docs, schemas, types, intended-behavior tests, callers, migrations, or existing product behavior. Convert them into observable criteria: inputs, actions, outputs, state changes, side effects, errors, and non-goals. If the contract is undefined, stop with **not proven**.
 
-2. **Name the bug that would matter.** Before running checks or editing, say what realistic defect would violate the contract and where it should be caught.
+2. **Name meaningful failure modes.** State the realistic defects that would violate the contract and where they should be visible: UI, CLI, API response, database/file state, emitted event, downstream call, logs, permissions, or integration boundary.
 
-3. **Trace source proof.** Read the real control, data, and error flow through the public path. Do not treat mocks, private helpers, or implementation-detail assertions as proof.
+3. **Trace the real path.** Read control, data, and error flow from public entry point to observable outcome. Include config, flags, routing, serialization, persistence, auth, async work, retries, and integrations when relevant. Mocks, snapshots, private helpers, and implementation-detail assertions are not proof.
 
-4. **Run executable proof.** Use the smallest command, test, script, fixture, API call, or reproduction that exercises the real path. Broad green tests alone are not proof unless they exercise the named contract.
+4. **Build the deepest practical harness.** Prefer:
+   - real end-to-end flow with the app/service/tool running and real or faithful local dependencies;
+   - public-boundary integration/API/CLI/browser flow;
+   - lower-level reproduction only when no executable public seam exists.
 
-5. **Fix only after proof fails.** If source proof or executable proof exposes a real defect or verification gap, make the smallest code/test change at the root cause. No suppressions, baselines, dependency bumps, skipped/deleted/weakened tests, sleeps, broad catches, or silent fallbacks.
+   Make setup reproducible: note seed data, commands, URLs, fixtures, credentials assumptions, and cleanup. Do not stop at CI just because it is green.
 
-6. **Prove the fix.** Rerun the targeted proof. If you added or changed a check, prove when feasible that it would fail for the realistic regression, then restore and rerun green. Run the broader relevant suite after targeted proof is green.
+5. **Run acceptance proof.** Exercise the real path. Check actual externally visible outcomes, not just exit status. Cover the happy path and the highest-risk negative/edge path needed to rule out the named failure modes.
 
-Verdict meanings:
-- **Verified** — source proof and executable proof both support the contract; no changes needed.
-- **Fixed** — a real defect or verification gap was proven, changed, and rerun green.
-- **Not proven** — expected behavior, source proof, executable proof, or a checkable seam is missing.
-- **Blocked** — required access, artifact, dependency, or environment is unavailable.
+6. **Fix only proven gaps.** If proof exposes a real defect or acceptance-coverage gap, make the smallest root-cause change. Do not use suppressions, baselines, skipped/weakened tests, sleeps, broad catches, silent fallbacks, or mock-only fixes.
+
+7. **Prove the fix hard.** Rerun the same acceptance harness and show the before/after distinction when available. If adding an automated check, prove when feasible that it fails for the realistic regression, restore, then rerun green. Run broader relevant regression checks after acceptance proof passes.
+
+8. **Escalate uncertainty.** If access, environment, dependencies, data, credentials, or observable seams are missing, do not speculate. Return **not proven** or **blocked** and name the exact missing proof.
+
+Verdicts:
+- **Verified** — source proof and acceptance proof support the contract through the real public path; no changes needed.
+- **Fixed** — defect or coverage gap was proven, fixed at root cause, and rerun through acceptance proof.
+- **Not proven** — contract, source proof, acceptance proof, realistic environment, or public seam is missing.
+- **Blocked** — required access, artifact, dependency, credential, environment, or external system is unavailable.
 
 Final:
 - Verdict: `<verified | fixed | not proven | blocked>`
-- Contract: `<expected behavior and source>`
-- Bug model: `<realistic defect checked>`
-- Source proof: `<files/functions/flow>`
-- Executable proof: `<commands/results or missing proof>`
+- Contract: `<source and observable acceptance criteria>`
+- Failure modes: `<realistic defects checked>`
+- Source proof: `<entry points/files/functions/config/flow>`
+- Acceptance proof: `<environment/setup/actions/observations/results or missing proof>`
+- Regression proof: `<targeted/broader commands and results, or why not run>`
 - Changed: `<files or none>`
-- Remaining: `<none or gap/blocker>`
+- Remaining: `<none or exact gap/blocker>`
