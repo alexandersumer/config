@@ -31,6 +31,7 @@ pub(crate) fn run_regression_tests() -> Result<()> {
     for (name, mutate) in mutations {
         assert_mutation_fails(name, *mutate)?;
     }
+    test_new_skill_generate_validate_flow()?;
     test_repair_config_command()?;
     test_install_command()?;
     test_link_safety()?;
@@ -116,6 +117,52 @@ fn test_repair_config_command() -> Result<()> {
         ));
     }
 
+    Ok(())
+}
+
+fn test_new_skill_generate_validate_flow() -> Result<()> {
+    let fixture = copy_fixture()?;
+    let skill_dir = fixture.path().join(".agents/skills/real-e2e-fixture");
+    fs::create_dir(&skill_dir).map_err(|err| {
+        format!(
+            "{}: cannot create fixture skill directory: {err}",
+            skill_dir.display()
+        )
+    })?;
+    fs::write(
+        skill_dir.join("SKILL.md"),
+        "---\nname: real-e2e-fixture\ndescription: Fixture skill proving generation discovers new valid skills through the public command path.\nregister_cmd: true\n---\n\nDrive the public command path, not a helper-only shortcut, when proving newly added skills are discoverable.\nGenerate the registry from the fixture checkout, then validate it exactly as the normal config command does.\nThe fixture body is intentionally concrete so failures prove registration behavior rather than placeholder rejection.\n",
+    )
+    .map_err(|err| format!("cannot write fixture skill: {err}"))?;
+
+    let stale_errors = validate_registry(fixture.path()).join("\n");
+    if !stale_errors.contains("generated content is not up to date") {
+        return Err(format!(
+            "new skill fixture should fail before registry generation; got:\n{stale_errors}"
+        ));
+    }
+
+    generate_command(&[
+        "--config-root".to_string(),
+        fixture.path().display().to_string(),
+    ])?;
+    generate_command(&[
+        "--config-root".to_string(),
+        fixture.path().display().to_string(),
+        "--check".to_string(),
+    ])?;
+    validate_command(&[
+        "--config-root".to_string(),
+        fixture.path().display().to_string(),
+    ])?;
+
+    let generated = fs::read_to_string(fixture.path().join("rovodev/prompts.yml"))
+        .map_err(|err| format!("cannot read generated fixture registry: {err}"))?;
+    if !generated.contains("name: real-e2e-fixture")
+        || !generated.contains("content_file: prompts/real-e2e-fixture/SKILL.md")
+    {
+        return Err("generated registry did not include new fixture skill".to_string());
+    }
     Ok(())
 }
 

@@ -98,6 +98,13 @@ prompts:
         Leave empty to infer from recent changes or conversation context.
       type: string
       required: false
+  real-e2e:
+    inputs:
+    - name: scope
+      label: E2E scope
+      description: Optional behavior, API, feature, package, or test lane to cover with a true end-to-end test. Leave empty to infer from conversation context.
+      type: string
+      required: false
   reconcile-plan:
     inputs:
     - name: artifact

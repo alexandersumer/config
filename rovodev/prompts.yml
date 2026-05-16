@@ -218,3 +218,12 @@ prompts:
     description: Optional feature, bug, refactor, design, file path, or implementation concern to plan in chat. Leave empty to infer from conversation context.
     type: string
     required: false
+- name: real-e2e
+  description: Add or harden true engine end-to-end tests. Use when the user wants a real E2E that boots the system, hits top public APIs, rejects mocks/fakes/workarounds, and proves behavior in CI.
+  content_file: prompts/real-e2e/SKILL.md
+  inputs:
+  - name: scope
+    label: E2E scope
+    description: Optional behavior, API, feature, package, or test lane to cover with a true end-to-end test. Leave empty to infer from conversation context.
+    type: string
+    required: false
