@@ -6,9 +6,15 @@ register_cmd: true
 
 Verify `scope`, `$ARGUMENTS`, recent changes, relevant artifact, or conversation behavior by proving the user-visible contract through the real product path.
 
-Do not rubber-stamp. **Verified** and **Fixed** require source proof plus acceptance-level executable proof from this turn. Vanilla CI, typechecks, linters, broad green suites, mocked unit tests, and helper-level assertions are supporting evidence only unless they exercise the real public contract.
+Standard: no rubber stamps. **Verified** and **Fixed** require source proof plus acceptance proof from this turn. CI, typechecks, linters, broad green suites, mocked unit tests, snapshots, and helper-level assertions are supporting evidence only. They do not prove the verdict unless they exercise the same public contract and observable outcome a user depends on.
 
-Mental model: be a skeptical release owner. Try to make the feature or fix fail in the most realistic available environment. Prefer running the app, service, or tool and observing behavior at its public boundary. Spin up dependencies, seed data, call APIs, use the CLI/UI, inspect persisted state, and check logs/events when those are part of the contract. If the real path cannot be exercised, say **not proven** or **blocked**.
+Mental model: be a skeptical release owner. Try to make the feature or fix fail in the most realistic runnable environment. Start by attempting the actual product path: run the app, service, CLI, worker, or tool; use real or faithful local dependencies; seed realistic data; call the API/UI/CLI; inspect persisted state, emitted events, downstream effects, logs, and errors when relevant. Do not choose a smaller proof because it is quicker.
+
+Proof ladder: use the first feasible level, and explicitly justify any downgrade.
+1. Real end-to-end flow with the product running and dependencies available.
+2. Public-boundary flow: API, CLI, browser/UI, worker, or integration exercising the same contract.
+3. Lower-level reproduction only when no executable public seam exists; this cannot support **Verified** or **Fixed** unless it observes the same contract outcome.
+4. If none is feasible, return **not proven** or **blocked**.
 
 Follow this loop:
 
@@ -16,22 +22,15 @@ Follow this loop:
 
 2. **Name meaningful failure modes.** State the realistic defects that would violate the contract and where they should be visible: UI, CLI, API response, database/file state, emitted event, downstream call, logs, permissions, or integration boundary.
 
-3. **Trace the real path.** Read control, data, and error flow from public entry point to observable outcome. Include config, flags, routing, serialization, persistence, auth, async work, retries, and integrations when relevant. Mocks, snapshots, private helpers, and implementation-detail assertions are not proof.
+3. **Trace the real path.** Read control, data, and error flow from public entry point to observable outcome. Include config, flags, routing, serialization, persistence, auth, async work, retries, and integrations when relevant. Mocks and implementation-detail assertions are not proof.
 
-4. **Build the deepest practical harness.** Prefer:
-   - real end-to-end flow with the app/service/tool running and real or faithful local dependencies;
-   - public-boundary integration/API/CLI/browser flow;
-   - lower-level reproduction only when no executable public seam exists.
+4. **Build and run acceptance proof.** Use the proof ladder. Make setup reproducible: note commands, URLs, seed data, fixtures, credentials assumptions, and cleanup. Record expected vs actual observations. Check externally visible outcomes, not just exit status. Cover the happy path and the highest-risk negative or edge path needed to rule out the named failure modes.
 
-   Make setup reproducible: note seed data, commands, URLs, fixtures, credentials assumptions, and cleanup. Do not stop at CI just because it is green.
+5. **Fix only proven gaps.** If proof exposes a real defect or acceptance-coverage gap, make the smallest root-cause change. Do not use suppressions, baselines, skipped/weakened tests, sleeps, broad catches, silent fallbacks, or mock-only fixes.
 
-5. **Run acceptance proof.** Exercise the real path. Check actual externally visible outcomes, not just exit status. Cover the happy path and the highest-risk negative/edge path needed to rule out the named failure modes.
+6. **Prove the fix hard.** Rerun the same acceptance proof and show the before/after distinction when available. If adding an automated check, prove when feasible that it fails for the realistic regression, restore, then rerun green. Run broader regression checks only after acceptance proof passes.
 
-6. **Fix only proven gaps.** If proof exposes a real defect or acceptance-coverage gap, make the smallest root-cause change. Do not use suppressions, baselines, skipped/weakened tests, sleeps, broad catches, silent fallbacks, or mock-only fixes.
-
-7. **Prove the fix hard.** Rerun the same acceptance harness and show the before/after distinction when available. If adding an automated check, prove when feasible that it fails for the realistic regression, restore, then rerun green. Run broader relevant regression checks after acceptance proof passes.
-
-8. **Escalate uncertainty.** If access, environment, dependencies, data, credentials, or observable seams are missing, do not speculate. Return **not proven** or **blocked** and name the exact missing proof.
+7. **Escalate uncertainty.** If access, environment, dependencies, data, credentials, or observable seams are missing, do not speculate. Return **not proven** or **blocked** and name the exact missing proof.
 
 Verdicts:
 - **Verified** — source proof and acceptance proof support the contract through the real public path; no changes needed.
