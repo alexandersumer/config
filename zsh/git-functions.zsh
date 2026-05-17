@@ -230,6 +230,59 @@ function _fetch_with_ref_cleanup() {
     return 0
 }
 
+function _print_reset_to_remote_default_dangerous_error() {
+    printf '\033[31merror: reset_to_remote_default would discard local changes\033[0m\n' >&2
+    printf '\033[33mcommit, stash, or explicitly discard your changes before retrying\033[0m\n' >&2
+}
+
+function _reset_to_remote_default_ref_has_unpublished_commits() {
+    local ref="$1"
+
+    [[ -n "$(git rev-list --max-count=1 "$ref" --not --remotes 2>/dev/null)" ]]
+}
+
+function _ensure_reset_to_remote_default_worktree_clean() {
+    local git_status
+
+    git_status=$(git status --porcelain --untracked-files=all 2>/dev/null)
+    if [[ -n "$git_status" ]]; then
+        _print_reset_to_remote_default_dangerous_error
+        return 1
+    fi
+
+    return 0
+}
+
+function _ensure_reset_to_remote_default_is_safe() {
+    _ensure_reset_to_remote_default_worktree_clean || return $?
+
+    if ! git rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
+        return 0
+    fi
+
+    if _reset_to_remote_default_ref_has_unpublished_commits HEAD; then
+        _print_reset_to_remote_default_dangerous_error
+        return 1
+    fi
+
+    return 0
+}
+
+function _ensure_reset_to_remote_default_prune_safe() {
+    local keep_branch="$1"
+    local branch
+
+    while IFS= read -r branch; do
+        [[ "$branch" == "$keep_branch" ]] && continue
+        if _reset_to_remote_default_ref_has_unpublished_commits "$branch"; then
+            _print_reset_to_remote_default_dangerous_error
+            return 1
+        fi
+    done < <(git for-each-ref --format='%(refname:short)' refs/heads)
+
+    return 0
+}
+
 function _reset_to_remote_default_single() {
     local remote="origin"
     local branch=""
@@ -284,6 +337,8 @@ function _reset_to_remote_default_single() {
         return 1
     fi
 
+    _ensure_reset_to_remote_default_worktree_clean || return $?
+
     if (( sync_fetch )); then
         # ── Synchronous full fetch ────────────────────────────────────
         # Fetch with retry and cleanup of transient/stale remote-tracking
@@ -328,13 +383,27 @@ function _reset_to_remote_default_single() {
         return 1
     fi
 
+    _ensure_reset_to_remote_default_is_safe || return $?
+    if (( do_prune )); then
+        _fetch_with_ref_cleanup "$git_dir" "$remote" git fetch --prune --no-tags "$remote" || return $?
+    fi
+    if git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null 2>&1; then
+        if _reset_to_remote_default_ref_has_unpublished_commits "$branch"; then
+            _print_reset_to_remote_default_dangerous_error
+            return 1
+        fi
+    fi
+    if (( do_prune )); then
+        _ensure_reset_to_remote_default_prune_safe "$branch" || return $?
+    fi
+
     # ── Reset to remote branch ─────────────────────────────────────────
     printf 'resetting to \033[32m%s/%s\033[0m\n' "$remote" "$branch"
 
     if git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null 2>&1; then
-        git switch --force "$branch" || return $?
+        git switch "$branch" || return $?
     else
-        git switch --force-create "$branch" "$remote/$branch" || return $?
+        git switch --create "$branch" "$remote/$branch" || return $?
     fi
 
     upstream_ref=$(git rev-parse --symbolic-full-name "$branch@{upstream}" 2>/dev/null)
@@ -348,7 +417,7 @@ function _reset_to_remote_default_single() {
 
     # ── Prune local branches ──────────────────────────────────────────
     if (( do_prune )); then
-        prune_all_except_remote_default "$branch"
+        prune_all_except_remote_default "$branch" || return $?
     fi
 
     # ── Background fetch for remote branch availability ───────────────
@@ -548,6 +617,8 @@ function prune_all_except_remote_default() {
         [[ "$branch" == "$keep_branch" ]] && continue
         branches_to_delete+=("$branch")
     done < <(git for-each-ref --format='%(refname:short)' refs/heads)
+
+    _ensure_reset_to_remote_default_prune_safe "$keep_branch" || return $?
 
     if (( ${#branches_to_delete[@]} == 0 )); then
         printf '\033[33mno local branches to delete\033[0m\n'
