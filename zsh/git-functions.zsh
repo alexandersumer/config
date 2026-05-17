@@ -231,93 +231,33 @@ function _fetch_with_ref_cleanup() {
 }
 
 function _print_reset_to_remote_default_dangerous_error() {
-    local detail="${1:-}"
+    local git_status="${1:-}"
+    local status_line
 
     printf '\033[31merror: reset_to_remote_default would discard local changes\033[0m\n' >&2
-    if [[ -n "$detail" ]]; then
-        printf '\033[33m%s\033[0m\n' "$detail" >&2
+    if [[ -n "$git_status" ]]; then
+        printf '\033[33mthe following working tree or index entries would be lost:\033[0m\n' >&2
+        while IFS= read -r status_line; do
+            printf '  %s\n' "$status_line" >&2
+        done <<< "$git_status"
     fi
-    printf '\033[33mcommit, stash, or explicitly discard your changes before retrying\033[0m\n' >&2
-}
-
-function _reset_to_remote_default_first_lost_commit() {
-    local ref="$1"
-    local target_ref="$2"
-    local commit cherry_line
-
-    while IFS= read -r commit; do
-        cherry_line=$(git cherry "$target_ref" "$commit" "${commit}^" 2>/dev/null)
-        if [[ "$cherry_line" != -* ]]; then
-            printf '%s\n' "$commit"
-            return 0
-        fi
-    done < <(git rev-list "$ref" --not --remotes 2>/dev/null)
-
-    return 1
-}
-
-function _reset_to_remote_default_ref_has_lost_commits() {
-    local ref="$1"
-    local target_ref="$2"
-
-    [[ -n "$(_reset_to_remote_default_first_lost_commit "$ref" "$target_ref")" ]]
-}
-
-function _print_reset_to_remote_default_lost_ref_error() {
-    local ref="$1"
-    local target_ref="$2"
-    local commit short_commit
-
-    commit=$(_reset_to_remote_default_first_lost_commit "$ref" "$target_ref")
-    short_commit=$(git rev-parse --short "$commit" 2>/dev/null || printf '%s' "$commit")
-    _print_reset_to_remote_default_dangerous_error "commits on $ref are not on any remote or $target_ref (example: $short_commit)"
+    printf '\033[33mcommit, stash, clean, or explicitly discard them before retrying\033[0m\n' >&2
 }
 
 function _ensure_reset_to_remote_default_worktree_clean() {
     local git_status
 
-    git_status=$(git status --porcelain --untracked-files=all 2>/dev/null)
+    git_status=$(git status --porcelain=v1 --untracked-files=all 2>/dev/null)
     if [[ -n "$git_status" ]]; then
-        _print_reset_to_remote_default_dangerous_error
+        _print_reset_to_remote_default_dangerous_error "$git_status"
         return 1
     fi
 
     return 0
 }
 
-function _ensure_reset_to_remote_default_is_safe() {
-    local target_ref="$1"
-    local current_branch
-
-    _ensure_reset_to_remote_default_worktree_clean || return $?
-
-    if ! git rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
-        return 0
-    fi
-
-    current_branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null)
-    if [[ -z "$current_branch" ]] && _reset_to_remote_default_ref_has_lost_commits HEAD "$target_ref"; then
-        _print_reset_to_remote_default_lost_ref_error HEAD "$target_ref"
-        return 1
-    fi
-
-    return 0
-}
-
-function _ensure_reset_to_remote_default_prune_safe() {
-    local keep_branch="$1"
-    local target_ref="$2"
-    local branch
-
-    while IFS= read -r branch; do
-        [[ "$branch" == "$keep_branch" ]] && continue
-        if _reset_to_remote_default_ref_has_lost_commits "$branch" "$target_ref"; then
-            _print_reset_to_remote_default_lost_ref_error "$branch" "$target_ref"
-            return 1
-        fi
-    done < <(git for-each-ref --format='%(refname:short)' refs/heads)
-
-    return 0
+function _reset_to_remote_default_is_safe() {
+    _ensure_reset_to_remote_default_worktree_clean
 }
 
 function _reset_to_remote_default_single() {
@@ -420,18 +360,9 @@ function _reset_to_remote_default_single() {
         return 1
     fi
 
-    _ensure_reset_to_remote_default_is_safe "$remote/$branch" || return $?
+    _reset_to_remote_default_is_safe || return $?
     if (( do_prune )); then
         _fetch_with_ref_cleanup "$git_dir" "$remote" git fetch --prune --no-tags "$remote" || return $?
-    fi
-    if git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null 2>&1; then
-        if _reset_to_remote_default_ref_has_lost_commits "$branch" "$remote/$branch"; then
-            _print_reset_to_remote_default_lost_ref_error "$branch" "$remote/$branch"
-            return 1
-        fi
-    fi
-    if (( do_prune )); then
-        _ensure_reset_to_remote_default_prune_safe "$branch" "$remote/$branch" || return $?
     fi
 
     # ── Reset to remote branch ─────────────────────────────────────────
@@ -654,8 +585,6 @@ function prune_all_except_remote_default() {
         [[ "$branch" == "$keep_branch" ]] && continue
         branches_to_delete+=("$branch")
     done < <(git for-each-ref --format='%(refname:short)' refs/heads)
-
-    _ensure_reset_to_remote_default_prune_safe "$keep_branch" "$remote/$keep_branch" || return $?
 
     if (( ${#branches_to_delete[@]} == 0 )); then
         printf '\033[33mno local branches to delete\033[0m\n'
