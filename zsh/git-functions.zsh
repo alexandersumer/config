@@ -236,7 +236,7 @@ function _print_reset_to_remote_default_dangerous_error() {
 
     printf '\033[31merror: reset_to_remote_default would discard local changes\033[0m\n' >&2
     if [[ -n "$git_status" ]]; then
-        printf '\033[33mthe following working tree or index entries would be lost:\033[0m\n' >&2
+        printf '\033[33mthe following tracked working tree or index entries would be reset:\033[0m\n' >&2
         while IFS= read -r status_line; do
             printf '  %s\n' "$status_line" >&2
         done <<< "$git_status"
@@ -247,7 +247,7 @@ function _print_reset_to_remote_default_dangerous_error() {
 function _ensure_reset_to_remote_default_worktree_clean() {
     local git_status
 
-    git_status=$(git status --porcelain=v1 --untracked-files=all 2>/dev/null)
+    git_status=$(git status --porcelain=v1 --untracked-files=no 2>/dev/null)
     if [[ -n "$git_status" ]]; then
         _print_reset_to_remote_default_dangerous_error "$git_status"
         return 1
