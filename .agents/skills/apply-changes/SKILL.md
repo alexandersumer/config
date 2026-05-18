@@ -8,9 +8,9 @@ Apply `changes`, else `$ARGUMENTS`, else the conversation request, else the obvi
 
 Do not stop at "no changes applied" until you have tried to resolve the target from referenced files, current diff, recent conversation, README/CONTRIBUTING/instructions, nearby tests, callers, and 2-3 sibling patterns. If the target is still unclear, ask one precise question and stop.
 
-Before editing, state the intended behavior in one sentence for yourself, then inspect the real entry point and data/error flow that must change. Make the smallest complete edit that matches existing naming, layering, error handling, tests, and comment density.
+Before editing, state the intended steel thread in one sentence for yourself: the smallest end-to-end behavior that makes the requested outcome real and provable. Then inspect the real entry point, data/error flow, caller, and validation seam that must change. Make the smallest complete edit that matches existing naming, layering, error handling, tests, and comment density.
 
-A complete edit may include production code, wiring, fixtures, tests, docs, or config when they are required to make the requested behavior reachable and provable. Do not add dependencies, abstractions, broad refactors, suppressions, skipped/weakened tests, fake TODOs, or explanatory comments unless the request requires them.
+A complete edit may include production code, wiring, fixtures, tests, docs, or config when they are required to make the requested behavior reachable and provable. Prefer one narrow integrated slice over disconnected preparation work. Do not add dependencies, abstractions, broad refactors, suppressions, skipped/weakened tests, fake TODOs, or explanatory comments unless the request requires them.
 
 Prefer fixing the root cause over patching the nearest symptom. If the requested change conflicts with repo conventions, existing behavior, or safety, stop and explain the conflict instead of improvising.
 
