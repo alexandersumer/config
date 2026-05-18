@@ -73,6 +73,7 @@ alias atlassian="cd $HOME/atlassian"
 alias vim="nvim"
 alias vi="nvim"
 alias clear="echo 'The clear command is disabled.'"
+alias axiom="atlas relay --agent axiom"
 
 # Project navigation
 alias blog="cd $HOME/atlassian/alexandersumer.com"
