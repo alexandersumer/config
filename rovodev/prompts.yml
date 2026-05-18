@@ -14,7 +14,7 @@ prompts:
     type: string
     required: false
 - name: apply-changes
-  description: Apply a narrow requested code change. Use when the user asks to edit, tweak, add, remove, or rename specific behavior without a broader plan.
+  description: Implement a requested code change without a formal plan. Use when the user asks to edit, tweak, add, remove, rename, or adjust behavior and the work should be completed directly.
   content_file: prompts/apply-changes/SKILL.md
   inputs:
   - name: changes
