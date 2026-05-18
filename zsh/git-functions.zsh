@@ -87,6 +87,60 @@ function _remove_worktrees_for_branches() {
     git worktree prune 2>/dev/null
 }
 
+function _refs_from_fetch_ref_failure() {
+    local remote="$1"
+    local fetch_output="$2"
+
+    {
+        printf '%s\n' "$fetch_output" \
+            | grep -E "(cannot lock ref|cannot update the ref|removing stale tracking ref|is at [0-9a-f]+ but expected)" \
+            | grep -oE "refs/remotes/${remote}/[^'[:space:]\":]+" \
+            | sed 's/\.lock$//'
+        printf '%s\n' "$fetch_output" \
+            | awk -v remote="$remote" '
+                / - \[deleted\][[:space:]]+\(none\)[[:space:]]+-> / {
+                    ref = $NF
+                    if (ref == remote || index(ref, remote "/") == 1) {
+                        print "refs/remotes/" ref
+                    }
+                }
+            '
+    } | awk '!seen[$0]++'
+}
+
+function _fetch_is_full_remote_prune() {
+    local remote="$1"
+    shift
+    local -a args=("$@")
+    local arg
+    local saw_fetch=0 saw_prune=0 saw_remote=0 saw_refspec=0
+
+    for arg in "${args[@]}"; do
+        case "$arg" in
+            fetch)
+                saw_fetch=1
+                ;;
+            --prune|-p)
+                saw_prune=1
+                ;;
+            --*)
+                ;;
+            "$remote")
+                saw_remote=1
+                ;;
+            git|command)
+                ;;
+            *)
+                if (( saw_remote )); then
+                    saw_refspec=1
+                fi
+                ;;
+        esac
+    done
+
+    (( saw_fetch && saw_prune && saw_remote && ! saw_refspec ))
+}
+
 function _cleanup_fetch_ref_failure() {
     local git_dir="$1"
     local remote="$2"
@@ -98,20 +152,16 @@ function _cleanup_fetch_ref_failure() {
 
     if (( cleanup_round == 0 )); then
         printf '\033[33mfetch failed, cleaning up stale refs and retrying…\033[0m\n' >&2
-
-        # Remove leftover lock files first. Avoid broad remote-tracking ref
-        # deletion here because the fast path fetches only one branch; targeted
-        # cleanup below removes only refs named in git's failure output.
-        for _cleanup_dir in "$git_dir/refs/remotes/$remote" "$git_dir/logs/refs/remotes/$remote"; do
-            [[ -d "$_cleanup_dir" ]] || continue
-            find "$_cleanup_dir" -name "*.lock" -delete 2>/dev/null
-        done
     fi
 
-    refs_to_delete=$(printf '%s\n' "$fetch_output" \
-        | grep -E "(cannot lock ref|cannot update the ref|removing stale tracking ref|is at [0-9a-f]+ but expected)" \
-        | grep -oE "refs/remotes/${remote}/[^'[:space:]\":]+" \
-        | awk '!seen[$0]++')
+    # Remove leftover lock files before every retry. Some large repos can hit
+    # multiple stale remote-tracking refs in a single prune sequence.
+    for _cleanup_dir in "$git_dir/refs/remotes/$remote" "$git_dir/logs/refs/remotes/$remote"; do
+        [[ -d "$_cleanup_dir" ]] || continue
+        find "$_cleanup_dir" -name "*.lock" -delete 2>/dev/null
+    done
+
+    refs_to_delete=$(_refs_from_fetch_ref_failure "$remote" "$fetch_output")
 
     if [[ -z "$refs_to_delete" ]]; then
         return 0
@@ -124,21 +174,30 @@ function _cleanup_fetch_ref_failure() {
 
         rm -f "${ref_path}.lock" 2>/dev/null
 
-        if [[ -f "$ref_path" ]]; then
-            printf '\033[33mwarning: removing stale ref %s\033[0m\n' "$ref" >&2
-            rm -f "$ref_path"
+        if git update-ref -d "$ref" >/dev/null 2>&1; then
             cleaned_refs+=("$ref")
-        elif [[ -d "$ref_path" ]]; then
-            printf '\033[33mwarning: removing stale ref directory %s\033[0m\n' "$ref" >&2
-            rm -rf "$ref_path"
-            cleaned_refs+=("$ref")
-        fi
-
-        if [[ -f "$git_dir/packed-refs" ]] && grep -q " ${ref}$" "$git_dir/packed-refs" 2>/dev/null; then
-            printf '\033[33mwarning: removing stale packed ref %s\033[0m\n' "$ref" >&2
-            sed -i '' "\| ${ref}$|d" "$git_dir/packed-refs"
-            if [[ "${cleaned_refs[-1]:-}" != "$ref" ]]; then
+        else
+            # Fall back to direct cleanup for broken D/F states that Git cannot
+            # lock or parse well enough for update-ref.
+            if [[ -f "$ref_path" ]]; then
+                printf '\033[33mwarning: removing stale ref %s\033[0m\n' "$ref" >&2
+                rm -f "$ref_path"
                 cleaned_refs+=("$ref")
+            elif [[ -d "$ref_path" ]]; then
+                printf '\033[33mwarning: removing stale ref directory %s\033[0m\n' "$ref" >&2
+                rm -rf "$ref_path"
+                cleaned_refs+=("$ref")
+            fi
+
+            if [[ -f "$git_dir/packed-refs" ]] && grep -q " ${ref}$" "$git_dir/packed-refs" 2>/dev/null; then
+                printf '\033[33mwarning: removing stale packed ref %s\033[0m\n' "$ref" >&2
+                git pack-refs --all --prune >/dev/null 2>&1 || true
+                if [[ -f "$git_dir/packed-refs" ]] && grep -q " ${ref}$" "$git_dir/packed-refs" 2>/dev/null; then
+                    sed -i.bak "\| ${ref}$|d" "$git_dir/packed-refs" && rm -f "$git_dir/packed-refs.bak"
+                fi
+                if [[ "${cleaned_refs[-1]:-}" != "$ref" ]]; then
+                    cleaned_refs+=("$ref")
+                fi
             fi
         fi
 
@@ -163,7 +222,7 @@ function _cleanup_fetch_ref_failure() {
     done
 
     if (( ${#cleaned_refs[@]} > 0 )); then
-        printf '%s\n' "${cleaned_refs[@]}"
+        printf '%s\n' "${cleaned_refs[@]}" | awk '!seen[$0]++'
     fi
 }
 
@@ -200,7 +259,11 @@ function _fetch_with_ref_cleanup() {
         fi
 
         printf '%s\n' "$fetch_output" >&2
-        cleaned_output=$(_cleanup_fetch_ref_failure "$git_dir" "$remote" "$fetch_output" "$cleanup_rounds")
+        local cleanup_output_file
+        cleanup_output_file=$(mktemp -t git-fetch-ref-cleanup.XXXXXX) || return 1
+        _cleanup_fetch_ref_failure "$git_dir" "$remote" "$fetch_output" "$cleanup_rounds" > "$cleanup_output_file"
+        cleaned_output=$(cat "$cleanup_output_file")
+        rm -f "$cleanup_output_file"
         if [[ -n "$cleaned_output" ]]; then
             cleaned_refs=(${(f)cleaned_output})
             manual_deleted_refs+=("${cleaned_refs[@]}")
@@ -213,6 +276,10 @@ function _fetch_with_ref_cleanup() {
     done
 
     if (( fetch_status != 0 )); then
+        if _fetch_is_full_remote_prune "$remote" "${fetch_cmd[@]}"; then
+            printf '\033[33mwarning: full remote prune failed after cleanup attempts; continuing with default branch reset\033[0m\n' >&2
+            return 0
+        fi
         printf '\033[31merror: git fetch failed after cleanup attempts\033[0m\n' >&2
         return $fetch_status
     fi

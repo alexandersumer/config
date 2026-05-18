@@ -9,6 +9,7 @@ use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs as unix_fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use tempfile::TempDir;
 
 type Mutation = fn(&Path) -> Result<&'static str>;
@@ -36,6 +37,7 @@ pub(crate) fn run_regression_tests() -> Result<()> {
     test_install_command()?;
     test_link_safety()?;
     test_command_failures()?;
+    test_git_fetch_ref_cleanup()?;
     Ok(())
 }
 
@@ -299,6 +301,156 @@ pub(crate) fn test_command_failures() -> Result<()> {
         return Err(format!("unexpected validate error: {validate_error}"));
     }
     Ok(())
+}
+
+fn test_git_fetch_ref_cleanup() -> Result<()> {
+    let config_root = std::env::current_dir()
+        .map_err(|err| format!("cannot determine config root for git cleanup test: {err}"))?;
+    if !config_root.join("zsh/git-functions.zsh").is_file() {
+        return Err(format!(
+            "{}: git cleanup test must run from config repo root",
+            config_root.display()
+        ));
+    }
+    let work = tempfile::Builder::new()
+        .prefix("tmp_git_fetch_ref_cleanup_")
+        .tempdir()
+        .map_err(|err| format!("cannot create temp git cleanup repo: {err}"))?;
+
+    run_command(work.path(), "git", &["init", "--initial-branch=main"])?;
+    run_command(
+        work.path(),
+        "git",
+        &["config", "user.email", "test@example.com"],
+    )?;
+    run_command(work.path(), "git", &["config", "user.name", "Test User"])?;
+    fs::write(work.path().join("README.md"), "fixture\n")
+        .map_err(|err| format!("cannot write cleanup fixture README: {err}"))?;
+    run_command(work.path(), "git", &["add", "README.md"])?;
+    run_command(work.path(), "git", &["commit", "-m", "initial"])?;
+    run_command(work.path(), "git", &["remote", "add", "origin", "."])?;
+
+    run_command(
+        work.path(),
+        "git",
+        &["update-ref", "refs/remotes/origin/main", "HEAD"],
+    )?;
+    run_command(
+        work.path(),
+        "git",
+        &["update-ref", "refs/remotes/origin/NOISSUE/deleted", "HEAD"],
+    )?;
+    run_command(
+        work.path(),
+        "git",
+        &["update-ref", "refs/remotes/origin/noIssue/locked", "HEAD"],
+    )?;
+    fs::create_dir_all(work.path().join(".git/refs/remotes/origin/noIssue"))
+        .map_err(|err| format!("cannot create lock fixture directory: {err}"))?;
+    fs::write(
+        work.path()
+            .join(".git/refs/remotes/origin/noIssue/locked.lock"),
+        "stale lock\n",
+    )
+    .map_err(|err| format!("cannot write stale lock fixture: {err}"))?;
+
+    let fake_fetch = work.path().join("fake-fetch.sh");
+    fs::write(
+        &fake_fetch,
+        r#"#!/bin/sh
+count_file="$1"
+count=0
+if [ -f "$count_file" ]; then count=$(cat "$count_file"); fi
+count=$((count + 1))
+printf '%s' "$count" > "$count_file"
+if [ "$count" -lt 2 ]; then
+  printf '%s\n' "error: could not delete references: cannot lock ref 'refs/remotes/origin/noIssue/locked': Unable to create '.git/refs/remotes/origin/noIssue/locked.lock': File exists." >&2
+  printf '%s\n' "From example.invalid/repo" >&2
+  printf '%s\n' " - [deleted]                   (none)                  -> origin/NOISSUE/deleted" >&2
+  exit 1
+fi
+exit 0
+"#,
+    )
+    .map_err(|err| format!("cannot write fake fetch script: {err}"))?;
+    run_command(
+        work.path(),
+        "chmod",
+        &["+x", fake_fetch.to_string_lossy().as_ref()],
+    )?;
+
+    let script = format!(
+        "source {}/zsh/git-functions.zsh; _fetch_with_ref_cleanup \"$(git rev-parse --git-common-dir)\" origin {} .fetch-count",
+        config_root.display(),
+        fake_fetch.display(),
+    );
+    let zsh_output = run_command_output(work.path(), "zsh", &["-lc", &script])?;
+
+    let debug_refs = run_command_output(work.path(), "git", &["show-ref"])?;
+    if debug_refs.contains("NOISSUE/deleted") {
+        return Err(format!(
+            "zsh output:
+{zsh_output}
+debug refs after cleanup:
+{debug_refs}"
+        ));
+    }
+    assert_git_ref_missing(work.path(), "refs/remotes/origin/NOISSUE/deleted")?;
+    assert_git_ref_missing(work.path(), "refs/remotes/origin/noIssue/locked")?;
+    if work
+        .path()
+        .join(".git/refs/remotes/origin/noIssue/locked.lock")
+        .exists()
+    {
+        return Err("stale remote-tracking ref lock was not removed".to_string());
+    }
+    let attempts = fs::read_to_string(work.path().join(".fetch-count"))
+        .map_err(|err| format!("cannot read fake fetch attempt count: {err}"))?;
+    if attempts.trim() != "2" {
+        return Err(format!(
+            "fake fetch should have succeeded on second attempt, got {attempts:?}"
+        ));
+    }
+    Ok(())
+}
+
+fn assert_git_ref_missing(cwd: &Path, ref_name: &str) -> Result<()> {
+    let output = Command::new("git")
+        .current_dir(cwd)
+        .args(["show-ref", "--verify", "--quiet", ref_name])
+        .output()
+        .map_err(|err| format!("cannot run git show-ref for {ref_name}: {err}"))?;
+    if output.status.success() {
+        return Err(format!("{ref_name} should have been removed"));
+    }
+    Ok(())
+}
+
+fn run_command(cwd: &Path, program: &str, args: &[&str]) -> Result<()> {
+    run_command_output(cwd, program, args).map(|_| ())
+}
+
+fn run_command_output(cwd: &Path, program: &str, args: &[&str]) -> Result<String> {
+    let output = Command::new(program)
+        .current_dir(cwd)
+        .args(args)
+        .output()
+        .map_err(|err| format!("cannot run {program}: {err}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "command failed in {}: {} {}
+stdout:
+{}
+stderr:
+{}",
+            cwd.display(),
+            program,
+            args.join(" "),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
 fn copy_fixture() -> Result<TempDir> {
