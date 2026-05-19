@@ -170,10 +170,28 @@ fn test_new_skill_generate_validate_flow() -> Result<()> {
 
 pub(crate) fn test_install_command() -> Result<()> {
     let fixture = copy_fixture()?;
+    let hidden_skill_dir = fixture.path().join(".agents/skills/.system");
+    fs::create_dir_all(&hidden_skill_dir).map_err(|err| {
+        format!(
+            "{}: cannot create hidden fixture skill: {err}",
+            hidden_skill_dir.display()
+        )
+    })?;
+    fs::write(hidden_skill_dir.join("SKILL.md"), "hidden fixture\n")
+        .map_err(|err| format!("cannot write hidden fixture skill: {err}"))?;
+    let non_skill_dir = fixture.path().join(".agents/skills/not-a-skill");
+    fs::create_dir(&non_skill_dir).map_err(|err| {
+        format!(
+            "{}: cannot create non-skill fixture directory: {err}",
+            non_skill_dir.display()
+        )
+    })?;
+
     let home = tempfile::Builder::new()
         .prefix("tmp_rovodev_install_home_")
         .tempdir()
         .map_err(|err| format!("cannot create temp install home: {err}"))?;
+    create_codex_system_skills(home.path())?;
 
     install_command(&[
         "--config-root".to_string(),
@@ -198,10 +216,85 @@ pub(crate) fn test_install_command() -> Result<()> {
         &home.path().join(".rovodev/prompts.yml"),
         &fixture.path().join("rovodev/prompts.yml"),
     )?;
+    assert_symlink_resolves_to(
+        &home.path().join(".codex/skills/apply-changes"),
+        &fixture.path().join(".agents/skills/apply-changes"),
+    )?;
+    assert_symlink_resolves_to(
+        &home.path().join(".codex/skills/describe-branch"),
+        &fixture.path().join(".agents/skills/describe-branch"),
+    )?;
+    if home.path().join(".codex/skills/.system").is_symlink() {
+        return Err("install replaced Codex-owned .system with a symlink".to_string());
+    }
+    if home.path().join(".codex/skills/.system/.system").exists() {
+        return Err("install linked hidden .system as a custom Codex skill".to_string());
+    }
+    if home.path().join(".codex/skills/not-a-skill").exists() {
+        return Err("install linked a directory without SKILL.md as a Codex skill".to_string());
+    }
+
+    install_command(&[
+        "--config-root".to_string(),
+        fixture.path().display().to_string(),
+        "--home".to_string(),
+        home.path().display().to_string(),
+    ])?;
     Ok(())
 }
 
 pub(crate) fn test_link_safety() -> Result<()> {
+    let missing_codex_fixture = copy_fixture()?;
+    let missing_codex_home = tempfile::Builder::new()
+        .prefix("tmp_codex_install_missing_system_")
+        .tempdir()
+        .map_err(|err| format!("cannot create missing Codex system home: {err}"))?;
+    let missing_codex_error = install_command(&[
+        "--config-root".to_string(),
+        missing_codex_fixture.path().display().to_string(),
+        "--home".to_string(),
+        missing_codex_home.path().display().to_string(),
+    ])
+    .expect_err("install should require Codex .system skills before linking custom Codex skills");
+    if !missing_codex_error.contains("Codex system skills directory") {
+        return Err(format!(
+            "unexpected missing Codex system error: {missing_codex_error}"
+        ));
+    }
+
+    let codex_conflict_fixture = copy_fixture()?;
+    let codex_conflict_home = tempfile::Builder::new()
+        .prefix("tmp_codex_install_conflict_")
+        .tempdir()
+        .map_err(|err| format!("cannot create Codex conflict home: {err}"))?;
+    create_codex_system_skills(codex_conflict_home.path())?;
+    let conflicting_skill = codex_conflict_home
+        .path()
+        .join(".codex/skills/apply-changes");
+    fs::create_dir(&conflicting_skill).map_err(|err| {
+        format!(
+            "{}: cannot create conflicting Codex skill: {err}",
+            conflicting_skill.display()
+        )
+    })?;
+    fs::write(conflicting_skill.join("keep"), "do not delete")
+        .map_err(|err| format!("cannot write conflicting Codex skill file: {err}"))?;
+    let codex_conflict_error = install_command(&[
+        "--config-root".to_string(),
+        codex_conflict_fixture.path().display().to_string(),
+        "--home".to_string(),
+        codex_conflict_home.path().display().to_string(),
+    ])
+    .expect_err("install should reject existing conflicting Codex skill entries");
+    if !codex_conflict_error.contains("expected Codex skill symlink") {
+        return Err(format!(
+            "unexpected Codex conflict error: {codex_conflict_error}"
+        ));
+    }
+    if !conflicting_skill.join("keep").is_file() {
+        return Err("install removed data from conflicting Codex skill directory".to_string());
+    }
+
     let repair_fixture = copy_fixture()?;
     let prompts_link = repair_fixture.path().join("rovodev/prompts");
     fs::remove_file(&prompts_link).map_err(|err| {
@@ -241,6 +334,7 @@ pub(crate) fn test_link_safety() -> Result<()> {
         .prefix("tmp_rovodev_install_safety_")
         .tempdir()
         .map_err(|err| format!("cannot create temp install home: {err}"))?;
+    create_codex_system_skills(home.path())?;
     fs::create_dir(home.path().join(".agents"))
         .map_err(|err| format!("cannot create fixture .agents directory: {err}"))?;
     fs::write(home.path().join(".agents/keep"), "do not delete")
@@ -521,6 +615,21 @@ pub(crate) fn assert_clean_fixture_passes() -> Result<()> {
             errors.join("\n")
         ))
     }
+}
+
+fn create_codex_system_skills(home: &Path) -> Result<()> {
+    for skill in ["skill-creator", "skill-installer", "openai-docs"] {
+        let skill_dir = home.join(".codex/skills/.system").join(skill);
+        fs::create_dir_all(&skill_dir).map_err(|err| {
+            format!(
+                "{}: cannot create Codex system skill: {err}",
+                skill_dir.display()
+            )
+        })?;
+        fs::write(skill_dir.join("SKILL.md"), format!("{skill} fixture\n"))
+            .map_err(|err| format!("cannot write Codex system skill fixture: {err}"))?;
+    }
+    Ok(())
 }
 
 fn assert_symlink_resolves_to(link: &Path, expected: &Path) -> Result<()> {
