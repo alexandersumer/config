@@ -12,9 +12,21 @@ You do not strengthen tests by guessing from the patch or by only polishing test
 
 2. **Read production code first, then discover the test seam.** Identify the changed observable behaviors, contracts, public entry points, and failure paths before editing. Read nearby tests if they exist; if they do not, inspect sibling packages/modules, build config, test naming patterns, fixtures, and documented commands until you can name the correct harness and file location for a new test. Treat "no nearby tests" as a reason to add the first focused regression test when there is changed behavior, not as a reason to stop. Find every `CLAUDE.md`, `AGENTS.md`, or `REVIEW.md` whose directory is an ancestor of any changed production or test file and include those conventions in reviewer prompts.
 
-3. **Dispatch four fresh-context test reviewers in parallel.** Each reviewer gets this prompt verbatim, with `{ROLE}`, `{DIFF}`, `{PRODUCTION_CONTEXT}`, `{TEST_CONTEXT}`, `{TEST_HARNESS}`, and `{CONVENTIONS}` filled in. No session context — only what you paste:
+3. **Dispatch four fresh-context test reviewers in parallel.** Before dispatch, confirm `{DIFF}` contains non-empty pasted diff text or focused excerpts, not a path, filename, or summary. Each reviewer gets this prompt verbatim, with `{ROLE}`, `{DIFF}`, `{PRODUCTION_CONTEXT}`, `{TEST_CONTEXT}`, `{TEST_HARNESS}`, and `{CONVENTIONS}` filled in. No session context — only what you paste:
 
-   > You are reviewing tests as **{ROLE}**. Diff: {DIFF}. Production context: {PRODUCTION_CONTEXT}. Existing test context, if any: {TEST_CONTEXT}. Test harness and likely new-test locations: {TEST_HARNESS}. Conventions: {CONVENTIONS}. Return candidate test improvements with file/test location or new test file location, the realistic bug each would catch, and why existing tests miss it or why no existing test covers the behavior. One issue = one missing or weak regression signal. If there are no tests, propose the smallest high-signal public-behavior test instead of saying there are no improvements. Skip coverage theater, style, private implementation details, and mock-call-order assertions unless the public contract is the call.
+   > You are reviewing tests as **{ROLE}**. Diff: {DIFF}. Production context: {PRODUCTION_CONTEXT}. Existing test context, if any: {TEST_CONTEXT}. Test harness and likely new-test locations: {TEST_HARNESS}. Conventions: {CONVENTIONS}. One issue = one missing or weak regression signal. If there are no tests, propose the smallest high-signal public-behavior test instead of saying there are no improvements. Skip coverage theater, style, private implementation details, and mock-call-order assertions unless the public contract is the call. Return exactly one of:
+   >
+   > CANDIDATES:
+   > - severity: <Critical | High | Medium | Low>
+   >   path: <test file path or new test file location>
+   >   line: <line or unknown>
+   >   claim: <missing or weak regression signal>
+   >   evidence: <realistic bug, public path, and why existing tests miss it>
+   >   suggested_fix: <minimal test improvement>
+   >
+   > NO_FINDINGS
+   > Reviewed: <files/scope>
+   > Reason: <one sentence>
 
    Roles:
    - **Behavior coverage** — changed public behavior or contract not exercised through a real entry point
@@ -22,17 +34,19 @@ You do not strengthen tests by guessing from the patch or by only polishing test
    - **Assertion strength** — weak assertions, snapshots/golden files that hide the important outcome, tests that would pass with swapped arguments or wrong branches
    - **Test integration and maintainability** — over-mocking, brittle implementation-detail coupling, missing fixture realism, unclear test names that obscure the regression
 
-4. **Validate every candidate.** Use one fresh Task subagent per candidate test improvement. Each validator gets this prompt verbatim, with `{ISSUE}`, `{FILES}`, `{TEST_HARNESS}`, and `{CONVENTIONS}` filled in:
+4. **Validate reviewer output before candidate validation.** A reviewer response is valid only if it contains either `CANDIDATES:` or `NO_FINDINGS`. Empty, whitespace-only, truncated, or otherwise unstructured output is invalid. If any reviewer output is invalid, retry that reviewer once with a smaller pasted diff/context packet. If it is still invalid, stop with `Review inconclusive`. Never treat invalid output as no findings.
 
-   > Issue: {ISSUE}. Relevant production and test files in full or focused excerpts: {FILES}. Test harness and candidate file location: {TEST_HARNESS}. Conventions: {CONVENTIONS}. Confirm or refute. State concrete evidence: changed behavior, realistic regression, existing test gap or absence, public path the new or changed test should exercise, and why this is the minimal maintainable test location. Score 0–100; anything that does not catch a named realistic bug scores under 80.
+5. **Validate every candidate.** Use one fresh Task subagent per candidate test improvement. Each validator gets this prompt verbatim, with `{ISSUE}`, `{FILES}`, `{TEST_HARNESS}`, and `{CONVENTIONS}` filled in:
 
-   Drop every candidate below 80.
+   > Issue: {ISSUE}. Relevant production and test files in full or focused excerpts: {FILES}. Test harness and candidate file location: {TEST_HARNESS}. Conventions: {CONVENTIONS}. Confirm or refute. Return `VALIDATED:` with concrete evidence: changed behavior, realistic regression, existing test gap or absence, public path the new or changed test should exercise, why this is the minimal maintainable test location, and score 0–100. Anything that does not catch a named realistic bug scores under 80.
 
-5. **Implement only validated improvements.** Prefer public behavior over private fields or mock call order. When tests exist, strengthen or extend them at the narrowest useful level. When no suitable test exists, create the smallest idiomatic test file in the discovered harness that exercises the changed public path end-to-end enough to fail for the named regression. Replace weak assertions with exact observable outcomes. Add edge/failure cases only when tied to real changed paths. Reject tests that only prove mocks, test-only production APIs, or implementation details. If a mock becomes more complex than the behavior, prefer a public seam or integration path. Skip trivial getters, generated code, framework boilerplate, style conventions, and broad coverage goals.
+   A validator response is invalid if it is empty, whitespace-only, truncated, or missing `VALIDATED:` with a score and evidence. Retry invalid validator output once with smaller focused production/test excerpts. If it is still invalid, stop with `Review inconclusive`. Drop every candidate below 80.
 
-6. **Run checks.** Run the targeted tests that prove each improvement, then the broader relevant check when available. If no check applies, say why.
+6. **Implement only validated improvements.** Prefer public behavior over private fields or mock call order. When tests exist, strengthen or extend them at the narrowest useful level. When no suitable test exists, create the smallest idiomatic test file in the discovered harness that exercises the changed public path end-to-end enough to fail for the named regression. Replace weak assertions with exact observable outcomes. Add edge/failure cases only when tied to real changed paths. Reject tests that only prove mocks, test-only production APIs, or implementation details. If a mock becomes more complex than the behavior, prefer a public seam or integration path. Skip trivial getters, generated code, framework boilerplate, style conventions, and broad coverage goals.
 
-7. **Report.** For each touched test, output:
+7. **Run checks.** Run the targeted tests that prove each improvement, then the broader relevant check when available. If no check applies, say why.
+
+8. **Report.** If any reviewer or validator returned invalid output after retry, output `Review inconclusive` and the failed role. For each touched test, output:
 
    `<file>::<test_name> — catches <named bug> via <public path> — <command> -> <result>`
 

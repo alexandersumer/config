@@ -12,9 +12,21 @@ You do not review the code directly. Subagents do the reviewing in fresh context
 
 2. **Read conventions yourself.** Find every `CLAUDE.md`, `AGENTS.md`, or `REVIEW.md` whose directory is an ancestor of any changed file. Read them and paste the relevant convention text into reviewer prompts.
 
-3. **Dispatch four fresh-context reviewers in parallel.** Each reviewer gets this prompt verbatim, with `{ROLE}`, `{DIFF}`, and `{CONVENTIONS}` filled in. No session context — only what you paste:
+3. **Dispatch four fresh-context reviewers in parallel.** Before dispatch, confirm `{DIFF}` contains non-empty pasted diff text or focused excerpts, not a path, filename, or summary. Each reviewer gets this prompt verbatim, with `{ROLE}`, `{DIFF}`, and `{CONVENTIONS}` filled in. No session context — only what you paste:
 
-   > You are reviewing a code change as **{ROLE}**. Diff: {DIFF}. Conventions: {CONVENTIONS}. Return candidate issues with `file:line`, severity, and a one-paragraph rationale grounded in the diff or files you read. One issue = one root cause. Skip nitpicks, style, "consider also". If it is not a real defect or risk, drop it.
+   > You are reviewing a code change as **{ROLE}**. Diff: {DIFF}. Conventions: {CONVENTIONS}. One issue = one root cause. Skip nitpicks, style, "consider also". If it is not a real defect or risk, drop it. Return exactly one of:
+   >
+   > CANDIDATES:
+   > - severity: <Critical | High | Medium | Low>
+   >   path: <file path>
+   >   line: <line or unknown>
+   >   claim: <what is wrong>
+   >   evidence: <specific code, behavior, rule, or failure path>
+   >   suggested_fix: <minimal fix>
+   >
+   > NO_FINDINGS
+   > Reviewed: <files/scope>
+   > Reason: <one sentence>
 
    Roles:
    - **Correctness** — logic errors, wrong returns, violated contracts
@@ -22,12 +34,14 @@ You do not review the code directly. Subagents do the reviewing in fresh context
    - **Security** — injection, auth, secrets, unsafe deserialization, missing validation
    - **Conventions** — rules scoped to changed files; skip what a linter catches
 
-4. **Validate every candidate.** Use one fresh Task subagent per candidate issue. Each validator gets this prompt verbatim, with `{ISSUE}`, `{FILES}`, and `{CONVENTIONS}` filled in:
+4. **Validate reviewer output before candidate validation.** A reviewer response is valid only if it contains either `CANDIDATES:` or `NO_FINDINGS`. Empty, whitespace-only, truncated, or otherwise unstructured output is invalid. If any reviewer output is invalid, retry that reviewer once with a smaller pasted diff/context packet. If it is still invalid, stop with `Review inconclusive`. Never treat invalid output as no findings.
 
-   > Issue: {ISSUE}. Relevant files in full: {FILES}. Conventions: {CONVENTIONS}. Confirm or refute. State concrete evidence — triggering input, line that executes wrong, rule violated. Score 0–100; anything you cannot demonstrate concretely scores under 80.
+5. **Validate every candidate.** Use one fresh Task subagent per candidate issue. Each validator gets this prompt verbatim, with `{ISSUE}`, `{FILES}`, and `{CONVENTIONS}` filled in:
 
-   Drop every candidate below 80.
+   > Issue: {ISSUE}. Relevant files in full: {FILES}. Conventions: {CONVENTIONS}. Confirm or refute. Return `VALIDATED:` with concrete evidence — triggering input, line that executes wrong, rule violated — and score 0–100. Anything you cannot demonstrate concretely scores under 80.
 
-5. **Report.** Dedupe by root cause, then rank Critical, High, Medium, Low. For each issue, include severity, `path:line`, what is wrong, why it matters, and the fix — one sentence each. End with **Ready to merge**, **Needs attention**, or **Needs work**. If zero candidates survive validation, say so in one line.
+   A validator response is invalid if it is empty, whitespace-only, truncated, or missing `VALIDATED:` with a score and evidence. Retry invalid validator output once with smaller focused file excerpts. If it is still invalid, stop with `Review inconclusive`. Drop every candidate below 80.
+
+6. **Report.** Dedupe by root cause, then rank Critical, High, Medium, Low. For each issue, include severity, `path:line`, what is wrong, why it matters, and the fix — one sentence each. End with **Ready to merge** only if every reviewer returned valid output and no validated findings remain, **Review inconclusive** if any reviewer or validator returned invalid output after retry, or **Needs attention**/**Needs work** if validated findings remain. If zero candidates survive validation, say so in one line.
 
 Never approve, never merge, never invent line numbers. Subagents see only what you paste.

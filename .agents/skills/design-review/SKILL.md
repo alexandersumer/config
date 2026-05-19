@@ -12,9 +12,20 @@ You do not rely on the author's framing alone. Fresh-context subagents challenge
 
 2. **Ground the review yourself.** Read the design/artifact/diff plus enough surrounding code to name the real domain vocabulary, ownership boundaries, callers, data flow, invariants, persistence/API seams, rollout path, tests, and local conventions. Find every `CLAUDE.md`, `AGENTS.md`, or `REVIEW.md` whose directory is relevant to the scoped files and include those conventions in reviewer prompts.
 
-3. **Dispatch four fresh-context design reviewers in parallel.** Each reviewer gets this prompt verbatim, with `{ROLE}`, `{DESIGN}`, `{CODE_CONTEXT}`, and `{CONVENTIONS}` filled in. No session context — only what you paste:
+3. **Dispatch four fresh-context design reviewers in parallel.** Before dispatch, confirm `{DESIGN}` and `{CODE_CONTEXT}` contain non-empty pasted artifact/code text or focused excerpts, not just paths, filenames, or summaries. Each reviewer gets this prompt verbatim, with `{ROLE}`, `{DESIGN}`, `{CODE_CONTEXT}`, and `{CONVENTIONS}` filled in. No session context — only what you paste:
 
-   > You are reviewing a software design as **{ROLE}**. Design/artifact/diff: {DESIGN}. Relevant code context: {CODE_CONTEXT}. Conventions: {CONVENTIONS}. Return candidate design issues or explicitly say no issue. One issue = one root cause. Ground every issue in code, artifact text, or a concrete future change path. Skip taste, style, generic best practices, praise, and "consider also" advice.
+   > You are reviewing a software design as **{ROLE}**. Design/artifact/diff: {DESIGN}. Relevant code context: {CODE_CONTEXT}. Conventions: {CONVENTIONS}. One issue = one root cause. Ground every issue in code, artifact text, or a concrete future change path. Skip taste, style, generic best practices, praise, and "consider also" advice. Return exactly one of:
+   >
+   > CANDIDATES:
+   > - severity: <Critical | High | Medium | Low>
+   >   location: <file path, line, or artifact section>
+   >   claim: <architectural issue>
+   >   evidence: <boundary, invariant, compatibility, or change-path evidence>
+   >   suggested_fix: <minimal design move>
+   >
+   > NO_FINDINGS
+   > Reviewed: <files/scope>
+   > Reason: <one sentence>
 
    Roles:
    - **Boundaries and ownership** — wrong module/API seams, leaked decisions, change amplification, misplaced responsibility
@@ -22,12 +33,14 @@ You do not rely on the author's framing alone. Fresh-context subagents challenge
    - **Evolution and operability** — migration/rollout/rollback risk, observability gaps, concurrency/idempotency, persistence/API compatibility, future change cost
    - **Simplicity and abstraction** — shallow wrappers, pass-through APIs, generic non-abstractions, configuration sprawl, temporal decomposition, unnecessary layers
 
-4. **Validate every candidate.** Use one fresh Task subagent per candidate issue. Each validator gets this prompt verbatim, with `{ISSUE}`, `{FILES_OR_ARTIFACTS}`, and `{CONVENTIONS}` filled in:
+4. **Validate reviewer output before candidate validation.** A reviewer response is valid only if it contains either `CANDIDATES:` or `NO_FINDINGS`. Empty, whitespace-only, truncated, or otherwise unstructured output is invalid. If any reviewer output is invalid, retry that reviewer once with a smaller pasted design/code/context packet. If it is still invalid, stop with `Review inconclusive`. Never treat invalid output as no findings.
 
-   > Issue: {ISSUE}. Relevant files/artifacts in full or as focused excerpts: {FILES_OR_ARTIFACTS}. Conventions: {CONVENTIONS}. Confirm or refute. State concrete evidence: boundary crossed, invariant weakened, change path made expensive, compatibility risk introduced, or convention violated. Score 0–100; anything you cannot demonstrate concretely scores under 70.
+5. **Validate every candidate.** Use one fresh Task subagent per candidate issue. Each validator gets this prompt verbatim, with `{ISSUE}`, `{FILES_OR_ARTIFACTS}`, and `{CONVENTIONS}` filled in:
 
-   Drop every candidate below 70. Do not keep a finding merely because it sounds architecturally sophisticated.
+   > Issue: {ISSUE}. Relevant files/artifacts in full or as focused excerpts: {FILES_OR_ARTIFACTS}. Conventions: {CONVENTIONS}. Confirm or refute. Return `VALIDATED:` with concrete evidence: boundary crossed, invariant weakened, change path made expensive, compatibility risk introduced, or convention violated, and score 0–100. Anything you cannot demonstrate concretely scores under 70.
 
-5. **Report.** Dedupe by root cause and rank Critical, High, Medium, Low. For each surviving issue, include severity, location/artifact section if available, architectural judgment, evidence, design move, and accepted trade-off — one concise paragraph each. If the cheapest good design is no change, say so. If zero candidates survive validation, say in one line that no material design issue was found and name the review surface.
+   A validator response is invalid if it is empty, whitespace-only, truncated, or missing `VALIDATED:` with a score and evidence. Retry invalid validator output once with smaller focused files/artifacts. If it is still invalid, stop with `Review inconclusive`. Drop every candidate below 70. Do not keep a finding merely because it sounds architecturally sophisticated.
+
+6. **Report.** Dedupe by root cause and rank Critical, High, Medium, Low. For each surviving issue, include severity, location/artifact section if available, architectural judgment, evidence, design move, and accepted trade-off — one concise paragraph each. If any reviewer or validator returned invalid output after retry, end with `Review inconclusive` and the failed role. If the cheapest good design is no change, say so. If zero candidates survive validation, say in one line that no material design issue was found and name the review surface.
 
 Think like a long-term codebase steward, not a style reviewer. Prefer designs that reduce total complexity: deep modules, hidden decisions, clear ownership, preserved invariants, and fewer places to edit for one behavior change. Never invent files, line numbers, owners, milestones, or risks. Never approve or merge.
