@@ -22,7 +22,7 @@ Command roles:
 - `check`: non-mutating verification for formatting, build, generated registry, validation, and regression tests.
 - `prepare`: intentional config-local mutation; repairs `rovodev/prompts`, regenerates `rovodev/prompts.yml`, then checks.
 - `pre-commit`: safe hook entrypoint; runs `prepare`, then fails if config-local generated files are left unstaged.
-- `install`: intentional home-directory mutation for `~/.agents` and `~/.rovodev` symlinks.
+- `install`: intentional home-directory mutation for `~/.agents`, `~/.rovodev`, and custom `~/.codex/skills` symlinks.
 - `install-git-hooks`: intentional local Git config mutation for `core.hooksPath`.
 
 ## Git hooks
@@ -64,8 +64,12 @@ Config-internal preparation and home install behavior must also be verified with
 cargo run -- prepare
 
 tmp_home="$(mktemp -d)"
+for skill in skill-creator skill-installer openai-docs; do
+  mkdir -p "$tmp_home/.codex/skills/.system/$skill"
+  printf 'fixture\n' > "$tmp_home/.codex/skills/.system/$skill/SKILL.md"
+done
 cargo run -- install --home "$tmp_home"
-find "$tmp_home" -maxdepth 2 -type l -exec ls -la {} \;
+find "$tmp_home" -maxdepth 4 -type l -exec ls -la {} \;
 rm -rf "$tmp_home"
 ```
 
@@ -76,6 +80,9 @@ Expected symlink behavior:
 - `~/.rovodev/skills` links to this config checkout's `.agents/skills` directory.
 - `~/.rovodev/prompts` links to this config checkout's `.agents/skills` directory for legacy prompt compatibility.
 - `~/.rovodev/prompts.yml` links to this config checkout's `rovodev/prompts.yml`.
+- `~/.codex/skills/.system` remains a Codex-owned directory with Codex system skills.
+- Each custom top-level `.agents/skills/<name>/SKILL.md` directory links into `~/.codex/skills/<name>`.
+- Hidden skill directories and directories without `SKILL.md` are not linked into Codex.
 - Existing non-empty files/directories or unrelated symlinks are not replaced automatically.
 
 ## Executable-code check
