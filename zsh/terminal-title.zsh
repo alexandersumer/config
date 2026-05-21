@@ -14,21 +14,49 @@ __terminal_title_sanitize() {
   print -r -- "$title"
 }
 
+__terminal_title_truncate_path() {
+  local path="$1"
+  local max_segments="${TERMINAL_TITLE_MAX_PATH_SEGMENTS:-2}"
+
+  [[ "$max_segments" == <-> ]] || max_segments=2
+  if (( max_segments > 0 )); then
+    local -a segments
+    segments=(${(s:/:)path})
+    if (( ${#segments} > max_segments )); then
+      path="…/${(j:/:)segments[-$max_segments,-1]}"
+    fi
+  fi
+
+  print -r -- "$path"
+}
+
 __terminal_title_current() {
-  local git_root title
+  local git_root repo relative title
 
   if command -v git >/dev/null 2>&1; then
     git_root=$(command git rev-parse --show-toplevel 2>/dev/null)
     if [[ -n "$git_root" ]]; then
-      title="${git_root:t}"
+      repo="${git_root:t}"
+      relative=$(command git rev-parse --show-prefix 2>/dev/null)
+      relative="${relative%/}"
+      if [[ -n "$relative" ]]; then
+        title="$repo/$( __terminal_title_truncate_path "$relative" )"
+      else
+        title="$repo"
+      fi
     fi
   fi
 
   if [[ -z "$title" ]]; then
     if [[ -n "${PWD:-}" ]]; then
-      title="${PWD:t}"
-      [[ -n "$title" ]] || title="/"
-      [[ "$PWD" == "$HOME" ]] && title="~"
+      if [[ "$PWD" == "$HOME" ]]; then
+        title="~"
+      elif [[ "$PWD" == "$HOME"/* ]]; then
+        title="~/$( __terminal_title_truncate_path "${PWD#$HOME/}" )"
+      else
+        title="${PWD:t}"
+        [[ -n "$title" ]] || title="/"
+      fi
     else
       title="shell"
     fi

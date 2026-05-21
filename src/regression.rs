@@ -38,6 +38,7 @@ pub(crate) fn run_regression_tests() -> Result<()> {
     test_link_safety()?;
     test_command_failures()?;
     test_git_fetch_ref_cleanup()?;
+    test_terminal_title_config_and_format()?;
     Ok(())
 }
 
@@ -505,6 +506,47 @@ debug refs after cleanup:
             "fake fetch should have succeeded on second attempt, got {attempts:?}"
         ));
     }
+    Ok(())
+}
+
+fn test_terminal_title_config_and_format() -> Result<()> {
+    let config_root = std::env::current_dir()
+        .map_err(|err| format!("cannot determine config root for terminal title test: {err}"))?;
+    let ghostty_config = fs::read_to_string(config_root.join("ghostty/config"))
+        .map_err(|err| format!("cannot read Ghostty config for terminal title test: {err}"))?;
+    if !ghostty_config
+        .lines()
+        .any(|line| line.trim() == "shell-integration-features = no-title")
+    {
+        return Err("Ghostty command-title integration should be disabled".to_string());
+    }
+
+    let work = tempfile::Builder::new()
+        .prefix("tmp_terminal_title_repo_")
+        .tempdir()
+        .map_err(|err| format!("cannot create terminal title temp repo: {err}"))?;
+    run_command(work.path(), "git", &["init", "--initial-branch=main"])?;
+    fs::create_dir_all(work.path().join("packages/service/api"))
+        .map_err(|err| format!("cannot create terminal title nested fixture: {err}"))?;
+
+    let script = format!(
+        "source {}/zsh/terminal-title.zsh; cd packages/service/api; __terminal_title_current",
+        config_root.display()
+    );
+    let actual = run_command_output(work.path(), "zsh", &["-fc", &script])?;
+    let repo = work
+        .path()
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "terminal title temp repo has no file name".to_string())?;
+    let expected = format!("{repo}/…/service/api\n");
+
+    if actual != expected {
+        return Err(format!(
+            "terminal title should include repo and compact relative cwd; got {actual:?}, expected {expected:?}"
+        ));
+    }
+
     Ok(())
 }
 
