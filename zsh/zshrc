@@ -98,6 +98,13 @@ else
   printf '\033[33mwarning: git helper functions file missing: %s\033[0m\n' "$HOME/.zsh/git-functions.zsh" >&2
 fi
 
+# Terminal tab titles
+if [[ -r "$HOME/.zsh/terminal-title.zsh" ]]; then
+  source "$HOME/.zsh/terminal-title.zsh"
+else
+  printf '\033[33mwarning: terminal title functions file missing: %s\033[0m\n' "$HOME/.zsh/terminal-title.zsh" >&2
+fi
+
 ########################################
 # Claude Code (auto-update)
 ########################################
