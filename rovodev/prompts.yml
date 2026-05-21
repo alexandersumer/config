@@ -227,3 +227,6 @@ prompts:
     description: Optional behavior, API, feature, package, or test lane to cover with a true end-to-end test. Leave empty to infer from conversation context.
     type: string
     required: false
+- name: understand-system
+  description: Understand one or more local codebases as a system. Searches ~/oss, ~/atlassian, and ~/src, then maps architecture, relationships, real flows, contracts, local runtime/debug context, validation seams, and evidence gaps.
+  content_file: prompts/understand-system/SKILL.md
