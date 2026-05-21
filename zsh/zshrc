@@ -231,3 +231,8 @@ fi
 
 # bun completions
 [ -s "/Users/asumer/.bun/_bun" ] && source "/Users/asumer/.bun/_bun"
+
+# alta-3 Node 24.15.0 local runtime alignment
+if [ -d /opt/homebrew/opt/node@24/bin ]; then
+  export PATH="/opt/homebrew/opt/node@24/bin:$PATH"
+fi

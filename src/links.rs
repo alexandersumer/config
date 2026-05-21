@@ -29,6 +29,12 @@ pub(crate) fn link_path(
     let source_resolved = source
         .canonicalize()
         .map_err(|err| format!("{}: cannot resolve source: {err}", source.display()))?;
+    if let Ok(target_resolved) = target.canonicalize() {
+        if normalize_path(&target_resolved) == normalize_path(&source_resolved) {
+            println!("{label} already resolves to managed config.");
+            return Ok(());
+        }
+    }
 
     match fs::symlink_metadata(target) {
         Ok(metadata) if metadata.file_type().is_symlink() => {
@@ -85,9 +91,33 @@ pub(crate) fn link_path(
                 ));
             }
         }
+        Ok(metadata) if metadata.is_file() && source_resolved.is_file() => {
+            let source_bytes = fs::read(&source_resolved).map_err(|err| {
+                format!(
+                    "{}: cannot read source file: {err}",
+                    source_resolved.display()
+                )
+            })?;
+            let target_bytes = fs::read(target)
+                .map_err(|err| format!("{}: cannot read existing file: {err}", target.display()))?;
+            if source_bytes != target_bytes {
+                return Err(format!(
+                    "Error: {} already exists with different contents.\nMove the intended contents into the repo first, then re-run this command.",
+                    target.display()
+                ));
+            }
+            fs::remove_file(target).map_err(|err| {
+                format!("{}: cannot remove matching file: {err}", target.display())
+            })?;
+            create_symlink(source, target, config_root)?;
+            println!(
+                "Replaced matching {label} file with symlink -> {}",
+                source.display()
+            );
+        }
         Ok(_) => {
             return Err(format!(
-                "Error: {} already exists and is not an empty directory.\nBack it up and remove it first, then re-run this command.",
+                "Error: {} already exists and is not an empty directory or matching file.\nBack it up and remove it first, then re-run this command.",
                 target.display()
             ));
         }

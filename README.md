@@ -77,6 +77,9 @@ Expected symlink behavior:
 
 - `rovodev/prompts` remains a symlink to `../.agents/skills`.
 - `~/.agents` links to this config checkout's `.agents` directory.
+- `~/.zsh` links to this config checkout's `zsh` directory.
+- `~/.zshrc` links to this config checkout's `zsh/zshrc` file.
+- `~/.config/ghostty/config` links to this config checkout's `ghostty/config` file.
 - `~/.rovodev/skills` links to this config checkout's `.agents/skills` directory.
 - `~/.rovodev/prompts` links to this config checkout's `.agents/skills` directory for legacy prompt compatibility.
 - `~/.rovodev/prompts.yml` links to this config checkout's `rovodev/prompts.yml`.

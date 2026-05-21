@@ -225,6 +225,15 @@ pub(crate) fn test_install_command() -> Result<()> {
         &home.path().join(".codex/skills/describe-branch"),
         &fixture.path().join(".agents/skills/describe-branch"),
     )?;
+    assert_symlink_resolves_to(
+        &home.path().join(".zshrc"),
+        &fixture.path().join("zsh/zshrc"),
+    )?;
+    assert_symlink_resolves_to(&home.path().join(".zsh"), &fixture.path().join("zsh"))?;
+    assert_symlink_resolves_to(
+        &home.path().join(".config/ghostty/config"),
+        &fixture.path().join("ghostty/config"),
+    )?;
     if home.path().join(".codex/skills/.system").is_symlink() {
         return Err("install replaced Codex-owned .system with a symlink".to_string());
     }
@@ -352,6 +361,56 @@ pub(crate) fn test_link_safety() -> Result<()> {
     }
     if !home.path().join(".agents/keep").is_file() {
         return Err("install removed data from non-empty home .agents directory".to_string());
+    }
+
+    let matching_file_fixture = copy_fixture()?;
+    let matching_file_home = tempfile::Builder::new()
+        .prefix("tmp_config_install_matching_file_")
+        .tempdir()
+        .map_err(|err| format!("cannot create matching file home: {err}"))?;
+    create_codex_system_skills(matching_file_home.path())?;
+    fs::copy(
+        matching_file_fixture.path().join("zsh/zshrc"),
+        matching_file_home.path().join(".zshrc"),
+    )
+    .map_err(|err| format!("cannot copy matching zshrc fixture: {err}"))?;
+    install_command(&[
+        "--config-root".to_string(),
+        matching_file_fixture.path().display().to_string(),
+        "--home".to_string(),
+        matching_file_home.path().display().to_string(),
+    ])?;
+    assert_symlink_resolves_to(
+        &matching_file_home.path().join(".zshrc"),
+        &matching_file_fixture.path().join("zsh/zshrc"),
+    )?;
+
+    let divergent_file_fixture = copy_fixture()?;
+    let divergent_file_home = tempfile::Builder::new()
+        .prefix("tmp_config_install_divergent_file_")
+        .tempdir()
+        .map_err(|err| format!("cannot create divergent file home: {err}"))?;
+    create_codex_system_skills(divergent_file_home.path())?;
+    fs::write(
+        divergent_file_home.path().join(".zshrc"),
+        "do not replace
+",
+    )
+    .map_err(|err| format!("cannot write divergent zshrc fixture: {err}"))?;
+    let divergent_file_error = install_command(&[
+        "--config-root".to_string(),
+        divergent_file_fixture.path().display().to_string(),
+        "--home".to_string(),
+        divergent_file_home.path().display().to_string(),
+    ])
+    .expect_err("install should reject divergent home config files");
+    if !divergent_file_error.contains("different contents") {
+        return Err(format!(
+            "unexpected divergent file error: {divergent_file_error}"
+        ));
+    }
+    if !divergent_file_home.path().join(".zshrc").is_file() {
+        return Err("install removed divergent home config file".to_string());
     }
     Ok(())
 }
@@ -602,6 +661,11 @@ fn copy_fixture() -> Result<TempDir> {
     copy_tree(
         &config_root.join("rovodev"),
         &temp_dir.path().join("rovodev"),
+    )?;
+    copy_tree(&config_root.join("zsh"), &temp_dir.path().join("zsh"))?;
+    copy_tree(
+        &config_root.join("ghostty"),
+        &temp_dir.path().join("ghostty"),
     )?;
     Ok(temp_dir)
 }

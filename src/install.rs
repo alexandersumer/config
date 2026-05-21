@@ -14,14 +14,24 @@ pub(crate) fn install_command(args: &[String]) -> Result<()> {
     let rovodev_dir = config_root.join("rovodev");
     let global_agents_dir = home_dir.join(".agents");
     let global_dir = home_dir.join(".rovodev");
+    let zsh_dir = config_root.join("zsh");
+    let ghostty_dir = config_root.join("ghostty");
 
     require_dir(&agents_dir, "config agents directory")?;
     require_dir(&skills_dir, "config skills directory")?;
+    require_dir(&zsh_dir, "config zsh directory")?;
+    require_dir(&ghostty_dir, "config Ghostty directory")?;
     let codex_skill_links = prepare_codex_skill_links(&skills_dir, &home_dir)?;
     fs::create_dir_all(&global_dir).map_err(|err| {
         format!(
             "{}: cannot create Rovo Dev config directory: {err}",
             global_dir.display()
+        )
+    })?;
+    fs::create_dir_all(home_dir.join(".config/ghostty")).map_err(|err| {
+        format!(
+            "{}: cannot create Ghostty config directory: {err}",
+            home_dir.join(".config/ghostty").display()
         )
     })?;
 
@@ -50,6 +60,27 @@ pub(crate) fn install_command(args: &[String]) -> Result<()> {
         &skills_dir,
         &global_dir.join("prompts"),
         "prompt adapter",
+        &config_root,
+        &skills_dir,
+    )?;
+    link_path(
+        &zsh_dir,
+        &home_dir.join(".zsh"),
+        "zsh config directory",
+        &config_root,
+        &skills_dir,
+    )?;
+    link_path(
+        &zsh_dir.join("zshrc"),
+        &home_dir.join(".zshrc"),
+        "zshrc",
+        &config_root,
+        &skills_dir,
+    )?;
+    link_path(
+        &ghostty_dir.join("config"),
+        &home_dir.join(".config/ghostty/config"),
+        "Ghostty config",
         &config_root,
         &skills_dir,
     )?;
