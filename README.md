@@ -23,7 +23,7 @@ Command roles:
 - `check`: non-mutating verification for formatting, build, generated registry, validation, and regression tests.
 - `prepare`: intentional config-local mutation; repairs `rovodev/prompts`, regenerates `rovodev/prompts.yml`, then checks.
 - `pre-commit`: safe hook entrypoint; runs `prepare`, then fails if config-local generated files are left unstaged.
-- `install`: intentional home-directory mutation for `~/.agents`, `~/.rovodev`, and custom `~/.codex/skills` symlinks.
+- `install`: intentional home-directory mutation for `~/.agents`, `~/.rovodev`, custom `~/.codex/skills` symlinks, and `~/.local/bin/config-tools`.
 - `title-protect`: run an interactive command behind a PTY while filtering terminal-title escape sequences.
 - `install-git-hooks`: intentional local Git config mutation for `core.hooksPath`.
 
@@ -82,6 +82,7 @@ Expected symlink behavior:
 - `~/.zsh` links to this config checkout's `zsh` directory.
 - `~/.zshrc` links to this config checkout's `zsh/zshrc` file.
 - `~/.config/ghostty/config` links to this config checkout's `ghostty/config` file.
+- `~/.local/bin/config-tools` is a runnable copy of the config helper used by shell wrappers.
 - Agent commands such as `axiom` run through `title-protect` so foreground tools cannot overwrite repo/path tab titles.
 - `~/.rovodev/skills` links to this config checkout's `.agents/skills` directory.
 - `~/.rovodev/prompts` links to this config checkout's `.agents/skills` directory for legacy prompt compatibility.
@@ -90,6 +91,23 @@ Expected symlink behavior:
 - Each custom top-level `.agents/skills/<name>/SKILL.md` directory links into `~/.codex/skills/<name>`.
 - Hidden skill directories and directories without `SKILL.md` are not linked into Codex.
 - Existing non-empty files/directories or unrelated symlinks are not replaced automatically.
+
+## Terminal titles
+
+Ghostty command-title integration is disabled so zsh owns useful workspace titles. Tabs show compact context: the repo name at a Git root, `repo/path` in Git subdirectories, `~` at home, and compact home-relative paths outside Git.
+
+Long-running agents can emit terminal title escape sequences after zsh has started them. The `axiom` wrapper runs through the installed `~/.local/bin/config-tools title-protect -- ...` PTY wrapper, which filters only OSC 0/1/2 title writes while preserving normal terminal output, color, hyperlinks, and exit status.
+
+After installing, verify manually in Ghostty:
+
+```bash
+cd ~/src/config
+# tab title should be: config
+cd zsh
+# tab title should be: config/zsh
+axiom
+# tab title should stay config/zsh, not Axiom
+```
 
 ## Executable-code check
 

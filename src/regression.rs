@@ -9,6 +9,8 @@ use serde_yaml::Value;
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs as unix_fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tempfile::TempDir;
@@ -41,6 +43,7 @@ pub(crate) fn run_regression_tests() -> Result<()> {
     test_git_fetch_ref_cleanup()?;
     test_terminal_title_config_and_format()?;
     test_terminal_title_filter()?;
+    test_title_protect_public_command()?;
     test_agent_title_protection_zsh_wiring()?;
     Ok(())
 }
@@ -237,6 +240,28 @@ pub(crate) fn test_install_command() -> Result<()> {
         &home.path().join(".config/ghostty/config"),
         &fixture.path().join("ghostty/config"),
     )?;
+    let installed_binary = home.path().join(".local/bin/config-tools");
+    if !installed_binary.is_file() {
+        return Err(format!(
+            "install should create runnable config-tools binary at {}",
+            installed_binary.display()
+        ));
+    }
+    #[cfg(unix)]
+    if fs::metadata(&installed_binary)
+        .map_err(|err| format!("cannot inspect installed config-tools binary: {err}"))?
+        .permissions()
+        .mode()
+        & 0o111
+        == 0
+    {
+        return Err("installed config-tools binary should be executable".to_string());
+    }
+    run_command(
+        home.path(),
+        installed_binary.to_string_lossy().as_ref(),
+        &["--help"],
+    )?;
     if home.path().join(".codex/skills/.system").is_symlink() {
         return Err("install replaced Codex-owned .system with a symlink".to_string());
     }
@@ -414,6 +439,40 @@ pub(crate) fn test_link_safety() -> Result<()> {
     }
     if !divergent_file_home.path().join(".zshrc").is_file() {
         return Err("install removed divergent home config file".to_string());
+    }
+
+    let binary_conflict_fixture = copy_fixture()?;
+    let binary_conflict_home = tempfile::Builder::new()
+        .prefix("tmp_config_install_binary_conflict_")
+        .tempdir()
+        .map_err(|err| format!("cannot create binary conflict home: {err}"))?;
+    create_codex_system_skills(binary_conflict_home.path())?;
+    let binary_conflict = binary_conflict_home.path().join(".local/bin/config-tools");
+    fs::create_dir_all(
+        binary_conflict
+            .parent()
+            .ok_or("binary target has no parent")?,
+    )
+    .map_err(|err| format!("cannot create binary conflict parent: {err}"))?;
+    fs::write(&binary_conflict, "do not replace")
+        .map_err(|err| format!("cannot write binary conflict fixture: {err}"))?;
+    let binary_conflict_error = install_command(&[
+        "--config-root".to_string(),
+        binary_conflict_fixture.path().display().to_string(),
+        "--home".to_string(),
+        binary_conflict_home.path().display().to_string(),
+    ])
+    .expect_err("install should reject unrelated config-tools binary target");
+    if !binary_conflict_error.contains("managed config-tools binary") {
+        return Err(format!(
+            "unexpected binary conflict error: {binary_conflict_error}"
+        ));
+    }
+    if fs::read_to_string(&binary_conflict)
+        .map_err(|err| format!("cannot read binary conflict fixture: {err}"))?
+        != "do not replace"
+    {
+        return Err("install replaced unrelated config-tools binary target".to_string());
     }
     Ok(())
 }
@@ -636,6 +695,70 @@ fn test_terminal_title_filter() -> Result<()> {
     Ok(())
 }
 
+fn test_title_protect_public_command() -> Result<()> {
+    let work = tempfile::Builder::new()
+        .prefix("tmp_title_protect_public_")
+        .tempdir()
+        .map_err(|err| format!("cannot create title-protect temp dir: {err}"))?;
+    let fake_agent = work.path().join("fake-agent");
+    fs::write(
+        &fake_agent,
+        "#!/bin/sh\nprintf 'start '\nprintf '\\033]0;Axiom\\007'\nprintf 'mid '\nprintf '\\033]2;Claude\\033\\\\'\nprintf '\\033[31mred\\033[0m '\nprintf '\\033]8;;https://example.com\\007link\\033]8;;\\007 '\nprintf 'end\\n'\nexit 23\n",
+    )
+    .map_err(|err| format!("cannot write fake title-protect agent: {err}"))?;
+    make_executable(&fake_agent)?;
+
+    let output = Command::new(std::env::current_exe().map_err(|err| {
+        format!("cannot determine current config-tools executable for title-protect test: {err}")
+    })?)
+    .arg("title-protect")
+    .arg("--")
+    .arg(&fake_agent)
+    .output()
+    .map_err(|err| format!("cannot run title-protect public command: {err}"))?;
+
+    if output.status.code() != Some(23) {
+        return Err(format!(
+            "title-protect should preserve child exit status 23; got {}\nstdout: {:?}\nstderr: {:?}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    for forbidden in [b"\x1b]0;Axiom\x07" as &[u8], b"\x1b]2;Claude\x1b\\"] {
+        if output
+            .stdout
+            .windows(forbidden.len())
+            .any(|window| window == forbidden)
+        {
+            return Err(format!(
+                "title-protect leaked terminal title sequence: {:?}",
+                String::from_utf8_lossy(forbidden)
+            ));
+        }
+    }
+    for required in [
+        b"start mid " as &[u8],
+        b"\x1b[31mred\x1b[0m",
+        b"\x1b]8;;https://example.com\x07link\x1b]8;;\x07",
+        b"end",
+    ] {
+        if !output
+            .stdout
+            .windows(required.len())
+            .any(|window| window == required)
+        {
+            return Err(format!(
+                "title-protect output missing expected bytes: {:?}\nstdout: {:?}",
+                String::from_utf8_lossy(required),
+                String::from_utf8_lossy(&output.stdout)
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 fn test_agent_title_protection_zsh_wiring() -> Result<()> {
     let zshrc = fs::read_to_string("zsh/zshrc")
         .map_err(|err| format!("cannot read zsh config for title protection test: {err}"))?;
@@ -647,9 +770,17 @@ fn test_agent_title_protection_zsh_wiring() -> Result<()> {
             "axiom should not directly alias atlas relay without title protection".to_string(),
         );
     }
+    if zshrc.contains("cargo run --quiet --manifest-path") {
+        return Err(
+            "agent title protection should use installed config-tools, not cargo run".to_string(),
+        );
+    }
     for required in [
+        "__title_protect()",
+        "${CONFIG_TOOLS:-$HOME/.local/bin/config-tools}",
+        "__protected_agent()",
         "axiom()",
-        "__title_protect atlas relay --agent axiom",
+        "__protected_agent atlas relay --agent axiom",
         "__terminal_title_set",
         "title-protect --",
     ] {
@@ -661,6 +792,29 @@ fn test_agent_title_protection_zsh_wiring() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn make_executable(path: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        let mut permissions = fs::metadata(path)
+            .map_err(|err| {
+                format!(
+                    "{}: cannot inspect executable fixture: {err}",
+                    path.display()
+                )
+            })?
+            .permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(path, permissions)
+            .map_err(|err| format!("{}: cannot mark fixture executable: {err}", path.display()))?;
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Ok(())
+    }
 }
 
 fn assert_git_ref_missing(cwd: &Path, ref_name: &str) -> Result<()> {

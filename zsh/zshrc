@@ -76,15 +76,25 @@ alias clear="echo 'The clear command is disabled.'"
 export CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1
 
 __title_protect() {
-  cargo run --quiet --manifest-path "$HOME/src/config/Cargo.toml" -- title-protect -- "$@"
+  local config_tools="${CONFIG_TOOLS:-$HOME/.local/bin/config-tools}"
+  if [[ ! -x "$config_tools" ]]; then
+    printf '\033[31mconfig-tools binary missing: %s\033[0m\n' "$config_tools" >&2
+    printf 'Run: cargo run --manifest-path "$HOME/src/config/Cargo.toml" -- install\n' >&2
+    return 127
+  fi
+  "$config_tools" title-protect -- "$@"
 }
 
-axiom() {
+__protected_agent() {
   (( $+functions[__terminal_title_set] )) && __terminal_title_set
-  __title_protect atlas relay --agent axiom "$@"
+  __title_protect "$@"
   local status=$?
   (( $+functions[__terminal_title_set] )) && __terminal_title_set
   return $status
+}
+
+axiom() {
+  __protected_agent atlas relay --agent axiom "$@"
 }
 
 # Project navigation

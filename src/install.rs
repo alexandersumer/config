@@ -85,6 +85,7 @@ pub(crate) fn install_command(args: &[String]) -> Result<()> {
         &skills_dir,
     )?;
     apply_codex_skill_links(codex_skill_links)?;
+    install_config_tools_binary(&home_dir)?;
 
     println!();
     println!(
@@ -97,7 +98,120 @@ pub(crate) fn install_command(args: &[String]) -> Result<()> {
         skills_dir.display()
     );
     println!("Run /skills to see native skills, or /prompts to use legacy prompt commands.");
+    println!(
+        "Protected agent wrappers use {}.",
+        home_dir.join(".local/bin/config-tools").display()
+    );
     Ok(())
+}
+
+fn install_config_tools_binary(home_dir: &Path) -> Result<()> {
+    let source = env::current_exe()
+        .map_err(|err| format!("cannot determine config-tools executable: {err}"))?;
+    if !source.is_file() {
+        return Err(format!(
+            "{}: config-tools executable is not a file",
+            source.display()
+        ));
+    }
+
+    let bin_dir = home_dir.join(".local/bin");
+    fs::create_dir_all(&bin_dir).map_err(|err| {
+        format!(
+            "{}: cannot create local binary directory: {err}",
+            bin_dir.display()
+        )
+    })?;
+    let target = bin_dir.join("config-tools");
+    if target
+        .canonicalize()
+        .ok()
+        .zip(source.canonicalize().ok())
+        .is_some_and(|(target, source)| target == source)
+    {
+        println!(
+            "config-tools binary already installed at {}",
+            target.display()
+        );
+        return Ok(());
+    }
+
+    verify_config_tools_binary_target(&source, &target)?;
+    fs::copy(&source, &target).map_err(|err| {
+        format!(
+            "cannot install config-tools binary from {} to {}: {err}",
+            source.display(),
+            target.display()
+        )
+    })?;
+    println!("Installed config-tools binary -> {}", target.display());
+    Ok(())
+}
+
+fn verify_config_tools_binary_target(source: &Path, target: &Path) -> Result<()> {
+    match fs::symlink_metadata(target) {
+        Ok(metadata) if metadata.is_file() => {
+            let source_bytes = fs::read(source)
+                .map_err(|err| format!("{}: cannot read current binary: {err}", source.display()))?;
+            let target_bytes = fs::read(target).map_err(|err| {
+                format!("{}: cannot read existing config-tools binary: {err}", target.display())
+            })?;
+            if target_bytes == source_bytes
+                || (is_executable_file(&metadata) && is_probably_config_tools_binary(&target_bytes))
+            {
+                Ok(())
+            } else {
+                Err(format!(
+                    "Error: {} already exists and does not look like a managed config-tools binary.\nBack it up and remove it first, then re-run this command.",
+                    target.display()
+                ))
+            }
+        }
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            let resolved = target.canonicalize().map_err(|err| {
+                format!("{}: cannot resolve existing binary symlink: {err}", target.display())
+            })?;
+            if resolved == source.canonicalize().map_err(|err| {
+                format!("{}: cannot resolve current binary: {err}", source.display())
+            })? {
+                Ok(())
+            } else {
+                Err(format!(
+                    "Error: {} is already a symlink to {}.\nBack it up and remove it first, then re-run this command.",
+                    target.display(),
+                    fs::read_link(target)
+                        .map_err(|err| format!("{}: cannot read symlink: {err}", target.display()))?
+                        .display()
+                ))
+            }
+        }
+        Ok(_) => Err(format!(
+            "Error: {} already exists and is not a config-tools binary.\nBack it up and remove it first, then re-run this command.",
+            target.display()
+        )),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(format!(
+            "{}: cannot inspect config-tools binary target: {err}",
+            target.display()
+        )),
+    }
+}
+
+#[cfg(unix)]
+fn is_executable_file(metadata: &fs::Metadata) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    metadata.permissions().mode() & 0o111 != 0
+}
+
+#[cfg(not(unix))]
+fn is_executable_file(_metadata: &fs::Metadata) -> bool {
+    true
+}
+
+fn is_probably_config_tools_binary(bytes: &[u8]) -> bool {
+    bytes
+        .windows(b"config-tools".len())
+        .any(|window| window == b"config-tools")
 }
 
 fn prepare_codex_skill_links(
