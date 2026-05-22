@@ -16,11 +16,13 @@ pub(crate) fn install_command(args: &[String]) -> Result<()> {
     let global_dir = home_dir.join(".rovodev");
     let zsh_dir = config_root.join("zsh");
     let ghostty_dir = config_root.join("ghostty");
+    let relay_dir = config_root.join("relay");
 
     require_dir(&agents_dir, "config agents directory")?;
     require_dir(&skills_dir, "config skills directory")?;
     require_dir(&zsh_dir, "config zsh directory")?;
     require_dir(&ghostty_dir, "config Ghostty directory")?;
+    require_dir(&relay_dir, "config Relay directory")?;
     let codex_skill_links = prepare_codex_skill_links(&skills_dir, &home_dir)?;
     fs::create_dir_all(&global_dir).map_err(|err| {
         format!(
@@ -32,6 +34,12 @@ pub(crate) fn install_command(args: &[String]) -> Result<()> {
         format!(
             "{}: cannot create Ghostty config directory: {err}",
             home_dir.join(".config/ghostty").display()
+        )
+    })?;
+    fs::create_dir_all(home_dir.join(".relay")).map_err(|err| {
+        format!(
+            "{}: cannot create Relay config directory: {err}",
+            home_dir.join(".relay").display()
         )
     })?;
 
@@ -84,6 +92,13 @@ pub(crate) fn install_command(args: &[String]) -> Result<()> {
         &config_root,
         &skills_dir,
     )?;
+    link_path(
+        &relay_dir.join("config.toml"),
+        &home_dir.join(".relay/config.toml"),
+        "Relay config",
+        &config_root,
+        &skills_dir,
+    )?;
     apply_codex_skill_links(codex_skill_links)?;
     install_config_tools_binary(&home_dir)?;
 
@@ -99,8 +114,8 @@ pub(crate) fn install_command(args: &[String]) -> Result<()> {
     );
     println!("Run /skills to see native skills, or /prompts to use legacy prompt commands.");
     println!(
-        "Protected agent wrappers use {}.",
-        home_dir.join(".local/bin/config-tools").display()
+        "Relay config points at {}.",
+        relay_dir.join("config.toml").display()
     );
     Ok(())
 }

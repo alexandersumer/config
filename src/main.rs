@@ -7,8 +7,6 @@ mod links;
 mod registry;
 mod regression;
 mod repair;
-mod terminal_title;
-
 fn main() -> std::process::ExitCode {
     match cli::run() {
         Ok(code) => code,

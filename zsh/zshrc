@@ -73,42 +73,7 @@ alias atlassian="cd $HOME/atlassian"
 alias vim="nvim"
 alias vi="nvim"
 alias clear="echo 'The clear command is disabled.'"
-export CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1
-
-title-protect() {
-  emulate -L zsh
-
-  local config_tools="${CONFIG_TOOLS:-$HOME/.local/bin/config-tools}"
-  if [[ ! -x "$config_tools" ]]; then
-    printf '\033[31mconfig-tools binary missing: %s\033[0m\n' "$config_tools" >&2
-    printf 'Run: cargo run --manifest-path "$HOME/src/config/Cargo.toml" -- install\n' >&2
-    return 127
-  fi
-  if (( $# == 0 )); then
-    printf 'usage: title-protect <command> [args...]\n' >&2
-    return 2
-  fi
-
-  local command_name="$1"
-  shift
-  local resolved_command="$command_name"
-  if [[ "$command_name" != */* ]]; then
-    resolved_command="$(whence -p -- "$command_name")" || {
-      printf '\033[31mcommand not found: %s\033[0m\n' "$command_name" >&2
-      return 127
-    }
-  fi
-
-  (( $+functions[__terminal_title_set] )) && __terminal_title_set
-  "$config_tools" title-protect -- "$resolved_command" "$@"
-  local exit_status=$?
-  (( $+functions[__terminal_title_set] )) && __terminal_title_set
-  return $exit_status
-}
-
-axiom() {
-  title-protect atlas relay --agent axiom "$@"
-}
+alias axiom="atlas relay --agent axiom"
 
 # Project navigation
 alias blog="cd $HOME/atlassian/alexandersumer.com"
@@ -132,14 +97,6 @@ if [[ -r "$HOME/.zsh/git-functions.zsh" ]]; then
 else
   printf '\033[33mwarning: git helper functions file missing: %s\033[0m\n' "$HOME/.zsh/git-functions.zsh" >&2
 fi
-
-# Terminal tab titles
-if [[ -r "$HOME/.zsh/terminal-title.zsh" ]]; then
-  source "$HOME/.zsh/terminal-title.zsh"
-else
-  printf '\033[33mwarning: terminal title functions file missing: %s\033[0m\n' "$HOME/.zsh/terminal-title.zsh" >&2
-fi
-
 ########################################
 # Claude Code (auto-update)
 ########################################

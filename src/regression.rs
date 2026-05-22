@@ -4,7 +4,6 @@ use crate::error::Result;
 use crate::install::install_command;
 use crate::registry::{get, load_yaml_file, string_key, validate_registry};
 use crate::repair::repair_config_command;
-use crate::terminal_title::filter_terminal_title_bytes;
 use serde_yaml::Value;
 use std::fs;
 #[cfg(unix)]
@@ -41,11 +40,8 @@ pub(crate) fn run_regression_tests() -> Result<()> {
     test_link_safety()?;
     test_command_failures()?;
     test_git_fetch_ref_cleanup()?;
-    test_terminal_title_config_and_format()?;
-    test_terminal_title_filter()?;
-    test_title_protect_public_command()?;
-    test_title_protect_zsh_wiring()?;
-    test_title_protect_zsh_behavior()?;
+    test_axiom_alias_zsh_wiring()?;
+    test_relay_axiom_config()?;
     Ok(())
 }
 
@@ -240,6 +236,10 @@ pub(crate) fn test_install_command() -> Result<()> {
     assert_symlink_resolves_to(
         &home.path().join(".config/ghostty/config"),
         &fixture.path().join("ghostty/config"),
+    )?;
+    assert_symlink_resolves_to(
+        &home.path().join(".relay/config.toml"),
+        &fixture.path().join("relay/config.toml"),
     )?;
     let installed_binary = home.path().join(".local/bin/config-tools");
     if !installed_binary.is_file() {
@@ -631,299 +631,38 @@ debug refs after cleanup:
     Ok(())
 }
 
-fn test_terminal_title_config_and_format() -> Result<()> {
-    let config_root = std::env::current_dir()
-        .map_err(|err| format!("cannot determine config root for terminal title test: {err}"))?;
-    let ghostty_config = fs::read_to_string(config_root.join("ghostty/config"))
-        .map_err(|err| format!("cannot read Ghostty config for terminal title test: {err}"))?;
-    if !ghostty_config
-        .lines()
-        .any(|line| line.trim() == "shell-integration-features = no-title")
-    {
-        return Err("Ghostty command-title integration should be disabled".to_string());
-    }
-
-    let work = tempfile::Builder::new()
-        .prefix("tmp_terminal_title_repo_")
-        .tempdir()
-        .map_err(|err| format!("cannot create terminal title temp repo: {err}"))?;
-    run_command(work.path(), "git", &["init", "--initial-branch=main"])?;
-    fs::create_dir_all(work.path().join("packages/service/api"))
-        .map_err(|err| format!("cannot create terminal title nested fixture: {err}"))?;
-
-    let script = format!(
-        "source {}/zsh/terminal-title.zsh; cd packages/service/api; __terminal_title_current",
-        config_root.display()
-    );
-    let actual = run_command_output(work.path(), "zsh", &["-fc", &script])?;
-    let repo = work
-        .path()
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| "terminal title temp repo has no file name".to_string())?;
-    let expected = format!("{repo}/…/service/api\n");
-
-    if actual != expected {
-        return Err(format!(
-            "terminal title should include repo and compact relative cwd; got {actual:?}, expected {expected:?}"
-        ));
-    }
-
-    Ok(())
-}
-
-fn test_terminal_title_filter() -> Result<()> {
-    let filtered = filter_terminal_title_bytes(&[
-        b"hello ",
-        b"\x1b]0;Axiom\x07",
-        b" colorful ",
-        b"\x1b[31mred\x1b[0m ",
-        b"\x1b]8;;https://example.com\x07link\x1b]8;;\x07 ",
-        b"\x1b]2;Claude",
-        b"\x1b\\",
-        b" done",
-    ]);
-    let expected =
-        b"hello  colorful \x1b[31mred\x1b[0m \x1b]8;;https://example.com\x07link\x1b]8;;\x07  done";
-    if filtered != expected {
-        return Err(format!(
-            "terminal title filter output mismatch: got {:?}, expected {:?}",
-            String::from_utf8_lossy(&filtered),
-            String::from_utf8_lossy(expected)
-        ));
-    }
-
-    Ok(())
-}
-
-fn test_title_protect_public_command() -> Result<()> {
-    let work = tempfile::Builder::new()
-        .prefix("tmp_title_protect_public_")
-        .tempdir()
-        .map_err(|err| format!("cannot create title-protect temp dir: {err}"))?;
-    let fake_agent = work.path().join("fake-agent");
-    fs::write(
-        &fake_agent,
-        "#!/bin/sh\nprintf 'start '\nprintf '\\033]0;Axiom\\007'\nprintf 'mid '\nprintf '\\033]2;Claude\\033\\\\'\nprintf '\\033[31mred\\033[0m '\nprintf '\\033]8;;https://example.com\\007link\\033]8;;\\007 '\nprintf 'end\\n'\nexit 23\n",
-    )
-    .map_err(|err| format!("cannot write fake title-protect agent: {err}"))?;
-    make_executable(&fake_agent)?;
-
-    let output = Command::new(std::env::current_exe().map_err(|err| {
-        format!("cannot determine current config-tools executable for title-protect test: {err}")
-    })?)
-    .arg("title-protect")
-    .arg("--")
-    .arg(&fake_agent)
-    .output()
-    .map_err(|err| format!("cannot run title-protect public command: {err}"))?;
-
-    if output.status.code() != Some(23) {
-        return Err(format!(
-            "title-protect should preserve child exit status 23; got {}\nstdout: {:?}\nstderr: {:?}",
-            output.status,
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
-    for forbidden in [b"\x1b]0;Axiom\x07" as &[u8], b"\x1b]2;Claude\x1b\\"] {
-        if output
-            .stdout
-            .windows(forbidden.len())
-            .any(|window| window == forbidden)
-        {
-            return Err(format!(
-                "title-protect leaked terminal title sequence: {:?}",
-                String::from_utf8_lossy(forbidden)
-            ));
-        }
-    }
-    for required in [
-        b"start mid " as &[u8],
-        b"\x1b[31mred\x1b[0m",
-        b"\x1b]8;;https://example.com\x07link\x1b]8;;\x07",
-        b"end",
-    ] {
-        if !output
-            .stdout
-            .windows(required.len())
-            .any(|window| window == required)
-        {
-            return Err(format!(
-                "title-protect output missing expected bytes: {:?}\nstdout: {:?}",
-                String::from_utf8_lossy(required),
-                String::from_utf8_lossy(&output.stdout)
-            ));
-        }
-    }
-
-    Ok(())
-}
-
-fn test_title_protect_zsh_wiring() -> Result<()> {
+fn test_axiom_alias_zsh_wiring() -> Result<()> {
     let zshrc = fs::read_to_string("zsh/zshrc")
-        .map_err(|err| format!("cannot read zsh config for title protection test: {err}"))?;
-    if !zshrc.contains("export CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1") {
-        return Err("Claude terminal title writes should be disabled by env".to_string());
+        .map_err(|err| format!("cannot read zsh config for axiom alias test: {err}"))?;
+    if !zshrc.contains("alias axiom=\"atlas relay --agent axiom\"") {
+        return Err("axiom should be the simple atlas relay alias".to_string());
     }
-    for forbidden in [
-        "alias axiom=\"atlas relay --agent axiom\"",
-        "__title_protect()",
-        "__protected_agent()",
-        "cargo run --quiet --manifest-path",
-    ] {
+    for forbidden in ["axiom()", "cargo run --quiet --manifest-path"] {
         if zshrc.contains(forbidden) {
             return Err(format!(
-                "zsh title protection should not contain {forbidden:?}"
+                "axiom alias wiring should not contain {forbidden:?}"
             ));
         }
     }
+
+    Ok(())
+}
+
+fn test_relay_axiom_config() -> Result<()> {
+    let relay_config = fs::read_to_string("relay/config.toml")
+        .map_err(|err| format!("cannot read Relay config: {err}"))?;
     for required in [
-        "title-protect()",
-        "emulate -L zsh",
-        "${CONFIG_TOOLS:-$HOME/.local/bin/config-tools}",
-        "usage: title-protect <command> [args...]",
-        "whence -p --",
-        "title-protect --",
-        "__terminal_title_set",
-        "axiom()",
-        "title-protect atlas relay --agent axiom",
+        "default = \"axiom\"",
+        "[agents.runners.axiom]",
+        "args = [\"alta\", \"agent\", \"run\", \"@atlassian/alta-agent-axiom-asumer\"]",
     ] {
-        if !zshrc.contains(required) {
+        if !relay_config.contains(required) {
             return Err(format!(
-                "zsh title protection wiring should contain {required:?}"
+                "Relay config should contain {required:?} so atlas relay --agent axiom works"
             ));
         }
     }
-
     Ok(())
-}
-
-fn test_title_protect_zsh_behavior() -> Result<()> {
-    let work = tempfile::Builder::new()
-        .prefix("tmp_title_protect_zsh_")
-        .tempdir()
-        .map_err(|err| format!("cannot create title-protect zsh temp dir: {err}"))?;
-    let fake_config_tools = work.path().join("config-tools");
-    let log = work.path().join("config-tools.log");
-    fs::write(
-        &fake_config_tools,
-        format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$@\" > {}\nexit 23\n",
-            shell_quote_path(&log)
-        ),
-    )
-    .map_err(|err| format!("cannot write fake config-tools: {err}"))?;
-    make_executable(&fake_config_tools)?;
-    let fake_bin = work.path().join("bin");
-    fs::create_dir(&fake_bin).map_err(|err| format!("cannot create fake bin dir: {err}"))?;
-    let fake_claude = fake_bin.join("claude");
-    fs::write(&fake_claude, "#!/bin/sh\nexit 0\n")
-        .map_err(|err| format!("cannot write fake claude: {err}"))?;
-    make_executable(&fake_claude)?;
-
-    let source = format!(
-        "source {}/zsh/zshrc",
-        std::env::current_dir()
-            .map_err(|err| {
-                format!("cannot determine current dir for zsh title-protect test: {err}")
-            })?
-            .display()
-    );
-    let script = format!("{source}; claude() {{ echo wrong; }}; title-protect claude --flag",);
-    let output = Command::new("zsh")
-        .arg("-fc")
-        .arg(&script)
-        .env("CONFIG_TOOLS", &fake_config_tools)
-        .env(
-            "PATH",
-            format!(
-                "{}:{}",
-                fake_bin.display(),
-                std::env::var("PATH").unwrap_or_default()
-            ),
-        )
-        .env("ZSH_DISABLE_COMPFIX", "true")
-        .output()
-        .map_err(|err| format!("cannot run zsh title-protect behavior test: {err}"))?;
-    if output.status.code() != Some(23) {
-        return Err(format!(
-            "title-protect zsh wrapper should return config-tools status 23; got {}\nstdout: {}\nstderr: {}",
-            output.status,
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
-    let actual_log = fs::read_to_string(&log)
-        .map_err(|err| format!("cannot read fake config-tools log: {err}"))?;
-    let expected = format!("title-protect\n--\n{}\n--flag\n", fake_claude.display());
-    if actual_log != expected {
-        return Err(format!(
-            "title-protect should call config-tools with resolved external command; got {actual_log:?}, expected {expected:?}"
-        ));
-    }
-
-    let missing = Command::new("zsh")
-        .arg("-fc")
-        .arg(format!("{source}; title-protect echo hi"))
-        .env("CONFIG_TOOLS", "/no/such/file")
-        .output()
-        .map_err(|err| format!("cannot run missing binary zsh test: {err}"))?;
-    if missing.status.code() != Some(127)
-        || !String::from_utf8_lossy(&missing.stderr).contains("config-tools binary missing")
-    {
-        return Err(format!(
-            "title-protect should fail clearly when config-tools is missing; status {} stderr {}",
-            missing.status,
-            String::from_utf8_lossy(&missing.stderr)
-        ));
-    }
-
-    let usage = Command::new("zsh")
-        .arg("-fc")
-        .arg(format!("{source}; title-protect"))
-        .env("CONFIG_TOOLS", &fake_config_tools)
-        .output()
-        .map_err(|err| format!("cannot run title-protect usage zsh test: {err}"))?;
-    if usage.status.code() != Some(2)
-        || !String::from_utf8_lossy(&usage.stderr).contains("usage: title-protect")
-    {
-        return Err(format!(
-            "title-protect should print usage with no command; status {} stderr {}",
-            usage.status,
-            String::from_utf8_lossy(&usage.stderr)
-        ));
-    }
-
-    Ok(())
-}
-
-fn shell_quote_path(path: &Path) -> String {
-    let text = path.to_string_lossy();
-    format!("'{}'", text.replace('\'', "'\\''"))
-}
-
-fn make_executable(path: &Path) -> Result<()> {
-    #[cfg(unix)]
-    {
-        let mut permissions = fs::metadata(path)
-            .map_err(|err| {
-                format!(
-                    "{}: cannot inspect executable fixture: {err}",
-                    path.display()
-                )
-            })?
-            .permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(path, permissions)
-            .map_err(|err| format!("{}: cannot mark fixture executable: {err}", path.display()))?;
-        Ok(())
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = path;
-        Ok(())
-    }
 }
 
 fn assert_git_ref_missing(cwd: &Path, ref_name: &str) -> Result<()> {
@@ -984,6 +723,7 @@ fn copy_fixture() -> Result<TempDir> {
         &config_root.join("ghostty"),
         &temp_dir.path().join("ghostty"),
     )?;
+    copy_tree(&config_root.join("relay"), &temp_dir.path().join("relay"))?;
     Ok(temp_dir)
 }
 

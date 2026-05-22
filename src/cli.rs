@@ -6,7 +6,6 @@ use crate::config_root::discover_config_root;
 use crate::error::Result;
 use crate::install::install_command;
 use crate::repair::repair_config_command;
-use crate::terminal_title::title_protect_command;
 use std::env;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -28,7 +27,6 @@ pub(crate) fn run() -> Result<ExitCode> {
         "install-git-hooks" => install_git_hooks_command(command_args).map(|()| ExitCode::SUCCESS),
         "install" => install_command(command_args).map(|()| ExitCode::SUCCESS),
         "repair-config" => repair_config_command(command_args).map(|()| ExitCode::SUCCESS),
-        "title-protect" => title_protect_command(command_args),
         "help" | "--help" | "-h" => {
             print_help();
             Ok(ExitCode::SUCCESS)
@@ -42,7 +40,7 @@ fn print_help() {
 }
 
 fn help_text() -> &'static str {
-    "Usage: config-tools <command> [options]\n\nCommands:\n  generate [--config-root PATH] [--check]\n  validate [--config-root PATH]\n  test-validate\n  check [--config-root PATH]\n  prepare [--config-root PATH]\n  pre-commit [--config-root PATH]\n  install-git-hooks [--config-root PATH]\n  repair-config [--config-root PATH]\n  install [--config-root PATH] [--home PATH]\n  title-protect -- <command> [args...]\n"
+    "Usage: config-tools <command> [options]\n\nCommands:\n  generate [--config-root PATH] [--check]\n  validate [--config-root PATH]\n  test-validate\n  check [--config-root PATH]\n  prepare [--config-root PATH]\n  pre-commit [--config-root PATH]\n  install-git-hooks [--config-root PATH]\n  repair-config [--config-root PATH]\n  install [--config-root PATH] [--home PATH]\n"
 }
 
 pub(crate) fn parse_config_args(args: &[String], allow_check: bool) -> Result<(PathBuf, bool)> {

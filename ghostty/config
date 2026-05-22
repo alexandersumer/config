@@ -21,5 +21,3 @@ working-directory = home
 window-inherit-working-directory = false
 tab-inherit-working-directory = false
 split-inherit-working-directory = false
-# zsh/terminal-title.zsh owns useful repo/directory titles.
-shell-integration-features = no-title

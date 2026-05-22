@@ -15,7 +15,6 @@ cargo run -- validate
 cargo run -- test-validate
 cargo run -- repair-config
 cargo run -- install
-cargo run -- title-protect -- <command> [args...]
 ```
 
 Command roles:
@@ -24,7 +23,6 @@ Command roles:
 - `prepare`: intentional config-local mutation; repairs `rovodev/prompts`, regenerates `rovodev/prompts.yml`, then checks.
 - `pre-commit`: safe hook entrypoint; runs `prepare`, then fails if config-local generated files are left unstaged.
 - `install`: intentional home-directory mutation for `~/.agents`, `~/.rovodev`, custom `~/.codex/skills` symlinks, and `~/.local/bin/config-tools`.
-- `title-protect`: run an interactive command behind a PTY while filtering terminal-title escape sequences.
 - `install-git-hooks`: intentional local Git config mutation for `core.hooksPath`.
 
 ## Git hooks
@@ -82,8 +80,8 @@ Expected symlink behavior:
 - `~/.zsh` links to this config checkout's `zsh` directory.
 - `~/.zshrc` links to this config checkout's `zsh/zshrc` file.
 - `~/.config/ghostty/config` links to this config checkout's `ghostty/config` file.
-- `~/.local/bin/config-tools` is a runnable copy of the config helper used by shell wrappers.
-- `title-protect <command> [args...]` runs any foreground tool through title filtering so it cannot overwrite repo/path tab titles.
+- `~/.relay/config.toml` links to this config checkout's `relay/config.toml` file.
+- `~/.local/bin/config-tools` is a runnable copy of the config helper.
 - `~/.rovodev/skills` links to this config checkout's `.agents/skills` directory.
 - `~/.rovodev/prompts` links to this config checkout's `.agents/skills` directory for legacy prompt compatibility.
 - `~/.rovodev/prompts.yml` links to this config checkout's `rovodev/prompts.yml`.
@@ -91,32 +89,6 @@ Expected symlink behavior:
 - Each custom top-level `.agents/skills/<name>/SKILL.md` directory links into `~/.codex/skills/<name>`.
 - Hidden skill directories and directories without `SKILL.md` are not linked into Codex.
 - Existing non-empty files/directories or unrelated symlinks are not replaced automatically.
-
-## Terminal titles
-
-Ghostty command-title integration is disabled so zsh owns useful workspace titles. Tabs show compact context: the repo name at a Git root, `repo/path` in Git subdirectories, `~` at home, and compact home-relative paths outside Git.
-
-Long-running tools can emit terminal title escape sequences after zsh has started them. Use `title-protect <command> [args...]` for any such command. It runs the command through the installed `~/.local/bin/config-tools title-protect -- ...` PTY wrapper, filtering only OSC 0/1/2 title writes while preserving normal terminal output, color, hyperlinks, and exit status. The `axiom` shell function is only a convenience wrapper around the generic command.
-
-Examples:
-
-```bash
-title-protect atlas relay --agent axiom
-title-protect claude
-title-protect codex
-```
-
-After installing, verify manually in Ghostty:
-
-```bash
-cd ~/src/config
-# tab title should be: config
-cd zsh
-# tab title should be: config/zsh
-title-protect atlas relay --agent axiom
-# tab title should stay config/zsh, not Axiom
-```
-
 ## Executable-code check
 
 Tracked non-Rust executables should be limited to repository wiring scripts and skill-owned helper scripts that are invoked directly by their skill documentation.
