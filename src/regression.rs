@@ -4,6 +4,7 @@ use crate::error::Result;
 use crate::install::install_command;
 use crate::registry::{get, load_yaml_file, string_key, validate_registry};
 use crate::repair::repair_config_command;
+use crate::terminal_title::filter_terminal_title_bytes;
 use serde_yaml::Value;
 use std::fs;
 #[cfg(unix)]
@@ -39,6 +40,8 @@ pub(crate) fn run_regression_tests() -> Result<()> {
     test_command_failures()?;
     test_git_fetch_ref_cleanup()?;
     test_terminal_title_config_and_format()?;
+    test_terminal_title_filter()?;
+    test_agent_title_protection_zsh_wiring()?;
     Ok(())
 }
 
@@ -604,6 +607,57 @@ fn test_terminal_title_config_and_format() -> Result<()> {
         return Err(format!(
             "terminal title should include repo and compact relative cwd; got {actual:?}, expected {expected:?}"
         ));
+    }
+
+    Ok(())
+}
+
+fn test_terminal_title_filter() -> Result<()> {
+    let filtered = filter_terminal_title_bytes(&[
+        b"hello ",
+        b"\x1b]0;Axiom\x07",
+        b" colorful ",
+        b"\x1b[31mred\x1b[0m ",
+        b"\x1b]8;;https://example.com\x07link\x1b]8;;\x07 ",
+        b"\x1b]2;Claude",
+        b"\x1b\\",
+        b" done",
+    ]);
+    let expected =
+        b"hello  colorful \x1b[31mred\x1b[0m \x1b]8;;https://example.com\x07link\x1b]8;;\x07  done";
+    if filtered != expected {
+        return Err(format!(
+            "terminal title filter output mismatch: got {:?}, expected {:?}",
+            String::from_utf8_lossy(&filtered),
+            String::from_utf8_lossy(expected)
+        ));
+    }
+
+    Ok(())
+}
+
+fn test_agent_title_protection_zsh_wiring() -> Result<()> {
+    let zshrc = fs::read_to_string("zsh/zshrc")
+        .map_err(|err| format!("cannot read zsh config for title protection test: {err}"))?;
+    if !zshrc.contains("export CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1") {
+        return Err("Claude terminal title writes should be disabled by env".to_string());
+    }
+    if zshrc.contains("alias axiom=\"atlas relay --agent axiom\"") {
+        return Err(
+            "axiom should not directly alias atlas relay without title protection".to_string(),
+        );
+    }
+    for required in [
+        "axiom()",
+        "__title_protect atlas relay --agent axiom",
+        "__terminal_title_set",
+        "title-protect --",
+    ] {
+        if !zshrc.contains(required) {
+            return Err(format!(
+                "zsh title protection wiring should contain {required:?}"
+            ));
+        }
     }
 
     Ok(())

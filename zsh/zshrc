@@ -73,7 +73,19 @@ alias atlassian="cd $HOME/atlassian"
 alias vim="nvim"
 alias vi="nvim"
 alias clear="echo 'The clear command is disabled.'"
-alias axiom="atlas relay --agent axiom"
+export CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1
+
+__title_protect() {
+  cargo run --quiet --manifest-path "$HOME/src/config/Cargo.toml" -- title-protect -- "$@"
+}
+
+axiom() {
+  (( $+functions[__terminal_title_set] )) && __terminal_title_set
+  __title_protect atlas relay --agent axiom "$@"
+  local status=$?
+  (( $+functions[__terminal_title_set] )) && __terminal_title_set
+  return $status
+}
 
 # Project navigation
 alias blog="cd $HOME/atlassian/alexandersumer.com"

@@ -15,6 +15,7 @@ cargo run -- validate
 cargo run -- test-validate
 cargo run -- repair-config
 cargo run -- install
+cargo run -- title-protect -- <command> [args...]
 ```
 
 Command roles:
@@ -23,6 +24,7 @@ Command roles:
 - `prepare`: intentional config-local mutation; repairs `rovodev/prompts`, regenerates `rovodev/prompts.yml`, then checks.
 - `pre-commit`: safe hook entrypoint; runs `prepare`, then fails if config-local generated files are left unstaged.
 - `install`: intentional home-directory mutation for `~/.agents`, `~/.rovodev`, and custom `~/.codex/skills` symlinks.
+- `title-protect`: run an interactive command behind a PTY while filtering terminal-title escape sequences.
 - `install-git-hooks`: intentional local Git config mutation for `core.hooksPath`.
 
 ## Git hooks
@@ -80,6 +82,7 @@ Expected symlink behavior:
 - `~/.zsh` links to this config checkout's `zsh` directory.
 - `~/.zshrc` links to this config checkout's `zsh/zshrc` file.
 - `~/.config/ghostty/config` links to this config checkout's `ghostty/config` file.
+- Agent commands such as `axiom` run through `title-protect` so foreground tools cannot overwrite repo/path tab titles.
 - `~/.rovodev/skills` links to this config checkout's `.agents/skills` directory.
 - `~/.rovodev/prompts` links to this config checkout's `.agents/skills` directory for legacy prompt compatibility.
 - `~/.rovodev/prompts.yml` links to this config checkout's `rovodev/prompts.yml`.

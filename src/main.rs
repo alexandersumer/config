@@ -7,10 +7,14 @@ mod links;
 mod registry;
 mod regression;
 mod repair;
+mod terminal_title;
 
-fn main() {
-    if let Err(err) = cli::run() {
-        eprintln!("{err}");
-        std::process::exit(1);
+fn main() -> std::process::ExitCode {
+    match cli::run() {
+        Ok(code) => code,
+        Err(err) => {
+            eprintln!("{err}");
+            std::process::ExitCode::FAILURE
+        }
     }
 }
