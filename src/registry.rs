@@ -864,7 +864,7 @@ mod tests {
     fn skill_front_matter_allows_relay_command_registration_key() {
         let value = yaml_value(
             r#"
-name: apply-changes
+name: surgical-edit
 description: Apply a narrow requested code change.
 register_cmd: true
 "#,
@@ -879,13 +879,13 @@ register_cmd: true
     fn validate_skill_body_rejects_non_instructional_stubs() {
         let value = yaml_value(
             r#"
-name: apply-changes
+name: surgical-edit
 description: Apply a narrow requested code change.
 register_cmd: true
 "#,
         );
         let metadata = value.as_mapping().expect("front matter mapping");
-        let path = Path::new(".agents/skills/apply-changes/SKILL.md");
+        let path = Path::new(".agents/skills/surgical-edit/SKILL.md");
 
         assert!(validate_skill_body(path, metadata, "").is_err());
         assert!(validate_skill_body(path, metadata, "TODO").is_err());
@@ -899,13 +899,13 @@ register_cmd: true
     fn validate_skill_body_accepts_concise_real_instructions() {
         let value = yaml_value(
             r#"
-name: apply-changes
+name: surgical-edit
 description: Apply a narrow requested code change.
 register_cmd: true
 "#,
         );
         let metadata = value.as_mapping().expect("front matter mapping");
-        let path = Path::new(".agents/skills/apply-changes/SKILL.md");
+        let path = Path::new(".agents/skills/surgical-edit/SKILL.md");
         let body = r#"
 Read the relevant files before editing, then make the smallest correct change that matches the existing naming, layering, error handling, and tests.
 Do not add dependencies, abstractions, broad refactors, or explanatory comments unless the requested change requires them.
@@ -918,19 +918,19 @@ If the request remains ambiguous after reading context, ask one focused question
     #[test]
     fn resolve_content_path_accepts_prompt_skill_paths_only() {
         let config_root = Path::new("/config");
-        let valid = Value::String("prompts/apply-changes/SKILL.md".to_string());
+        let valid = Value::String("prompts/surgical-edit/SKILL.md".to_string());
         assert_eq!(
             resolve_content_path(config_root, Some(&valid), "prompt").expect("valid content path"),
-            PathBuf::from("/config/rovodev/prompts/apply-changes/SKILL.md")
+            PathBuf::from("/config/rovodev/prompts/surgical-edit/SKILL.md")
         );
 
-        let absolute = Value::String("/tmp/prompts/apply-changes/SKILL.md".to_string());
+        let absolute = Value::String("/tmp/prompts/surgical-edit/SKILL.md".to_string());
         assert!(resolve_content_path(config_root, Some(&absolute), "prompt").is_err());
 
         let traversal = Value::String("prompts/../secret/SKILL.md".to_string());
         assert!(resolve_content_path(config_root, Some(&traversal), "prompt").is_err());
 
-        let wrong_suffix = Value::String("prompts/apply-changes/README.md".to_string());
+        let wrong_suffix = Value::String("prompts/surgical-edit/README.md".to_string());
         assert!(resolve_content_path(config_root, Some(&wrong_suffix), "prompt").is_err());
     }
 }

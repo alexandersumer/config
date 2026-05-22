@@ -221,8 +221,8 @@ pub(crate) fn test_install_command() -> Result<()> {
         &fixture.path().join("rovodev/prompts.yml"),
     )?;
     assert_symlink_resolves_to(
-        &home.path().join(".codex/skills/apply-changes"),
-        &fixture.path().join(".agents/skills/apply-changes"),
+        &home.path().join(".codex/skills/surgical-edit"),
+        &fixture.path().join(".agents/skills/surgical-edit"),
     )?;
     assert_symlink_resolves_to(
         &home.path().join(".codex/skills/describe-branch"),
@@ -309,7 +309,7 @@ pub(crate) fn test_link_safety() -> Result<()> {
     create_codex_system_skills(codex_conflict_home.path())?;
     let conflicting_skill = codex_conflict_home
         .path()
-        .join(".codex/skills/apply-changes");
+        .join(".codex/skills/surgical-edit");
     fs::create_dir(&conflicting_skill).map_err(|err| {
         format!(
             "{}: cannot create conflicting Codex skill: {err}",
@@ -908,18 +908,18 @@ fn mutate_generated_registry_drift(config_root: &Path) -> Result<&'static str> {
                 .as_mapping()
                 .and_then(|mapping| get(mapping, "name"))
                 .and_then(Value::as_str)
-                == Some("apply-changes")
+                == Some("surgical-edit")
         })
         .and_then(Value::as_mapping_mut)
-        .ok_or_else(|| "fixture prompts.yml is missing apply-changes".to_string())?;
+        .ok_or_else(|| "fixture prompts.yml is missing surgical-edit".to_string())?;
     let inputs = prompt
         .get_mut(string_key("inputs"))
         .and_then(Value::as_sequence_mut)
-        .ok_or_else(|| "fixture apply-changes prompt is missing inputs".to_string())?;
+        .ok_or_else(|| "fixture surgical-edit prompt is missing inputs".to_string())?;
     let first_input = inputs
         .first_mut()
         .and_then(Value::as_mapping_mut)
-        .ok_or_else(|| "fixture apply-changes prompt is missing input mapping".to_string())?;
+        .ok_or_else(|| "fixture surgical-edit prompt is missing input mapping".to_string())?;
     first_input.insert(string_key("required"), Value::Bool(true));
     write_config(config_root, &config)?;
     Ok("generated content is not up to date")

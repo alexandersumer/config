@@ -13,15 +13,6 @@ prompts:
     description: Optional focus area or extra instructions for which comments to address.
     type: string
     required: false
-- name: apply-changes
-  description: Implement a requested code change without a formal plan. Use when the user asks to edit, tweak, add, remove, rename, or adjust behavior and the work should be completed directly.
-  content_file: prompts/apply-changes/SKILL.md
-  inputs:
-  - name: changes
-    label: Changes to apply
-    description: Describe the changes to apply. Leave empty to apply changes from conversation context.
-    type: string
-    required: false
 - name: clean-up-feature-flag
   description: Remove a rolled-out flag
   content_file: prompts/clean-up-feature-flag/SKILL.md
@@ -47,7 +38,7 @@ prompts:
     type: string
     required: false
 - name: git-publish
-  description: Commit and publish changes
+  description: Commit, push, and open a PR when starting from the default branch
   content_file: prompts/git-publish/SKILL.md
 - name: git-publish-to-origin
   description: Commit and push current branch
@@ -230,3 +221,12 @@ prompts:
 - name: understand-system
   description: Understand one or more local codebases as a system. Searches ~/oss, ~/atlassian, and ~/src, then maps architecture, relationships, real flows, contracts, local runtime/debug context, validation seams, and evidence gaps.
   content_file: prompts/understand-system/SKILL.md
+- name: surgical-edit
+  description: Implement a requested code change without a formal plan. Use when the user asks to edit, tweak, add, remove, rename, or adjust behavior and the work should be completed directly.
+  content_file: prompts/surgical-edit/SKILL.md
+  inputs:
+  - name: changes
+    label: Changes to apply
+    description: Describe the changes to apply. Leave empty to apply changes from conversation context.
+    type: string
+    required: false

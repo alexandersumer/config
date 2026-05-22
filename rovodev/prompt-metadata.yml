@@ -13,7 +13,7 @@ prompts:
         address.
       type: string
       required: false
-  apply-changes:
+  surgical-edit:
     inputs:
     - name: changes
       label: Changes to apply
