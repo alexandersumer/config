@@ -83,7 +83,7 @@ Expected symlink behavior:
 - `~/.zshrc` links to this config checkout's `zsh/zshrc` file.
 - `~/.config/ghostty/config` links to this config checkout's `ghostty/config` file.
 - `~/.local/bin/config-tools` is a runnable copy of the config helper used by shell wrappers.
-- Agent commands such as `axiom` run through `title-protect` so foreground tools cannot overwrite repo/path tab titles.
+- `title-protect <command> [args...]` runs any foreground tool through title filtering so it cannot overwrite repo/path tab titles.
 - `~/.rovodev/skills` links to this config checkout's `.agents/skills` directory.
 - `~/.rovodev/prompts` links to this config checkout's `.agents/skills` directory for legacy prompt compatibility.
 - `~/.rovodev/prompts.yml` links to this config checkout's `rovodev/prompts.yml`.
@@ -96,7 +96,15 @@ Expected symlink behavior:
 
 Ghostty command-title integration is disabled so zsh owns useful workspace titles. Tabs show compact context: the repo name at a Git root, `repo/path` in Git subdirectories, `~` at home, and compact home-relative paths outside Git.
 
-Long-running agents can emit terminal title escape sequences after zsh has started them. The `axiom` wrapper runs through the installed `~/.local/bin/config-tools title-protect -- ...` PTY wrapper, which filters only OSC 0/1/2 title writes while preserving normal terminal output, color, hyperlinks, and exit status.
+Long-running tools can emit terminal title escape sequences after zsh has started them. Use `title-protect <command> [args...]` for any such command. It runs the command through the installed `~/.local/bin/config-tools title-protect -- ...` PTY wrapper, filtering only OSC 0/1/2 title writes while preserving normal terminal output, color, hyperlinks, and exit status. The `axiom` shell function is only a convenience wrapper around the generic command.
+
+Examples:
+
+```bash
+title-protect atlas relay --agent axiom
+title-protect claude
+title-protect codex
+```
 
 After installing, verify manually in Ghostty:
 
@@ -105,7 +113,7 @@ cd ~/src/config
 # tab title should be: config
 cd zsh
 # tab title should be: config/zsh
-axiom
+title-protect atlas relay --agent axiom
 # tab title should stay config/zsh, not Axiom
 ```
 
