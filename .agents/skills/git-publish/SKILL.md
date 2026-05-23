@@ -10,6 +10,8 @@ Invoking this skill is explicit authorization to perform the required git writes
 
 Optimize for a smooth, safe publish: one coherent commit subject, no provider-generated titles, no branch-name summaries, no accidental wrong-repo PRs, no duplicate PRs.
 
+Non-default branches are normal publish sources. Never end with “PR not created” merely because the current branch is non-default or because the workflow started from an existing feature branch; after pushing, run the PR flow for that branch.
+
 ## Workflow
 
 1. Inspect repository context before any write:
@@ -21,14 +23,17 @@ Optimize for a smooth, safe publish: one coherent commit subject, no provider-ge
      - staged diff: `git diff --cached`
      - unstaged diff: `git diff`
      - relevant untracked files from `git ls-files --others --exclude-standard`, rendered or summarized as new-file diffs
-2. If there are no publishable working-tree changes but the current non-default branch has commits ahead of the remote default branch, skip committing and continue to push and PR creation for the branch diff.
-3. If there are no publishable working-tree changes and no branch diff, stop.
-4. Confirm the effective changes form one coherent subject. If not, stop and ask how to split or scope the publish.
-5. Choose a valid Conventional Commit subject from the effective changes.
+2. Build the effective changes from both sources:
+   - branch diff: committed changes ahead of the remote default branch, when on a non-default branch
+   - working-tree diff: staged, unstaged, and relevant untracked changes
+3. If there is no branch diff and no working-tree diff, stop.
+4. Confirm the combined effective changes form one coherent subject. If the committed branch diff and working-tree diff are unrelated, stop and ask how to split or scope the publish.
+5. Choose a valid Conventional Commit subject from the combined effective changes.
 6. If currently on `main`, `master`, or the remote default branch, create a focused branch derived from the subject before staging or committing, for example `fix/short-topic`.
-7. If there are publishable working-tree changes, stage intended changes unless explicitly excluded, then commit with the chosen subject. Do not stage unrelated files.
-8. Push the source branch to `origin`, setting upstream if needed.
-9. Always create or report a no-reviewer PR from the source branch to the remote default branch using the PR flow below. This applies equally when starting from an existing non-default branch.
+7. If there are publishable working-tree changes, stage intended changes unless explicitly excluded, then commit them with the chosen subject before pushing. Do not stage unrelated files.
+8. If there are no publishable working-tree changes but the source branch already has a branch diff, skip committing and continue.
+9. Push the source branch to `origin`, setting upstream if needed.
+10. Always create or report a no-reviewer PR from the source branch to the remote default branch using the PR flow below. This applies equally when starting from an existing non-default branch.
 
 Do not run tests/builds unless explicitly asked.
 
