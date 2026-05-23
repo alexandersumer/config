@@ -1,10 +1,12 @@
 ---
 name: git-publish
-description: Commit, push, and open a PR when starting from the default branch
+description: Commit, push, and open a no-reviewer PR for the current changes
 register_cmd: true
 ---
 
-Commit current staged, unstaged, and relevant untracked changes, then push to `origin`. If starting from the default branch, create a no-reviewer pull request. If the user did not explicitly request publishing, ask before any git write.
+Commit current staged, unstaged, and relevant untracked changes, push to `origin`, then create or report a no-reviewer pull request to the remote default branch.
+
+Invoking this skill is explicit authorization to perform the required git writes for publishing: stage intended changes, create a commit, create a branch when needed, push, and create the PR. Do not pause to ask for publish permission unless the inspected changes are incoherent, risky, or ambiguous.
 
 Optimize for a smooth, safe publish: one coherent commit subject, no provider-generated titles, no branch-name summaries, no accidental wrong-repo PRs, no duplicate PRs.
 
@@ -19,16 +21,14 @@ Optimize for a smooth, safe publish: one coherent commit subject, no provider-ge
      - staged diff: `git diff --cached`
      - unstaged diff: `git diff`
      - relevant untracked files from `git ls-files --others --exclude-standard`, rendered or summarized as new-file diffs
-2. If there are no publishable changes, stop.
-3. Confirm the changes form one coherent subject. If not, stop and ask how to split or scope the publish.
-4. Stage intended changes unless explicitly excluded. Do not stage unrelated files.
-5. Commit with a valid Conventional Commit subject.
-6. If already on a non-default branch: push current branch only. Do not inspect, create, or update PRs unless the user explicitly asked for PR work.
-7. If on `main`, `master`, or the remote default branch:
-   - create a focused branch derived from the subject, for example `fix/short-topic`
-   - commit there
-   - push with upstream to `origin`
-   - create or report a no-reviewer PR to the default branch using the PR flow below
+2. If there are no publishable working-tree changes but the current non-default branch has commits ahead of the remote default branch, skip committing and continue to push and PR creation for the branch diff.
+3. If there are no publishable working-tree changes and no branch diff, stop.
+4. Confirm the effective changes form one coherent subject. If not, stop and ask how to split or scope the publish.
+5. Choose a valid Conventional Commit subject from the effective changes.
+6. If currently on `main`, `master`, or the remote default branch, create a focused branch derived from the subject before staging or committing, for example `fix/short-topic`.
+7. If there are publishable working-tree changes, stage intended changes unless explicitly excluded, then commit with the chosen subject. Do not stage unrelated files.
+8. Push the source branch to `origin`, setting upstream if needed.
+9. Always create or report a no-reviewer PR from the source branch to the remote default branch using the PR flow below. This applies equally when starting from an existing non-default branch.
 
 Do not run tests/builds unless explicitly asked.
 
@@ -45,7 +45,7 @@ Rules:
 - No branch names, issue-title summaries, issue-key prefixes, chat summaries, provider defaults, or trailing period.
 - Keep the subject human-readable and specific.
 
-## PR flow for default-branch publishes
+## PR flow
 
 Use the smoothest safe path available. Never use Bitbucket MCP to create, list, inspect, or update pull requests during publish.
 
@@ -59,7 +59,7 @@ Use this path when the runtime exposes canonical PR metadata tools such as `coll
    git rev-parse --show-toplevel
    ```
 
-2. Collect canonical PR context for that root. Pass `workspaceRoot` when the tool supports it. The reported `gitRoot`, branch, and default branch must match the repository being published.
+2. Collect canonical PR context for that root after the source branch is pushed. Pass `workspaceRoot` when the tool supports it. The reported `gitRoot`, source branch, and default branch must match the repository being published.
 3. Record fresh PR metadata using:
    - the same Conventional Commit subject as the PR title
    - a grounded body describing what changed and why
@@ -103,8 +103,8 @@ Use this path only when canonical PR tools are unavailable or the repository/too
 ## Final response
 
 Report:
-- commit hash
-- subject
+- commit hash, or state that no new commit was needed
+- subject / PR title
 - branch
 - push result
-- PR result, only when PR creation was part of the workflow
+- PR result

@@ -4,7 +4,9 @@ description: Commit and push current branch
 register_cmd: true
 ---
 
-Commit current staged, unstaged, and relevant untracked changes, then push the current branch to `origin`. If the user did not explicitly request publishing, ask before any git write.
+Commit current staged, unstaged, and relevant untracked changes, then push the current branch to `origin`.
+
+Invoking this skill is explicit authorization to perform the required git writes for pushing: stage intended changes, create a commit, and push the current branch. Do not pause to ask for publish permission unless the inspected changes are incoherent, risky, or ambiguous.
 
 This skill is push-only: do not create branches, open PRs, inspect PRs, update PRs, run unrequested checks, or use an invalid subject.
 

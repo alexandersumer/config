@@ -38,7 +38,7 @@ prompts:
     type: string
     required: false
 - name: git-publish
-  description: Commit, push, and open a PR when starting from the default branch
+  description: Commit, push, and open a no-reviewer PR for the current changes
   content_file: prompts/git-publish/SKILL.md
 - name: git-publish-to-origin
   description: Commit and push current branch
