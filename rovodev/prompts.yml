@@ -43,24 +43,6 @@ prompts:
 - name: git-publish-to-origin
   description: Commit and push current branch
   content_file: prompts/git-publish-to-origin/SKILL.md
-- name: design-review
-  description: Use when reviewing software design, architecture, a technical proposal, refactor plan, API boundary, module split, data model, or design-sensitive branch diff.
-  content_file: prompts/design-review/SKILL.md
-  inputs:
-  - name: scope
-    label: Design scope
-    description: Optional design, diff, file, plan, or scope to evaluate. Leave empty to infer from conversation or current branch.
-    type: string
-    required: false
-- name: review-tests
-  description: Use when reviewing, strengthening, or adding tests for a pull request, branch, diff, bug fix, feature, or changed behavior.
-  content_file: prompts/review-tests/SKILL.md
-  inputs:
-  - name: focus_area
-    label: Focus area
-    description: Optional text to narrow the review to specific tests or areas. Leave empty to review all tests in the branch.
-    type: string
-    required: false
 - name: create-plan
   description: Write a spec and implementation plan artifact. Use when the user asks to create planning files, a proposal, design doc, or implementation plan.
   content_file: prompts/create-plan/SKILL.md
@@ -106,15 +88,6 @@ prompts:
 - name: resolve-conflict
   description: Resolve merge conflicts
   content_file: prompts/resolve-conflict/SKILL.md
-- name: review-branch
-  description: Use when reviewing a pull request, diff, branch, or any set of code changes.
-  content_file: prompts/review-branch/SKILL.md
-  inputs:
-  - name: focus_area
-    label: Focus area
-    description: Optional text to narrow the review scope. Leave empty to review the entire branch.
-    type: string
-    required: false
 - name: ship-next-chunk
   description: Ship the next planned chunk
   content_file: prompts/ship-next-chunk/SKILL.md
@@ -228,5 +201,59 @@ prompts:
   - name: changes
     label: Changes to apply
     description: Describe the changes to apply. Leave empty to apply changes from conversation context.
+    type: string
+    required: false
+- name: review-delegated-branch
+  description: Use when reviewing a pull request, diff, branch, or any set of code changes using fresh-context subagents for broad coverage and validated findings.
+  content_file: prompts/review-delegated-branch/SKILL.md
+  inputs:
+  - name: focus_area
+    label: Focus area
+    description: Optional text to narrow the review scope. Leave empty to review the entire branch.
+    type: string
+    required: false
+- name: review-delegated-design
+  description: Use when reviewing software design, architecture, a technical proposal, refactor plan, API boundary, module split, data model, or design-sensitive branch diff using fresh-context subagents.
+  content_file: prompts/review-delegated-design/SKILL.md
+  inputs:
+  - name: scope
+    label: Design scope
+    description: Optional design, diff, file, plan, or scope to evaluate. Leave empty to infer from conversation or current branch.
+    type: string
+    required: false
+- name: review-delegated-tests
+  description: Use when reviewing, strengthening, or adding tests for a pull request, branch, diff, bug fix, feature, or changed behavior using fresh-context subagents to identify validated test improvements.
+  content_file: prompts/review-delegated-tests/SKILL.md
+  inputs:
+  - name: focus_area
+    label: Focus area
+    description: Optional text to narrow the review to specific tests or areas. Leave empty to review all tests in the branch.
+    type: string
+    required: false
+- name: review-direct-branch
+  description: Use when reviewing a pull request, diff, branch, or any set of code changes directly in the current session without subagents.
+  content_file: prompts/review-direct-branch/SKILL.md
+  inputs:
+  - name: focus_area
+    label: Focus area
+    description: Optional text to narrow the review scope. Leave empty to review the entire branch.
+    type: string
+    required: false
+- name: review-direct-design
+  description: Use when reviewing software design, architecture, a technical proposal, refactor plan, API boundary, module split, data model, or design-sensitive branch diff directly without subagents.
+  content_file: prompts/review-direct-design/SKILL.md
+  inputs:
+  - name: scope
+    label: Design scope
+    description: Optional design, diff, file, plan, or scope to evaluate. Leave empty to infer from conversation or current branch.
+    type: string
+    required: false
+- name: review-direct-tests
+  description: Use when reviewing, strengthening, or adding tests for a pull request, branch, diff, bug fix, feature, or changed behavior directly without subagents.
+  content_file: prompts/review-direct-tests/SKILL.md
+  inputs:
+  - name: focus_area
+    label: Focus area
+    description: Optional text to narrow the review to specific tests or areas. Leave empty to review all tests in the branch.
     type: string
     required: false

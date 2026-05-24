@@ -1,6 +1,6 @@
 ---
-name: design-review
-description: Use when reviewing software design, architecture, a technical proposal, refactor plan, API boundary, module split, data model, or design-sensitive branch diff.
+name: review-delegated-design
+description: Use when reviewing software design, architecture, a technical proposal, refactor plan, API boundary, module split, data model, or design-sensitive branch diff using fresh-context subagents.
 register_cmd: true
 ---
 
