@@ -1,6 +1,6 @@
 ---
-name: review-delegated-tests
-description: Default test review. Use unless the user explicitly asks for direct, inline, single-agent, or no-subagent review. Uses fresh-context subagents to review, strengthen, or add tests for changed behavior.
+name: review-tests
+description: Default test review using fresh-context subagents. Use to review, strengthen, or add tests for changed behavior unless the user explicitly asks for direct, inline, single-agent, or no-subagent review.
 register_cmd: true
 ---
 

@@ -50,7 +50,7 @@ prompts:
         artifact conventions.
       type: string
       required: false
-  review-delegated-design:
+  review-design:
     inputs:
     - name: scope
       label: Design scope
@@ -58,7 +58,7 @@ prompts:
         empty to infer from conversation or current branch.
       type: string
       required: false
-  review-direct-design:
+  review-design-direct:
     inputs:
     - name: scope
       label: Design scope
@@ -90,14 +90,14 @@ prompts:
         checks if needed.
       type: string
       required: false
-  review-delegated-architecture:
+  review-architecture:
     inputs:
     - name: scope
       label: Architecture scope
       description: Optional codebase area, module, package, file, or architecture concern to review. Leave empty to infer from conversation or the current repo.
       type: string
       required: false
-  review-direct-architecture:
+  review-architecture-direct:
     inputs:
     - name: scope
       label: Architecture scope
@@ -141,7 +141,7 @@ prompts:
         comparison scope. Leave empty to infer from branch and artifact locality.
       type: string
       required: false
-  review-delegated-branch:
+  review-code:
     inputs:
     - name: focus_area
       label: Focus area
@@ -149,7 +149,7 @@ prompts:
         the entire branch.
       type: string
       required: false
-  review-delegated-tests:
+  review-tests:
     inputs:
     - name: focus_area
       label: Focus area
@@ -157,7 +157,7 @@ prompts:
         Leave empty to review all tests in the branch.
       type: string
       required: false
-  review-direct-branch:
+  review-code-direct:
     inputs:
     - name: focus_area
       label: Focus area
@@ -165,7 +165,7 @@ prompts:
         the entire branch.
       type: string
       required: false
-  review-direct-tests:
+  review-tests-direct:
     inputs:
     - name: focus_area
       label: Focus area

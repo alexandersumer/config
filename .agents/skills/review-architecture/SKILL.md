@@ -1,10 +1,10 @@
 ---
-name: review-delegated-architecture
-description: Default codebase architecture review. Use unless the user explicitly asks for direct, inline, single-agent, or no-subagent review. Uses fresh-context subagents to find small high-leverage design moves including deeper modules, better seams, less coupling, clearer ownership, stronger domain boundaries, AI-navigability, or a more testable codebase.
+name: review-architecture
+description: Default codebase architecture review using fresh-context subagents. Use for architecture, modularity, seams, coupling, ownership, domain boundaries, AI-navigability, or testability review unless the user explicitly asks for direct, inline, single-agent, or no-subagent review.
 register_cmd: true
 ---
 
-# Review Delegated Architecture
+# Review Architecture
 
 Do not review codebase architecture alone. Use fresh-context subagents because architecture review is biased by session framing; your job is to ground the scope, dispatch role-specific scouts, validate candidates, and return only small high-leverage design moves. Do not edit product code.
 

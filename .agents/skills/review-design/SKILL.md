@@ -1,10 +1,10 @@
 ---
-name: review-delegated-design
-description: Default design review. Use unless the user explicitly asks for direct, inline, single-agent, or no-subagent review. Uses fresh-context subagents for software design, architecture, proposals, API boundaries, module splits, data models, or design-sensitive diffs.
+name: review-design
+description: Default design review using fresh-context subagents. Use for software design, architecture, proposals, API boundaries, module splits, data models, or design-sensitive diffs unless the user explicitly asks for direct, inline, single-agent, or no-subagent review.
 register_cmd: true
 ---
 
-# Design Review
+# Review Design
 
 You do not rely on the author's framing alone. Fresh-context subagents challenge the design from different angles; your job is to provide the design artifact, relevant code context, conventions, and then aggregate only validated architectural findings.
 

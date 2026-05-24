@@ -1,12 +1,12 @@
 ---
-name: review-direct-architecture
+name: review-architecture-direct
 description: Direct codebase architecture review without subagents. Use only when the user explicitly asks for direct, inline, single-agent, or no-subagent architecture review.
 register_cmd: true
 ---
 
-# Review Direct Architecture
+# Review Architecture Direct
 
-Review codebase architecture directly in this session. Do not invoke subagents. Preserve the same quality bar as `review-delegated-architecture` by doing explicit, sequential architecture-review passes and validating every candidate against concrete files, current friction, and a realistic future change path. Do not edit product code.
+Review codebase architecture directly in this session. Do not invoke subagents. Preserve the same quality bar as `review-architecture` by doing explicit, sequential architecture-review passes and validating every candidate against concrete files, current friction, and a realistic future change path. Do not edit product code.
 
 1. **Resolve scope.** Use `scope`, `$ARGUMENTS`, the conversation target, or the current repo. Prefer the smallest coherent surface with callers, tests, and future change pressure. If that cannot be bounded quickly after reading available context, ask one narrowing question.
 

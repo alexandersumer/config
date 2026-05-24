@@ -200,75 +200,75 @@ prompts:
     description: Describe the changes to apply. Leave empty to apply changes from conversation context.
     type: string
     required: false
-- name: review-delegated-branch
-  description: Default branch/code-change review. Use unless the user explicitly asks for direct, inline, single-agent, or no-subagent review. Uses fresh-context subagents for broad coverage and validated findings.
-  content_file: prompts/review-delegated-branch/SKILL.md
-  inputs:
-  - name: focus_area
-    label: Focus area
-    description: Optional text to narrow the review scope. Leave empty to review the entire branch.
-    type: string
-    required: false
-- name: review-delegated-design
-  description: Default design review. Use unless the user explicitly asks for direct, inline, single-agent, or no-subagent review. Uses fresh-context subagents for software design, architecture, proposals, API boundaries, module splits, data models, or design-sensitive diffs.
-  content_file: prompts/review-delegated-design/SKILL.md
-  inputs:
-  - name: scope
-    label: Design scope
-    description: Optional design, diff, file, plan, or scope to evaluate. Leave empty to infer from conversation or current branch.
-    type: string
-    required: false
-- name: review-delegated-tests
-  description: Default test review. Use unless the user explicitly asks for direct, inline, single-agent, or no-subagent review. Uses fresh-context subagents to review, strengthen, or add tests for changed behavior.
-  content_file: prompts/review-delegated-tests/SKILL.md
-  inputs:
-  - name: focus_area
-    label: Focus area
-    description: Optional text to narrow the review to specific tests or areas. Leave empty to review all tests in the branch.
-    type: string
-    required: false
-- name: review-direct-branch
-  description: Direct branch/code-change review without subagents. Use only when the user explicitly asks for direct, inline, single-agent, or no-subagent review.
-  content_file: prompts/review-direct-branch/SKILL.md
-  inputs:
-  - name: focus_area
-    label: Focus area
-    description: Optional text to narrow the review scope. Leave empty to review the entire branch.
-    type: string
-    required: false
-- name: review-direct-design
-  description: Direct design review without subagents. Use only when the user explicitly asks for direct, inline, single-agent, or no-subagent review of software design, architecture, proposals, API boundaries, module splits, data models, or design-sensitive diffs.
-  content_file: prompts/review-direct-design/SKILL.md
-  inputs:
-  - name: scope
-    label: Design scope
-    description: Optional design, diff, file, plan, or scope to evaluate. Leave empty to infer from conversation or current branch.
-    type: string
-    required: false
-- name: review-direct-tests
-  description: Direct test review without subagents. Use only when the user explicitly asks for direct, inline, single-agent, or no-subagent review of tests or changed behavior.
-  content_file: prompts/review-direct-tests/SKILL.md
-  inputs:
-  - name: focus_area
-    label: Focus area
-    description: Optional text to narrow the review to specific tests or areas. Leave empty to review all tests in the branch.
-    type: string
-    required: false
-- name: review-delegated-architecture
-  description: Default codebase architecture review. Use unless the user explicitly asks for direct, inline, single-agent, or no-subagent review. Uses fresh-context subagents to find small high-leverage design moves including deeper modules, better seams, less coupling, clearer ownership, stronger domain boundaries, AI-navigability, or a more testable codebase.
-  content_file: prompts/review-delegated-architecture/SKILL.md
+- name: review-architecture
+  description: Default codebase architecture review using fresh-context subagents. Use for architecture, modularity, seams, coupling, ownership, domain boundaries, AI-navigability, or testability review unless the user explicitly asks for direct, inline, single-agent, or no-subagent review.
+  content_file: prompts/review-architecture/SKILL.md
   inputs:
   - name: scope
     label: Architecture scope
     description: Optional codebase area, module, package, file, or architecture concern to review. Leave empty to infer from conversation or the current repo.
     type: string
     required: false
-- name: review-direct-architecture
+- name: review-architecture-direct
   description: Direct codebase architecture review without subagents. Use only when the user explicitly asks for direct, inline, single-agent, or no-subagent architecture review.
-  content_file: prompts/review-direct-architecture/SKILL.md
+  content_file: prompts/review-architecture-direct/SKILL.md
   inputs:
   - name: scope
     label: Architecture scope
     description: Optional codebase area, module, package, file, or architecture concern to review. Leave empty to infer from conversation or the current repo.
+    type: string
+    required: false
+- name: review-code
+  description: Default code-change review using fresh-context subagents. Use for PRs, diffs, branches, staged changes, unstaged changes, untracked files, or any set of code/config/test changes unless the user explicitly asks for direct, inline, single-agent, or no-subagent review.
+  content_file: prompts/review-code/SKILL.md
+  inputs:
+  - name: focus_area
+    label: Focus area
+    description: Optional text to narrow the review scope. Leave empty to review the entire branch.
+    type: string
+    required: false
+- name: review-code-direct
+  description: Direct code-change review without subagents. Use only when the user explicitly asks for direct, inline, single-agent, or no-subagent review of code/config/test changes.
+  content_file: prompts/review-code-direct/SKILL.md
+  inputs:
+  - name: focus_area
+    label: Focus area
+    description: Optional text to narrow the review scope. Leave empty to review the entire branch.
+    type: string
+    required: false
+- name: review-design
+  description: Default design review using fresh-context subagents. Use for software design, architecture, proposals, API boundaries, module splits, data models, or design-sensitive diffs unless the user explicitly asks for direct, inline, single-agent, or no-subagent review.
+  content_file: prompts/review-design/SKILL.md
+  inputs:
+  - name: scope
+    label: Design scope
+    description: Optional design, diff, file, plan, or scope to evaluate. Leave empty to infer from conversation or current branch.
+    type: string
+    required: false
+- name: review-design-direct
+  description: Direct design review without subagents. Use only when the user explicitly asks for direct, inline, single-agent, or no-subagent review of software design, architecture, proposals, API boundaries, module splits, data models, or design-sensitive diffs.
+  content_file: prompts/review-design-direct/SKILL.md
+  inputs:
+  - name: scope
+    label: Design scope
+    description: Optional design, diff, file, plan, or scope to evaluate. Leave empty to infer from conversation or current branch.
+    type: string
+    required: false
+- name: review-tests
+  description: Default test review using fresh-context subagents. Use to review, strengthen, or add tests for changed behavior unless the user explicitly asks for direct, inline, single-agent, or no-subagent review.
+  content_file: prompts/review-tests/SKILL.md
+  inputs:
+  - name: focus_area
+    label: Focus area
+    description: Optional text to narrow the review to specific tests or areas. Leave empty to review all tests in the branch.
+    type: string
+    required: false
+- name: review-tests-direct
+  description: Direct test review without subagents. Use only when the user explicitly asks for direct, inline, single-agent, or no-subagent review of tests or changed behavior.
+  content_file: prompts/review-tests-direct/SKILL.md
+  inputs:
+  - name: focus_area
+    label: Focus area
+    description: Optional text to narrow the review to specific tests or areas. Leave empty to review all tests in the branch.
     type: string
     required: false
