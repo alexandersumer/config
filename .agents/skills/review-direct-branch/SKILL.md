@@ -1,6 +1,6 @@
 ---
 name: review-direct-branch
-description: Use when reviewing a pull request, diff, branch, or any set of code changes directly in the current session without subagents.
+description: Direct branch/code-change review without subagents. Use only when the user explicitly asks for direct, inline, single-agent, or no-subagent review.
 register_cmd: true
 ---
 

@@ -1,12 +1,12 @@
 ---
-name: improve-codebase-architecture
-description: Find high-leverage architecture improvements. Use when the user wants refactoring opportunities, deeper modules, better seams, less coupling, clearer ownership, stronger domain boundaries, AI-navigability, or a more testable codebase.
+name: review-delegated-architecture
+description: Default codebase architecture review. Use unless the user explicitly asks for direct, inline, single-agent, or no-subagent review. Uses fresh-context subagents to find small high-leverage design moves including deeper modules, better seams, less coupling, clearer ownership, stronger domain boundaries, AI-navigability, or a more testable codebase.
 register_cmd: true
 ---
 
-# Improve Codebase Architecture
+# Review Delegated Architecture
 
-Do not hunt architecture improvements alone. Use fresh-context subagents because architecture review is biased by session framing; your job is to ground the scope, dispatch role-specific scouts, validate candidates, and return only small high-leverage design moves. Do not edit product code.
+Do not review codebase architecture alone. Use fresh-context subagents because architecture review is biased by session framing; your job is to ground the scope, dispatch role-specific scouts, validate candidates, and return only small high-leverage design moves. Do not edit product code.
 
 1. **Resolve scope.** Use `scope`, `$ARGUMENTS`, the conversation target, or the current repo. Prefer the smallest coherent surface with callers, tests, and future change pressure. If that cannot be bounded quickly, ask one narrowing question.
 

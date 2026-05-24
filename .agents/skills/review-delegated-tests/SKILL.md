@@ -1,6 +1,6 @@
 ---
 name: review-delegated-tests
-description: Use when reviewing, strengthening, or adding tests for a pull request, branch, diff, bug fix, feature, or changed behavior using fresh-context subagents to identify validated test improvements.
+description: Default test review. Use unless the user explicitly asks for direct, inline, single-agent, or no-subagent review. Uses fresh-context subagents to review, strengthen, or add tests for changed behavior.
 register_cmd: true
 ---
 

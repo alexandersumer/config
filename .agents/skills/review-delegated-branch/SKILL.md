@@ -1,6 +1,6 @@
 ---
 name: review-delegated-branch
-description: Use when reviewing a pull request, diff, branch, or any set of code changes using fresh-context subagents for broad coverage and validated findings.
+description: Default branch/code-change review. Use unless the user explicitly asks for direct, inline, single-agent, or no-subagent review. Uses fresh-context subagents for broad coverage and validated findings.
 register_cmd: true
 ---
 

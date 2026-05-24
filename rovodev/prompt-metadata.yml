@@ -90,6 +90,20 @@ prompts:
         checks if needed.
       type: string
       required: false
+  review-delegated-architecture:
+    inputs:
+    - name: scope
+      label: Architecture scope
+      description: Optional codebase area, module, package, file, or architecture concern to review. Leave empty to infer from conversation or the current repo.
+      type: string
+      required: false
+  review-direct-architecture:
+    inputs:
+    - name: scope
+      label: Architecture scope
+      description: Optional codebase area, module, package, file, or architecture concern to review. Leave empty to infer from conversation or the current repo.
+      type: string
+      required: false
   grill-me:
     inputs:
     - name: plan

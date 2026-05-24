@@ -1,6 +1,6 @@
 ---
 name: review-direct-design
-description: Use when reviewing software design, architecture, a technical proposal, refactor plan, API boundary, module split, data model, or design-sensitive branch diff directly without subagents.
+description: Direct design review without subagents. Use only when the user explicitly asks for direct, inline, single-agent, or no-subagent review of software design, architecture, proposals, API boundaries, module splits, data models, or design-sensitive diffs.
 register_cmd: true
 ---
 

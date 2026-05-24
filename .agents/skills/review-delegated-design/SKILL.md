@@ -1,6 +1,6 @@
 ---
 name: review-delegated-design
-description: Use when reviewing software design, architecture, a technical proposal, refactor plan, API boundary, module split, data model, or design-sensitive branch diff using fresh-context subagents.
+description: Default design review. Use unless the user explicitly asks for direct, inline, single-agent, or no-subagent review. Uses fresh-context subagents for software design, architecture, proposals, API boundaries, module splits, data models, or design-sensitive diffs.
 register_cmd: true
 ---
 

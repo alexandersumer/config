@@ -149,9 +149,6 @@ prompts:
 - name: diagnose
   description: Diagnose hard bugs and performance regressions. Use when the failure is unclear, flaky, not yet reproduced, or needs a disciplined debug loop before fixing.
   content_file: prompts/diagnose/SKILL.md
-- name: improve-codebase-architecture
-  description: Find high-leverage architecture improvements. Use when the user wants refactoring opportunities, deeper modules, better seams, less coupling, clearer ownership, stronger domain boundaries, AI-navigability, or a more testable codebase.
-  content_file: prompts/improve-codebase-architecture/SKILL.md
 - name: brainstorming
   description: You MUST use this before any creative work - creating features, building components, adding functionality, or modifying behavior. Explores user intent, requirements and design before implementation.
   content_file: prompts/brainstorming/SKILL.md
@@ -204,7 +201,7 @@ prompts:
     type: string
     required: false
 - name: review-delegated-branch
-  description: Use when reviewing a pull request, diff, branch, or any set of code changes using fresh-context subagents for broad coverage and validated findings.
+  description: Default branch/code-change review. Use unless the user explicitly asks for direct, inline, single-agent, or no-subagent review. Uses fresh-context subagents for broad coverage and validated findings.
   content_file: prompts/review-delegated-branch/SKILL.md
   inputs:
   - name: focus_area
@@ -213,7 +210,7 @@ prompts:
     type: string
     required: false
 - name: review-delegated-design
-  description: Use when reviewing software design, architecture, a technical proposal, refactor plan, API boundary, module split, data model, or design-sensitive branch diff using fresh-context subagents.
+  description: Default design review. Use unless the user explicitly asks for direct, inline, single-agent, or no-subagent review. Uses fresh-context subagents for software design, architecture, proposals, API boundaries, module splits, data models, or design-sensitive diffs.
   content_file: prompts/review-delegated-design/SKILL.md
   inputs:
   - name: scope
@@ -222,7 +219,7 @@ prompts:
     type: string
     required: false
 - name: review-delegated-tests
-  description: Use when reviewing, strengthening, or adding tests for a pull request, branch, diff, bug fix, feature, or changed behavior using fresh-context subagents to identify validated test improvements.
+  description: Default test review. Use unless the user explicitly asks for direct, inline, single-agent, or no-subagent review. Uses fresh-context subagents to review, strengthen, or add tests for changed behavior.
   content_file: prompts/review-delegated-tests/SKILL.md
   inputs:
   - name: focus_area
@@ -231,7 +228,7 @@ prompts:
     type: string
     required: false
 - name: review-direct-branch
-  description: Use when reviewing a pull request, diff, branch, or any set of code changes directly in the current session without subagents.
+  description: Direct branch/code-change review without subagents. Use only when the user explicitly asks for direct, inline, single-agent, or no-subagent review.
   content_file: prompts/review-direct-branch/SKILL.md
   inputs:
   - name: focus_area
@@ -240,7 +237,7 @@ prompts:
     type: string
     required: false
 - name: review-direct-design
-  description: Use when reviewing software design, architecture, a technical proposal, refactor plan, API boundary, module split, data model, or design-sensitive branch diff directly without subagents.
+  description: Direct design review without subagents. Use only when the user explicitly asks for direct, inline, single-agent, or no-subagent review of software design, architecture, proposals, API boundaries, module splits, data models, or design-sensitive diffs.
   content_file: prompts/review-direct-design/SKILL.md
   inputs:
   - name: scope
@@ -249,11 +246,29 @@ prompts:
     type: string
     required: false
 - name: review-direct-tests
-  description: Use when reviewing, strengthening, or adding tests for a pull request, branch, diff, bug fix, feature, or changed behavior directly without subagents.
+  description: Direct test review without subagents. Use only when the user explicitly asks for direct, inline, single-agent, or no-subagent review of tests or changed behavior.
   content_file: prompts/review-direct-tests/SKILL.md
   inputs:
   - name: focus_area
     label: Focus area
     description: Optional text to narrow the review to specific tests or areas. Leave empty to review all tests in the branch.
+    type: string
+    required: false
+- name: review-delegated-architecture
+  description: Default codebase architecture review. Use unless the user explicitly asks for direct, inline, single-agent, or no-subagent review. Uses fresh-context subagents to find small high-leverage design moves including deeper modules, better seams, less coupling, clearer ownership, stronger domain boundaries, AI-navigability, or a more testable codebase.
+  content_file: prompts/review-delegated-architecture/SKILL.md
+  inputs:
+  - name: scope
+    label: Architecture scope
+    description: Optional codebase area, module, package, file, or architecture concern to review. Leave empty to infer from conversation or the current repo.
+    type: string
+    required: false
+- name: review-direct-architecture
+  description: Direct codebase architecture review without subagents. Use only when the user explicitly asks for direct, inline, single-agent, or no-subagent architecture review.
+  content_file: prompts/review-direct-architecture/SKILL.md
+  inputs:
+  - name: scope
+    label: Architecture scope
+    description: Optional codebase area, module, package, file, or architecture concern to review. Leave empty to infer from conversation or the current repo.
     type: string
     required: false
