@@ -680,6 +680,15 @@ nested_list=$(cd "$list_cwd" && home_reset_to_origin --list --include-nested "$d
 printf '%s\n' "$nested_list" | grep -Fx -- "$real_work/discovery/outer" >/dev/null
 printf '%s\n' "$nested_list" | grep -Fx -- "$real_work/discovery/outer/inner" >/dev/null
 
+default_list=$(cd "$list_cwd" && HOME_RESET_TO_ORIGIN_ROOTS="$discovery" home_reset_to_origin --list)
+printf '%s\n' "$default_list" | grep -Fx -- "$real_work/discovery/outer" >/dev/null
+if printf '%s\n' "$default_list" | grep -Fx -- "$real_work/discovery/outer/inner" >/dev/null; then
+  echo "default no-arg roots should stay fast and prune nested repos" >&2
+  exit 1
+fi
+all_home_list=$(cd "$list_cwd" && HOME="$work" HOME_RESET_TO_ORIGIN_ROOTS="$work/missing-root" home_reset_to_origin --list --all-home)
+printf '%s\n' "$all_home_list" | grep -Fx -- "$real_work/discovery/outer" >/dev/null
+
 make_clone() {
   local remote="$1"
   local clone="$2"

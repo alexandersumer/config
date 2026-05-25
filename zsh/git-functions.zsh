@@ -1182,19 +1182,39 @@ function reset_all_to_remote_default() {
 
 function _home_reset_to_origin_usage() {
     cat <<'EOF'
-usage: home_reset_to_origin [--list] [--include-nested] [--retries N] [--retry-delay SECS] [--root PATH|PATH] [-- single-repo args...]
+usage: home_reset_to_origin [--list] [--all-home] [--include-nested] [--retries N] [--retry-delay SECS] [--root PATH|PATH] [-- single-repo args...]
 
-Recursively finds git repositories under PATH, defaulting to $HOME, and resets each
-one to its remote default branch using the same safety checks as reset_to_origin.
+Recursively finds git repositories under your default workspace roots and resets
+each one to its remote default branch using the same safety checks as reset_to_origin.
+
+Default roots are existing directories from HOME_RESET_TO_ORIGIN_ROOTS, or:
+  ~/atlassian ~/oss ~/src ~/stable
 
 options:
   --list             print discovered repositories without resetting them
+  --all-home         scan all of $HOME instead of the fast default workspace roots
   --include-nested   include repos found inside another repo; by default they are pruned
   --retries N        retry transient git/network failures N times per repo (default: 3)
   --retry-delay S    base delay in seconds between retries (default: 2)
-  --root PATH        scan PATH instead of $HOME
+  --root PATH        scan PATH instead of the default workspace roots
   --                 pass remaining arguments to the single-repo reset helper
 EOF
+}
+
+function _home_reset_to_origin_default_roots() {
+    local configured_roots="${HOME_RESET_TO_ORIGIN_ROOTS:-}"
+    local root
+    local -a default_roots=()
+
+    if [[ -n "$configured_roots" ]]; then
+        default_roots=( ${(z)configured_roots} )
+    else
+        default_roots=("$HOME/atlassian" "$HOME/oss" "$HOME/src" "$HOME/stable")
+    fi
+
+    for root in "${default_roots[@]}"; do
+        [[ -d "$root" ]] && printf '%s\0' "${root:A}"
+    done
 }
 
 function _home_reset_to_origin_prune_expr() {
@@ -1205,35 +1225,57 @@ function _home_reset_to_origin_prune_expr() {
             "$HOME/Library" \
             "$HOME/.Trash" \
             "$HOME/.cache" \
-            "$HOME/Downloads"
+            "$HOME/Downloads" \
+            "$HOME/Applications" \
+            "$HOME/Desktop" \
+            "$HOME/Documents" \
+            "$HOME/Movies" \
+            "$HOME/Music" \
+            "$HOME/Pictures" \
+            "$HOME/Public" \
+            "$HOME/.npm" \
+            "$HOME/.pyenv" \
+            "$HOME/.sdkman" \
+            "$HOME/.Trash"
     fi
 }
 
 function _home_reset_to_origin_find_git_entries() {
     local root="$1"
     local -a prune_paths=()
-    local prune_path prune_output
+    local -a prune_names=(node_modules .venv venv target dist build .next .turbo .gradle)
+    local prune_path prune_name prune_output
+    local -a find_args=("$root" '(')
+    local -i first=1
 
     prune_output=$(_home_reset_to_origin_prune_expr "$root")
     if [[ -n "$prune_output" ]]; then
         prune_paths=("${(@f)prune_output}")
     fi
 
-    if (( ${#prune_paths[@]} > 0 )); then
-        local -a find_args=("$root" '(')
-        local -i first=1
-        for prune_path in "${prune_paths[@]}"; do
-            if (( first )); then
-                first=0
-            else
-                find_args+=(-o)
-            fi
-            find_args+=(-path "$prune_path")
-        done
+    for prune_path in "${prune_paths[@]}"; do
+        if (( first )); then
+            first=0
+        else
+            find_args+=(-o)
+        fi
+        find_args+=(-path "$prune_path")
+    done
+
+    for prune_name in "${prune_names[@]}"; do
+        if (( first )); then
+            first=0
+        else
+            find_args+=(-o)
+        fi
+        find_args+=(-name "$prune_name")
+    done
+
+    if (( first )); then
+        command find "$root" '(' -name .git -type d -print0 -prune -o -name .git -type f -print0 ')'
+    else
         find_args+=(')' -prune -o '(' -name .git -type d -print0 -prune -o -name .git -type f -print0 ')')
         command find "${find_args[@]}"
-    else
-        command find "$root" '(' -name .git -type d -print0 -prune -o -name .git -type f -print0 ')'
     fi
 }
 
@@ -1282,12 +1324,14 @@ function _home_reset_to_origin_repo_roots() {
 
 function home_reset_to_origin() {
     local root="$HOME"
-    local arg log_file entry repo_name
+    local arg log_file entry repo_name display_root scan_label
     local -a positional=()
     local -a reset_args=()
     local -a repos=()
+    local -a roots=()
     local -a failed_repos=()
-    local -i list_only=0 include_nested=0 parsing=1
+    local -A seen_repo=()
+    local -i list_only=0 all_home=0 include_nested=0 parsing=1
     local -i max_attempts=3 retry_base_delay=2
     local -i total=0 ok_count=0 fail_count=0 retried_count=0 index=0
     local -i attempt=0 delay=0 status_code=0
@@ -1301,6 +1345,10 @@ function home_reset_to_origin() {
                 ;;
             --list)
                 list_only=1
+                shift
+                ;;
+            --all-home)
+                all_home=1
                 shift
                 ;;
             --include-nested)
@@ -1354,19 +1402,38 @@ function home_reset_to_origin() {
     fi
 
     if (( ${#positional[@]} == 1 )); then
-        root="${positional[1]}"
-    fi
-
-    if [[ -d "$root" ]]; then
-        root="${root:A}"
+        roots=("${positional[1]}")
+        scan_label="${positional[1]}"
+    elif (( all_home )); then
+        roots=("$HOME")
+        scan_label="$HOME"
     else
-        printf '\033[31merror: %s is not a directory\033[0m\n' "$root" >&2
-        return 1
+        while IFS= read -r -d '' entry; do
+            roots+=("$entry")
+        done < <(_home_reset_to_origin_default_roots)
+        scan_label="default workspace roots"
     fi
 
-    while IFS= read -r -d '' entry; do
-        repos+=("$entry")
-    done < <(_home_reset_to_origin_repo_roots "$root" "$include_nested")
+    if (( ${#roots[@]} == 0 )); then
+        printf '\033[33mno default workspace roots found; set HOME_RESET_TO_ORIGIN_ROOTS or use --all-home/--root\033[0m\n' >&2
+        return 0
+    fi
+
+    for root in "${roots[@]}"; do
+        if [[ -d "$root" ]]; then
+            root="${root:A}"
+        else
+            printf '\033[31merror: %s is not a directory\033[0m\n' "$root" >&2
+            return 1
+        fi
+
+        while IFS= read -r -d '' entry; do
+            if [[ -z "${seen_repo[$entry]-}" ]]; then
+                seen_repo[$entry]=1
+                repos+=("$entry")
+            fi
+        done < <(_home_reset_to_origin_repo_roots "$root" "$include_nested")
+    done
 
     total=${#repos[@]}
     if (( list_only )); then
@@ -1375,7 +1442,7 @@ function home_reset_to_origin() {
     fi
 
     printf 'scanning \033[32m%s\033[0m (%d git repos, retries=%d)\n' \
-        "$root" "$total" "$max_attempts"
+        "$scan_label" "$total" "$max_attempts"
 
     if (( total == 0 )); then
         return 0
@@ -1389,8 +1456,14 @@ function home_reset_to_origin() {
 
     for entry in "${repos[@]}"; do
         (( index++ ))
-        repo_name="${entry#$root/}"
-        [[ "$repo_name" == "$entry" ]] && repo_name="$entry"
+        repo_name="$entry"
+        for display_root in "${roots[@]}"; do
+            display_root="${display_root:A}"
+            if [[ "$entry" == "$display_root"/* ]]; then
+                repo_name="${entry#$display_root/}"
+                break
+            fi
+        done
 
         printf '\n[%d/%d] \033[32m%s\033[0m\n' "$index" "$total" "$repo_name"
         printf -- '----------------------------------------\n'
