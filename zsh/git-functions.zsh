@@ -1180,6 +1180,281 @@ function reset_all_to_remote_default() {
     reset_to_remote_default --multi "$@"
 }
 
+function _home_reset_to_origin_usage() {
+    cat <<'EOF'
+usage: home_reset_to_origin [--list] [--include-nested] [--retries N] [--retry-delay SECS] [--root PATH|PATH] [-- single-repo args...]
+
+Recursively finds git repositories under PATH, defaulting to $HOME, and resets each
+one to its remote default branch using the same safety checks as reset_to_origin.
+
+options:
+  --list             print discovered repositories without resetting them
+  --include-nested   include repos found inside another repo; by default they are pruned
+  --retries N        retry transient git/network failures N times per repo (default: 3)
+  --retry-delay S    base delay in seconds between retries (default: 2)
+  --root PATH        scan PATH instead of $HOME
+  --                 pass remaining arguments to the single-repo reset helper
+EOF
+}
+
+function _home_reset_to_origin_prune_expr() {
+    local root="$1"
+
+    if [[ "$root" == "$HOME" || "$root" == "$HOME/"* ]]; then
+        printf '%s\n' \
+            "$HOME/Library" \
+            "$HOME/.Trash" \
+            "$HOME/.cache" \
+            "$HOME/Downloads"
+    fi
+}
+
+function _home_reset_to_origin_find_git_entries() {
+    local root="$1"
+    local -a prune_paths=()
+    local prune_path prune_output
+
+    prune_output=$(_home_reset_to_origin_prune_expr "$root")
+    if [[ -n "$prune_output" ]]; then
+        prune_paths=("${(@f)prune_output}")
+    fi
+
+    if (( ${#prune_paths[@]} > 0 )); then
+        local -a find_args=("$root" '(')
+        local -i first=1
+        for prune_path in "${prune_paths[@]}"; do
+            if (( first )); then
+                first=0
+            else
+                find_args+=(-o)
+            fi
+            find_args+=(-path "$prune_path")
+        done
+        find_args+=(')' -prune -o '(' -name .git -type d -print0 -prune -o -name .git -type f -print0 ')')
+        command find "${find_args[@]}"
+    else
+        command find "$root" '(' -name .git -type d -print0 -prune -o -name .git -type f -print0 ')'
+    fi
+}
+
+function _home_reset_to_origin_repo_roots() {
+    local root="$1"
+    local include_nested="${2:-0}"
+    local git_entry repo root_abs repo_abs top_level candidate selected_repo
+    local -i inside_selected=0
+    local -A seen=()
+    local -a candidates=()
+    local -a selected=()
+
+    root_abs="${root:A}"
+
+    while IFS= read -r -d '' git_entry; do
+        repo="${git_entry:h}"
+        repo_abs="${repo:A}"
+        top_level=$(git -C "$repo_abs" rev-parse --show-toplevel 2>/dev/null) || continue
+        top_level="${top_level:A}"
+
+        if [[ -z "${seen[$top_level]-}" ]]; then
+            seen[$top_level]=1
+            candidates+=("$top_level")
+        fi
+    done < <(_home_reset_to_origin_find_git_entries "$root_abs")
+
+    if (( include_nested )); then
+        (( ${#candidates[@]} > 0 )) && printf '%s\0' "${candidates[@]}"
+        return 0
+    fi
+
+    for candidate in "${(o)candidates[@]}"; do
+        inside_selected=0
+        for selected_repo in "${selected[@]}"; do
+            if [[ "$candidate" == "$selected_repo"/* ]]; then
+                inside_selected=1
+                break
+            fi
+        done
+        (( inside_selected )) && continue
+        selected+=("$candidate")
+    done
+
+    (( ${#selected[@]} > 0 )) && printf '%s\0' "${selected[@]}"
+}
+
+function home_reset_to_origin() {
+    local root="$HOME"
+    local arg log_file entry repo_name
+    local -a positional=()
+    local -a reset_args=()
+    local -a repos=()
+    local -a failed_repos=()
+    local -i list_only=0 include_nested=0 parsing=1
+    local -i max_attempts=3 retry_base_delay=2
+    local -i total=0 ok_count=0 fail_count=0 retried_count=0 index=0
+    local -i attempt=0 delay=0 status_code=0
+
+    while (( parsing && $# > 0 )); do
+        arg="$1"
+        case "$arg" in
+            --help|-h)
+                _home_reset_to_origin_usage
+                return 0
+                ;;
+            --list)
+                list_only=1
+                shift
+                ;;
+            --include-nested)
+                include_nested=1
+                shift
+                ;;
+            --root)
+                if [[ -z "${2-}" ]]; then
+                    printf '\033[31merror: --root requires a path\033[0m\n' >&2
+                    return 1
+                fi
+                positional+=("$2")
+                shift 2
+                ;;
+            --retries)
+                if [[ -z "${2-}" || "$2" != <-> ]]; then
+                    printf '\033[31merror: --retries requires a non-negative integer\033[0m\n' >&2
+                    return 1
+                fi
+                max_attempts=$2
+                (( max_attempts < 1 )) && max_attempts=1
+                shift 2
+                ;;
+            --retry-delay)
+                if [[ -z "${2-}" || "$2" != <-> ]]; then
+                    printf '\033[31merror: --retry-delay requires a non-negative integer\033[0m\n' >&2
+                    return 1
+                fi
+                retry_base_delay=$2
+                shift 2
+                ;;
+            --)
+                shift
+                reset_args=("$@")
+                parsing=0
+                ;;
+            --*)
+                printf '\033[31merror: unknown option %s\033[0m\n' "$arg" >&2
+                return 1
+                ;;
+            *)
+                positional+=("$arg")
+                shift
+                ;;
+        esac
+    done
+
+    if (( ${#positional[@]} > 1 )); then
+        printf '\033[31merror: too many root paths\033[0m\n' >&2
+        return 1
+    fi
+
+    if (( ${#positional[@]} == 1 )); then
+        root="${positional[1]}"
+    fi
+
+    if [[ -d "$root" ]]; then
+        root="${root:A}"
+    else
+        printf '\033[31merror: %s is not a directory\033[0m\n' "$root" >&2
+        return 1
+    fi
+
+    while IFS= read -r -d '' entry; do
+        repos+=("$entry")
+    done < <(_home_reset_to_origin_repo_roots "$root" "$include_nested")
+
+    total=${#repos[@]}
+    if (( list_only )); then
+        (( total > 0 )) && printf '%s\n' "${repos[@]}"
+        return 0
+    fi
+
+    printf 'scanning \033[32m%s\033[0m (%d git repos, retries=%d)\n' \
+        "$root" "$total" "$max_attempts"
+
+    if (( total == 0 )); then
+        return 0
+    fi
+
+    log_file=$(mktemp -t home_reset_to_origin.XXXXXX) || {
+        printf '\033[31merror: could not create temp log file\033[0m\n' >&2
+        return 1
+    }
+    trap 'rm -f "$log_file"; trap - INT TERM; return 130' INT TERM
+
+    for entry in "${repos[@]}"; do
+        (( index++ ))
+        repo_name="${entry#$root/}"
+        [[ "$repo_name" == "$entry" ]] && repo_name="$entry"
+
+        printf '\n[%d/%d] \033[32m%s\033[0m\n' "$index" "$total" "$repo_name"
+        printf -- '----------------------------------------\n'
+
+        attempt=1
+        status_code=0
+        while (( attempt <= max_attempts )); do
+            : > "$log_file"
+            if (( ${#reset_args[@]} > 0 )); then
+                ( cd -- "$entry" && _reset_to_remote_default_single "${reset_args[@]}" ) 2>&1 | tee "$log_file"
+                status_code=${pipestatus[1]}
+            else
+                ( cd -- "$entry" && _reset_to_remote_default_single ) 2>&1 | tee "$log_file"
+                status_code=${pipestatus[1]}
+            fi
+
+            if (( status_code == 0 )); then
+                break
+            fi
+
+            if (( attempt >= max_attempts )) || ! _is_transient_git_failure "$log_file"; then
+                break
+            fi
+
+            delay=$(( retry_base_delay * (1 << (attempt - 1)) ))
+            printf '\033[33mretry attempt %d/%d in %ds\033[0m\n' \
+                "$(( attempt + 1 ))" "$max_attempts" "$delay"
+            printf -- '----------------------------------------\n'
+            sleep "$delay"
+            (( attempt++ ))
+        done
+
+        if (( status_code == 0 )); then
+            (( ok_count++ ))
+            if (( attempt > 1 )); then
+                (( retried_count++ ))
+                printf '\033[32mrecovered after %d attempts\033[0m\n' "$attempt"
+            fi
+        else
+            (( fail_count++ ))
+            local plural=s
+            (( attempt == 1 )) && plural=
+            failed_repos+=("$entry (exit $status_code after $attempt attempt$plural)")
+        fi
+    done
+
+    rm -f "$log_file"
+    trap - INT TERM
+
+    printf '\n========================================\n'
+    printf 'summary: %d total, \033[32m%d ok\033[0m (\033[33m%d retried\033[0m), \033[31m%d failed\033[0m\n' \
+        "$total" "$ok_count" "$retried_count" "$fail_count"
+
+    if (( fail_count > 0 )); then
+        printf '\033[31mfailed repositories:\033[0m\n'
+        for entry in "${failed_repos[@]}"; do
+            printf '  %s\n' "$entry"
+        done
+        return 1
+    fi
+
+    return 0
+}
+
 # Backward-compatible aliases for the previous origin-named entry points.
 function reset_to_origin()              { reset_to_remote_default "$@"; }
 function reset_all_to_origin()          { reset_all_to_remote_default "$@"; }

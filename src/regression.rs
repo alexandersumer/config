@@ -40,6 +40,7 @@ pub(crate) fn run_regression_tests() -> Result<()> {
     test_link_safety()?;
     test_command_failures()?;
     test_git_fetch_ref_cleanup()?;
+    test_home_reset_to_origin()?;
     test_axiom_alias_zsh_wiring()?;
     test_relay_axiom_config()?;
     Ok(())
@@ -628,6 +629,103 @@ debug refs after cleanup:
             "fake fetch should have succeeded on second attempt, got {attempts:?}"
         ));
     }
+    Ok(())
+}
+
+fn test_home_reset_to_origin() -> Result<()> {
+    let config_root = std::env::current_dir()
+        .map_err(|err| format!("cannot determine config root for home reset test: {err}"))?;
+    if !config_root.join("zsh/git-functions.zsh").is_file() {
+        return Err(format!(
+            "{}: home reset test must run from config repo root",
+            config_root.display()
+        ));
+    }
+    let work = tempfile::Builder::new()
+        .prefix("tmp_home_reset_to_origin_")
+        .tempdir()
+        .map_err(|err| format!("cannot create home reset fixture: {err}"))?;
+
+    let config_root_arg = config_root.display().to_string();
+    let work_arg = work.path().display().to_string();
+    let script = r#"
+set -eu
+set -o pipefail
+config_root="$1"
+work="$2"
+real_work=$(cd "$work" && pwd -P)
+source "$config_root/zsh/git-functions.zsh"
+
+typeset -f home_reset_to_origin >/dev/null
+case "$(typeset -f home_reset_to_origin | head -1)" in
+  home_reset_to_origin\ *) ;;
+  *) echo "home_reset_to_origin should not be a reset-prefixed function" >&2; exit 1 ;;
+esac
+
+discovery="$work/discovery"
+git init --initial-branch=main "$discovery/outer" >/dev/null
+git init --initial-branch=main "$discovery/outer/inner" >/dev/null
+list_cwd="/tmp"
+[[ -d "$list_cwd" ]] || list_cwd="$work"
+before_pwd="$list_cwd"
+list=$(cd "$list_cwd" && home_reset_to_origin --list "$discovery")
+after_pwd="$list_cwd"
+[[ "$before_pwd" = "$after_pwd" ]]
+printf '%s\n' "$list" | grep -Fx -- "$real_work/discovery/outer" >/dev/null
+if printf '%s\n' "$list" | grep -Fx -- "$real_work/discovery/outer/inner" >/dev/null; then
+  echo "nested repos should be pruned by default" >&2
+  exit 1
+fi
+nested_list=$(cd "$list_cwd" && home_reset_to_origin --list --include-nested "$discovery")
+printf '%s\n' "$nested_list" | grep -Fx -- "$real_work/discovery/outer" >/dev/null
+printf '%s\n' "$nested_list" | grep -Fx -- "$real_work/discovery/outer/inner" >/dev/null
+
+make_clone() {
+  local remote="$1"
+  local clone="$2"
+  git init --bare --initial-branch=main "$remote" >/dev/null
+  git clone "$remote" "$clone" >/dev/null 2>&1
+  git -C "$clone" config user.email test@example.com
+  git -C "$clone" config user.name 'Test User'
+  printf 'base\n' > "$clone/file.txt"
+  git -C "$clone" add file.txt
+  git -C "$clone" commit -m initial >/dev/null
+  git -C "$clone" push -u origin main >/dev/null 2>&1
+}
+
+reset_root="$work/reset-root"
+mkdir -p "$reset_root/nested"
+make_clone "$work/good.git" "$reset_root/nested/good repo"
+make_clone "$work/dirty.git" "$reset_root/dirty"
+git clone "$work/good.git" "$work/updater" >/dev/null 2>&1
+git -C "$work/updater" config user.email test@example.com
+git -C "$work/updater" config user.name 'Test User'
+printf 'remote update\n' > "$work/updater/file.txt"
+git -C "$work/updater" commit -am 'remote update' >/dev/null
+git -C "$work/updater" push origin main >/dev/null 2>&1
+printf 'dirty local edit\n' >> "$reset_root/dirty/file.txt"
+
+run_from="$work/run-from-anywhere"
+mkdir -p "$run_from"
+cd "$run_from"
+if home_reset_to_origin "$reset_root" -- --sync; then
+  echo "dirty repo should make home_reset_to_origin fail" >&2
+  exit 1
+fi
+[[ "$PWD" = "$run_from" ]]
+
+good_head=$(git -C "$reset_root/nested/good repo" rev-parse HEAD)
+good_remote_head=$(git -C "$reset_root/nested/good repo" rev-parse origin/main)
+[[ "$good_head" = "$good_remote_head" ]]
+grep -F 'dirty local edit' "$reset_root/dirty/file.txt" >/dev/null
+git -C "$reset_root/dirty" status --porcelain=v1 --untracked-files=no | grep -F ' M file.txt' >/dev/null
+"#;
+
+    run_command_output(
+        work.path(),
+        "zsh",
+        &["-lc", script, "--", &config_root_arg, &work_arg],
+    )?;
     Ok(())
 }
 
