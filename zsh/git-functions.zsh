@@ -1419,106 +1419,140 @@ function home_reset_to_origin() {
         return 0
     fi
 
-    for root in "${roots[@]}"; do
-        if [[ -d "$root" ]]; then
-            root="${root:A}"
-        else
-            printf '\033[31merror: %s is not a directory\033[0m\n' "$root" >&2
+    if (( list_only || include_nested || all_home )); then
+        for root in "${roots[@]}"; do
+            if [[ -d "$root" ]]; then
+                root="${root:A}"
+            else
+                printf '\033[31merror: %s is not a directory\033[0m\n' "$root" >&2
+                return 1
+            fi
+
+            while IFS= read -r -d '' entry; do
+                if [[ -z "${seen_repo[$entry]-}" ]]; then
+                    seen_repo[$entry]=1
+                    repos+=("$entry")
+                fi
+            done < <(_home_reset_to_origin_repo_roots "$root" "$include_nested")
+        done
+
+        total=${#repos[@]}
+        if (( list_only )); then
+            (( total > 0 )) && printf '%s\n' "${repos[@]}"
+            return 0
+        fi
+    fi
+
+    if (( include_nested || all_home )); then
+        printf 'scanning \033[32m%s\033[0m (%d git repos, retries=%d)\n' \
+            "$scan_label" "$total" "$max_attempts"
+
+        if (( total == 0 )); then
+            return 0
+        fi
+
+        log_file=$(mktemp -t home_reset_to_origin.XXXXXX) || {
+            printf '\033[31merror: could not create temp log file\033[0m\n' >&2
+            return 1
+        }
+        trap 'rm -f "$log_file"; trap - INT TERM; return 130' INT TERM
+
+        for entry in "${repos[@]}"; do
+            (( ++index ))
+            repo_name="$entry"
+            for display_root in "${roots[@]}"; do
+                display_root="${display_root:A}"
+                if [[ "$entry" == "$display_root"/* ]]; then
+                    repo_name="${entry#$display_root/}"
+                    break
+                fi
+            done
+
+            printf '\n[%d/%d] \033[32m%s\033[0m\n' "$index" "$total" "$repo_name"
+            printf -- '----------------------------------------\n'
+
+            attempt=1
+            status_code=0
+            while (( attempt <= max_attempts )); do
+                : > "$log_file"
+                if (( ${#reset_args[@]} > 0 )); then
+                    ( cd -- "$entry" && reset_to_origin "${reset_args[@]}" ) 2>&1 | tee "$log_file"
+                    status_code=${pipestatus[1]}
+                else
+                    ( cd -- "$entry" && reset_to_origin ) 2>&1 | tee "$log_file"
+                    status_code=${pipestatus[1]}
+                fi
+
+                if (( status_code == 0 )); then
+                    break
+                fi
+
+                if (( attempt >= max_attempts )) || ! _is_transient_git_failure "$log_file"; then
+                    break
+                fi
+
+                delay=$(( retry_base_delay * (1 << (attempt - 1)) ))
+                printf '\033[33mretry attempt %d/%d in %ds\033[0m\n' \
+                    "$(( attempt + 1 ))" "$max_attempts" "$delay"
+                printf -- '----------------------------------------\n'
+                sleep "$delay"
+                (( ++attempt ))
+            done
+
+            if (( status_code == 0 )); then
+                (( ++ok_count ))
+                if (( attempt > 1 )); then
+                    (( ++retried_count ))
+                    printf '\033[32mrecovered after %d attempts\033[0m\n' "$attempt"
+                fi
+            else
+                (( ++fail_count ))
+                local plural=s
+                (( attempt == 1 )) && plural=
+                failed_repos+=("$entry (exit $status_code after $attempt attempt$plural)")
+            fi
+        done
+
+        rm -f "$log_file"
+        trap - INT TERM
+
+        printf '\n========================================\n'
+        printf 'summary: %d total, \033[32m%d ok\033[0m (\033[33m%d retried\033[0m), \033[31m%d failed\033[0m\n' \
+            "$total" "$ok_count" "$retried_count" "$fail_count"
+
+        if (( fail_count > 0 )); then
+            printf '\033[31mfailed repositories:\033[0m\n'
+            for entry in "${failed_repos[@]}"; do
+                printf '  %s\n' "$entry"
+            done
             return 1
         fi
 
-        while IFS= read -r -d '' entry; do
-            if [[ -z "${seen_repo[$entry]-}" ]]; then
-                seen_repo[$entry]=1
-                repos+=("$entry")
-            fi
-        done < <(_home_reset_to_origin_repo_roots "$root" "$include_nested")
-    done
-
-    total=${#repos[@]}
-    if (( list_only )); then
-        (( total > 0 )) && printf '%s\n' "${repos[@]}"
         return 0
     fi
 
-    printf 'scanning \033[32m%s\033[0m (%d git repos, retries=%d)\n' \
-        "$scan_label" "$total" "$max_attempts"
+    total=${#roots[@]}
+    for root in "${roots[@]}"; do
+        (( ++index ))
+        root="${root:A}"
+        printf '\n[%d/%d roots] \033[32m%s\033[0m\n' "$index" "$total" "$root"
+        printf '========================================\n'
 
-    if (( total == 0 )); then
-        return 0
-    fi
+        local -a multi_argv=("$root" --retries "$max_attempts" --retry-delay "$retry_base_delay")
+        if (( ${#reset_args[@]} > 0 )); then
+            multi_argv+=(-- "${reset_args[@]}")
+        fi
 
-    log_file=$(mktemp -t home_reset_to_origin.XXXXXX) || {
-        printf '\033[31merror: could not create temp log file\033[0m\n' >&2
-        return 1
-    }
-    trap 'rm -f "$log_file"; trap - INT TERM; return 130' INT TERM
-
-    for entry in "${repos[@]}"; do
-        (( index++ ))
-        repo_name="$entry"
-        for display_root in "${roots[@]}"; do
-            display_root="${display_root:A}"
-            if [[ "$entry" == "$display_root"/* ]]; then
-                repo_name="${entry#$display_root/}"
-                break
-            fi
-        done
-
-        printf '\n[%d/%d] \033[32m%s\033[0m\n' "$index" "$total" "$repo_name"
-        printf -- '----------------------------------------\n'
-
-        attempt=1
-        status_code=0
-        while (( attempt <= max_attempts )); do
-            : > "$log_file"
-            if (( ${#reset_args[@]} > 0 )); then
-                ( cd -- "$entry" && _reset_to_remote_default_single "${reset_args[@]}" ) 2>&1 | tee "$log_file"
-                status_code=${pipestatus[1]}
-            else
-                ( cd -- "$entry" && _reset_to_remote_default_single ) 2>&1 | tee "$log_file"
-                status_code=${pipestatus[1]}
-            fi
-
-            if (( status_code == 0 )); then
-                break
-            fi
-
-            if (( attempt >= max_attempts )) || ! _is_transient_git_failure "$log_file"; then
-                break
-            fi
-
-            delay=$(( retry_base_delay * (1 << (attempt - 1)) ))
-            printf '\033[33mretry attempt %d/%d in %ds\033[0m\n' \
-                "$(( attempt + 1 ))" "$max_attempts" "$delay"
-            printf -- '----------------------------------------\n'
-            sleep "$delay"
-            (( attempt++ ))
-        done
-
-        if (( status_code == 0 )); then
-            (( ok_count++ ))
-            if (( attempt > 1 )); then
-                (( retried_count++ ))
-                printf '\033[32mrecovered after %d attempts\033[0m\n' "$attempt"
-            fi
-        else
-            (( fail_count++ ))
-            local plural=s
-            (( attempt == 1 )) && plural=
-            failed_repos+=("$entry (exit $status_code after $attempt attempt$plural)")
+        reset_to_origin --multi "${multi_argv[@]}"
+        status_code=$?
+        if (( status_code != 0 )); then
+            failed_repos+=("$root (exit $status_code)")
+            (( ++fail_count ))
         fi
     done
 
-    rm -f "$log_file"
-    trap - INT TERM
-
-    printf '\n========================================\n'
-    printf 'summary: %d total, \033[32m%d ok\033[0m (\033[33m%d retried\033[0m), \033[31m%d failed\033[0m\n' \
-        "$total" "$ok_count" "$retried_count" "$fail_count"
-
     if (( fail_count > 0 )); then
-        printf '\033[31mfailed repositories:\033[0m\n'
+        printf '\n\033[31mfailed roots:\033[0m\n'
         for entry in "${failed_repos[@]}"; do
             printf '  %s\n' "$entry"
         done

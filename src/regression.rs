@@ -689,6 +689,26 @@ fi
 all_home_list=$(cd "$list_cwd" && HOME="$work" HOME_RESET_TO_ORIGIN_ROOTS="$work/missing-root" home_reset_to_origin --list --all-home)
 printf '%s\n' "$all_home_list" | grep -Fx -- "$real_work/discovery/outer" >/dev/null
 
+stream_root="$work/stream-root"
+git init --initial-branch=main "$stream_root/child-one" >/dev/null
+stream_output=$(cd "$list_cwd" && HOME_RESET_TO_ORIGIN_ROOTS="$stream_root" home_reset_to_origin --retries 1 2>&1 || true)
+printf '%s\n' "$stream_output" | grep -F "[1/1 roots]" | grep -F "$real_work/stream-root" >/dev/null
+printf '%s\n' "$stream_output" | grep -F "scanning" | grep -F "$real_work/stream-root" | grep -F "(1 entries, retries=1)" >/dev/null
+reset_to_origin() {
+  printf 'stub reset_to_origin argv:%s\n' "$*"
+  return 0
+}
+stub_output=$(cd "$list_cwd" && HOME_RESET_TO_ORIGIN_ROOTS="$stream_root" home_reset_to_origin --retries 4 --retry-delay 0 -- --sync 2>&1)
+case "$stub_output" in
+  *"stub reset_to_origin argv:--multi $real_work/stream-root --retries 4 --retry-delay 0 -- --sync"*) ;;
+  *) printf '%s\n' "$stub_output" >&2; exit 1 ;;
+esac
+recursive_stub_output=$(cd "$list_cwd" && home_reset_to_origin --include-nested "$discovery" -- --sync 2>&1)
+recursive_stub_lines=("${(@f)recursive_stub_output}")
+recursive_stub_matches=("${(@M)recursive_stub_lines:#*stub reset_to_origin argv:--sync*}")
+[[ "${#recursive_stub_matches[@]}" = "2" ]]
+source "$config_root/zsh/git-functions.zsh"
+
 make_clone() {
   local remote="$1"
   local clone="$2"
@@ -717,7 +737,7 @@ printf 'dirty local edit\n' >> "$reset_root/dirty/file.txt"
 run_from="$work/run-from-anywhere"
 mkdir -p "$run_from"
 cd "$run_from"
-if home_reset_to_origin "$reset_root" -- --sync; then
+if home_reset_to_origin --include-nested "$reset_root" -- --sync; then
   echo "dirty repo should make home_reset_to_origin fail" >&2
   exit 1
 fi
@@ -728,6 +748,10 @@ good_remote_head=$(git -C "$reset_root/nested/good repo" rev-parse origin/main)
 [[ "$good_head" = "$good_remote_head" ]]
 grep -F 'dirty local edit' "$reset_root/dirty/file.txt" >/dev/null
 git -C "$reset_root/dirty" status --porcelain=v1 --untracked-files=no | grep -F ' M file.txt' >/dev/null
+home_reset_log="$work/home-reset.log"
+(cd "$run_from" && home_reset_to_origin --include-nested "$reset_root" -- --sync >"$home_reset_log" 2>&1 || true)
+grep -F 'resetting to ' "$home_reset_log" | grep -F 'origin/main' >/dev/null
+grep -F 'reset_to_remote_default would discard local changes' "$home_reset_log" >/dev/null
 "#;
 
     run_command_output(
