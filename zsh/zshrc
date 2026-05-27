@@ -86,6 +86,10 @@ alias alta-2="cd $HOME/atlassian/alta-2"
 alias alta-3="cd $HOME/atlassian/alta-3"
 alias alta-4="cd $HOME/atlassian/alta-4"
 alias alta-5="cd $HOME/atlassian/alta-5"
+alias relay-1="cd $HOME/atlassian/relay-1"
+alias relay-2="cd $HOME/atlassian/relay-2"
+alias alta-contrib-1="cd $HOME/atlassian/alta-contrib-1"
+alias alta-contrib-2="cd $HOME/atlassian/alta-contrib-2"
 
 ########################################
 # Functions
