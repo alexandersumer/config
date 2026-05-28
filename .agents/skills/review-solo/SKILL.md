@@ -1,12 +1,12 @@
 ---
-name: review-code-direct
+name: review-solo
 description: Direct code-change review without subagents. Use only when the user explicitly asks for direct, inline, single-agent, or no-subagent review of code/config/test changes.
 register_cmd: true
 ---
 
-# Review Code Direct
+# Review Solo
 
-Review the code directly in this session. Do not invoke subagents. Preserve the same quality bar as `review-code` by doing explicit, sequential review passes and validating every finding against concrete code, behavior, or conventions.
+Review the code directly in this session. Do not invoke subagents. Preserve the same quality bar as `review` by doing explicit, sequential review passes and validating every finding against concrete code, behavior, or conventions.
 
 1. **Get the effective review diff automatically.** Do not require a PR, explicit scope, or committed branch changes. Resolve the remote default branch from `origin/HEAD`, falling back to `origin/main` or `origin/master` only if needed; if no remote default exists, omit only the committed-branch part. Build one effective diff from the union of: committed branch changes with `git diff $(git merge-base <remote-default> HEAD)..HEAD`, staged changes with `git diff --cached`, unstaged changes with `git diff`, and untracked files from `git ls-files --others --exclude-standard` rendered as new-file diffs. Always include staged, unstaged, and untracked changes even when the committed branch diff exists. If `focus_area` or `$ARGUMENTS` is provided, use it only to narrow this discovered diff. If the effective review diff is empty, draft-only, formatter-only, version-bump-only, or already reviewed in this thread, stop with a one-line note.
 

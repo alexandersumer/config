@@ -1,12 +1,12 @@
 ---
-name: review-design-direct
+name: design-review-solo
 description: Direct design review without subagents. Use only when the user explicitly asks for direct, inline, single-agent, or no-subagent review of software design, architecture, proposals, API boundaries, module splits, data models, or design-sensitive diffs.
 register_cmd: true
 ---
 
-# Review Design Direct
+# Design Review Solo
 
-Review the design directly in this session. Do not invoke subagents. Preserve the same quality bar as `review-design` by grounding the review in the artifact, diff, code context, conventions, and concrete future change paths.
+Review the design directly in this session. Do not invoke subagents. Preserve the same quality bar as `design-review` by grounding the review in the artifact, diff, code context, conventions, and concrete future change paths.
 
 1. **Resolve the scope and effective diff automatically.** Use `scope`, `$ARGUMENTS`, the conversation, artifact, or file when provided; otherwise default to the effective branch/worktree diff. Do not require a PR, explicit scope, or committed branch changes. For diff review, resolve the remote default branch from `origin/HEAD`, falling back to `origin/main` or `origin/master` only if needed; if no remote default exists, omit only the committed-branch part. Build one effective diff from the union of: committed branch changes with `git diff $(git merge-base <remote-default> HEAD)..HEAD`, staged changes with `git diff --cached`, unstaged changes with `git diff`, and untracked files from `git ls-files --others --exclude-standard` rendered as new-file diffs. Always include staged, unstaged, and untracked changes even when the committed branch diff exists. If `scope` or `$ARGUMENTS` is provided, use it only to narrow this discovered diff unless it names a separate artifact or file. If no artifact/file/diff can be discovered and the design target is still unclear after reading available context, ask one precise question and stop.
 

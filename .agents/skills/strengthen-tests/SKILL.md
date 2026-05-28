@@ -1,10 +1,10 @@
 ---
-name: review-tests
+name: strengthen-tests
 description: Default test review using fresh-context subagents. Use to review, strengthen, or add tests for changed behavior unless the user explicitly asks for direct, inline, single-agent, or no-subagent review.
 register_cmd: true
 ---
 
-# Review Tests
+# Strengthen Tests
 
 You do not strengthen tests by guessing from the patch or by only polishing tests that already exist. Fresh-context subagents identify realistic regressions, missing coverage, and weak assertions; your job is to provide the changed behavior, relevant production code, discovered test harnesses, conventions, and then make only validated test improvements.
 

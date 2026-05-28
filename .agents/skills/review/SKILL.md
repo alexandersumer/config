@@ -1,10 +1,10 @@
 ---
-name: review-code
+name: review
 description: Default code-change review using fresh-context subagents. Use for PRs, diffs, branches, staged changes, unstaged changes, untracked files, or any set of code/config/test changes unless the user explicitly asks for direct, inline, single-agent, or no-subagent review.
 register_cmd: true
 ---
 
-# Review Code
+# Review
 
 You do not review the code directly. Subagents do the reviewing in fresh context because session history biases the reviewer toward the author's framing and burns tokens on noise. Your job is dispatching and aggregating.
 

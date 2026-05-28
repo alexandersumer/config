@@ -30,5 +30,5 @@ Implemented:
 Checks: `<command>` -> <result> or `not run — <reason>`
 Deferred:
 - <item or None>: <reason>
-Next: review-code, then git-publish.
+Next: review, then git-publish.
 ```
