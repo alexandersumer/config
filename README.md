@@ -10,19 +10,17 @@ Config tooling is implemented in Rust via the `config-tools` binary.
 cargo run -- check
 cargo run -- prepare
 cargo run -- pre-commit
-cargo run -- generate --check
 cargo run -- validate
 cargo run -- test-validate
-cargo run -- repair-config
 cargo run -- install
 ```
 
 Command roles:
 
-- `check`: non-mutating verification for formatting, build, generated registry, validation, and regression tests.
-- `prepare`: intentional config-local mutation; repairs `rovodev/prompts`, regenerates `rovodev/prompts.yml`, then checks.
-- `pre-commit`: safe hook entrypoint; runs `prepare`, then fails if config-local generated files are left unstaged.
-- `install`: intentional home-directory mutation for `~/.agents`, `~/.rovodev`, custom `~/.codex/skills` symlinks, and `~/.local/bin/config-tools`.
+- `check`: non-mutating verification for formatting, build, skill validation, and regression tests.
+- `prepare`: runs the same verification as `check`.
+- `pre-commit`: safe hook entrypoint; runs `prepare`.
+- `install`: intentional home-directory mutation for `~/.agents`, custom `~/.codex/skills` symlinks, and `~/.local/bin/config-tools`.
 - `install-git-hooks`: intentional local Git config mutation for `core.hooksPath`.
 
 ## Git hooks
@@ -75,20 +73,17 @@ rm -rf "$tmp_home"
 
 Expected symlink behavior:
 
-- `rovodev/prompts` remains a symlink to `../.agents/skills`.
 - `~/.agents` links to this config checkout's `.agents` directory.
 - `~/.zsh` links to this config checkout's `zsh` directory.
 - `~/.zshrc` links to this config checkout's `zsh/zshrc` file.
 - `~/.config/ghostty/config` links to this config checkout's `ghostty/config` file.
 - `~/.relay/config.toml` links to this config checkout's `relay/config.toml` file.
 - `~/.local/bin/config-tools` is a runnable copy of the config helper.
-- `~/.rovodev/skills` links to this config checkout's `.agents/skills` directory.
-- `~/.rovodev/prompts` links to this config checkout's `.agents/skills` directory for legacy prompt compatibility.
-- `~/.rovodev/prompts.yml` links to this config checkout's `rovodev/prompts.yml`.
 - `~/.codex/skills/.system` remains a Codex-owned directory with Codex system skills.
 - Each custom top-level `.agents/skills/<name>/SKILL.md` directory links into `~/.codex/skills/<name>`.
 - Hidden skill directories and directories without `SKILL.md` are not linked into Codex.
 - Existing non-empty files/directories or unrelated symlinks are not replaced automatically.
+
 ## Executable-code check
 
 Tracked non-Rust executables should be limited to repository wiring scripts and skill-owned helper scripts that are invoked directly by their skill documentation.

@@ -1,11 +1,10 @@
 use crate::commands::{
-    check_command, generate_command, install_git_hooks_command, pre_commit_command,
-    prepare_command, test_validate_command, validate_command,
+    check_command, install_git_hooks_command, pre_commit_command, prepare_command,
+    test_validate_command, validate_command,
 };
 use crate::config_root::discover_config_root;
 use crate::error::Result;
 use crate::install::install_command;
-use crate::repair::repair_config_command;
 use std::env;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -18,7 +17,6 @@ pub(crate) fn run() -> Result<ExitCode> {
     };
 
     match command.as_str() {
-        "generate" => generate_command(command_args).map(|()| ExitCode::SUCCESS),
         "validate" => validate_command(command_args).map(|()| ExitCode::SUCCESS),
         "test-validate" => test_validate_command(command_args).map(|()| ExitCode::SUCCESS),
         "check" => check_command(command_args).map(|()| ExitCode::SUCCESS),
@@ -26,7 +24,6 @@ pub(crate) fn run() -> Result<ExitCode> {
         "pre-commit" => pre_commit_command(command_args).map(|()| ExitCode::SUCCESS),
         "install-git-hooks" => install_git_hooks_command(command_args).map(|()| ExitCode::SUCCESS),
         "install" => install_command(command_args).map(|()| ExitCode::SUCCESS),
-        "repair-config" => repair_config_command(command_args).map(|()| ExitCode::SUCCESS),
         "help" | "--help" | "-h" => {
             print_help();
             Ok(ExitCode::SUCCESS)
@@ -40,7 +37,7 @@ fn print_help() {
 }
 
 fn help_text() -> &'static str {
-    "Usage: config-tools <command> [options]\n\nCommands:\n  generate [--config-root PATH] [--check]\n  validate [--config-root PATH]\n  test-validate\n  check [--config-root PATH]\n  prepare [--config-root PATH]\n  pre-commit [--config-root PATH]\n  install-git-hooks [--config-root PATH]\n  repair-config [--config-root PATH]\n  install [--config-root PATH] [--home PATH]\n"
+    "Usage: config-tools <command> [options]\n\nCommands:\n  validate [--config-root PATH]\n  test-validate\n  check [--config-root PATH]\n  prepare [--config-root PATH]\n  pre-commit [--config-root PATH]\n  install-git-hooks [--config-root PATH]\n  install [--config-root PATH] [--home PATH]\n"
 }
 
 pub(crate) fn parse_config_args(args: &[String], allow_check: bool) -> Result<(PathBuf, bool)> {

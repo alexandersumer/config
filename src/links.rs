@@ -17,7 +17,6 @@ pub(crate) fn link_path(
     target: &Path,
     label: &str,
     config_root: &Path,
-    skills_dir: &Path,
 ) -> Result<()> {
     if !source.exists() {
         return Err(format!(
@@ -41,27 +40,8 @@ pub(crate) fn link_path(
             let existing = fs::read_link(target)
                 .map_err(|err| format!("{}: cannot read symlink: {err}", target.display()))?;
             let existing_resolved = resolve_link_target(target, &existing)?;
-            let legacy_prompts_resolved =
-                normalize_existing_ancestor(&config_root.join(".agents/prompts"));
             if existing_resolved == normalize_path(&source_resolved) {
                 println!("{label} already linked correctly.");
-            } else if existing_resolved == legacy_prompts_resolved
-                && normalize_path(&source_resolved)
-                    == normalize_path(&skills_dir.canonicalize().map_err(|err| {
-                        format!(
-                            "{}: cannot resolve skills directory: {err}",
-                            skills_dir.display()
-                        )
-                    })?)
-            {
-                fs::remove_file(target).map_err(|err| {
-                    format!("{}: cannot remove legacy symlink: {err}", target.display())
-                })?;
-                create_symlink(source, target, config_root)?;
-                println!(
-                    "Migrated {label} from legacy prompts -> {}",
-                    source.display()
-                );
             } else {
                 return Err(format!(
                     "Error: {} is already a symlink to {}\nRemove it first if you want to replace it.",
@@ -226,12 +206,12 @@ mod tests {
     #[test]
     fn symlink_source_uses_relative_path_inside_config_root() {
         let config_root = Path::new("/config");
-        let source = Path::new("/config/.agents/skills");
-        let target = Path::new("/config/rovodev/prompts");
+        let source = Path::new("/config/zsh/zshrc");
+        let target = Path::new("/config/generated/zshrc");
 
         assert_eq!(
             symlink_source(source, target, config_root),
-            PathBuf::from("../.agents/skills")
+            PathBuf::from("../zsh/zshrc")
         );
     }
 
@@ -251,7 +231,7 @@ mod tests {
     fn symlink_source_preserves_absolute_path_outside_config_root() {
         let config_root = Path::new("/config");
         let source = Path::new("/other/.agents/skills");
-        let target = Path::new("/config/rovodev/prompts");
+        let target = Path::new("/config/generated/prompts");
 
         assert_eq!(symlink_source(source, target, config_root), source);
     }
@@ -259,7 +239,7 @@ mod tests {
     #[test]
     fn normalize_existing_ancestor_resolves_existing_prefix_and_keeps_missing_tail() {
         let temp_dir = tempfile::Builder::new()
-            .prefix("tmp_rovodev_links_test_")
+            .prefix("tmp_config_links_test_")
             .tempdir()
             .expect("create temp dir");
         let existing = temp_dir.path().join("existing");
