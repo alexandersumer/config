@@ -6,7 +6,6 @@ mod install;
 mod links;
 mod registry;
 mod regression;
-mod repair;
 fn main() -> std::process::ExitCode {
     match cli::run() {
         Ok(code) => code,

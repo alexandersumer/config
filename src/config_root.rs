@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 pub(crate) fn discover_config_root(start: &Path) -> Result<PathBuf> {
     for candidate in start.ancestors() {
-        if candidate.join(".agents/skills").is_dir() && candidate.join("rovodev").is_dir() {
+        if candidate.join(".agents/skills").is_dir() && candidate.join("Cargo.toml").is_file() {
             return Ok(candidate.to_path_buf());
         }
     }

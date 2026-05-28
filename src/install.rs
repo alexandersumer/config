@@ -11,9 +11,7 @@ pub(crate) fn install_command(args: &[String]) -> Result<()> {
     let (config_root, home_dir) = parse_install_args(args)?;
     let agents_dir = config_root.join(".agents");
     let skills_dir = agents_dir.join("skills");
-    let rovodev_dir = config_root.join("rovodev");
     let global_agents_dir = home_dir.join(".agents");
-    let global_dir = home_dir.join(".rovodev");
     let zsh_dir = config_root.join("zsh");
     let ghostty_dir = config_root.join("ghostty");
     let relay_dir = config_root.join("relay");
@@ -24,12 +22,6 @@ pub(crate) fn install_command(args: &[String]) -> Result<()> {
     require_dir(&ghostty_dir, "config Ghostty directory")?;
     require_dir(&relay_dir, "config Relay directory")?;
     let codex_skill_links = prepare_codex_skill_links(&skills_dir, &home_dir)?;
-    fs::create_dir_all(&global_dir).map_err(|err| {
-        format!(
-            "{}: cannot create Rovo Dev config directory: {err}",
-            global_dir.display()
-        )
-    })?;
     fs::create_dir_all(home_dir.join(".config/ghostty")).map_err(|err| {
         format!(
             "{}: cannot create Ghostty config directory: {err}",
@@ -48,56 +40,30 @@ pub(crate) fn install_command(args: &[String]) -> Result<()> {
         &global_agents_dir,
         "global agents directory",
         &config_root,
-        &skills_dir,
-    )?;
-    link_path(
-        &skills_dir,
-        &global_dir.join("skills"),
-        "skills",
-        &config_root,
-        &skills_dir,
-    )?;
-    link_path(
-        &rovodev_dir.join("prompts.yml"),
-        &global_dir.join("prompts.yml"),
-        "prompts.yml",
-        &config_root,
-        &skills_dir,
-    )?;
-    link_path(
-        &skills_dir,
-        &global_dir.join("prompts"),
-        "prompt adapter",
-        &config_root,
-        &skills_dir,
     )?;
     link_path(
         &zsh_dir,
         &home_dir.join(".zsh"),
         "zsh config directory",
         &config_root,
-        &skills_dir,
     )?;
     link_path(
         &zsh_dir.join("zshrc"),
         &home_dir.join(".zshrc"),
         "zshrc",
         &config_root,
-        &skills_dir,
     )?;
     link_path(
         &ghostty_dir.join("config"),
         &home_dir.join(".config/ghostty/config"),
         "Ghostty config",
         &config_root,
-        &skills_dir,
     )?;
     link_path(
         &relay_dir.join("config.toml"),
         &home_dir.join(".relay/config.toml"),
         "Relay config",
         &config_root,
-        &skills_dir,
     )?;
     apply_codex_skill_links(codex_skill_links)?;
     install_config_tools_binary(&home_dir)?;
@@ -107,12 +73,8 @@ pub(crate) fn install_command(args: &[String]) -> Result<()> {
         "Done. Agent config is now managed from {}.",
         config_root.display()
     );
-    println!(
-        "~/.agents points at {}, and Rovo Dev skills point at {}.",
-        agents_dir.display(),
-        skills_dir.display()
-    );
-    println!("Run /skills to see native skills, or /prompts to use legacy prompt commands.");
+    println!("~/.agents points at {}.", agents_dir.display());
+    println!("Custom Codex skills point at {}.", skills_dir.display());
     println!(
         "Relay config points at {}.",
         relay_dir.join("config.toml").display()
