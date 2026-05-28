@@ -86,6 +86,23 @@ pub(crate) fn test_install_command() -> Result<()> {
         .tempdir()
         .map_err(|err| format!("cannot create temp install home: {err}"))?;
     create_codex_system_skills(home.path())?;
+    let stale_managed_skill = home.path().join(".codex/skills/review-code");
+    let external_skill_dir = home.path().join("external-skill");
+    fs::create_dir(&external_skill_dir)
+        .map_err(|err| format!("cannot create external skill fixture: {err}"))?;
+    #[cfg(unix)]
+    {
+        unix_fs::symlink(
+            fixture.path().join(".agents/skills/review-code"),
+            &stale_managed_skill,
+        )
+        .map_err(|err| format!("cannot create stale managed skill symlink: {err}"))?;
+        unix_fs::symlink(
+            &external_skill_dir,
+            home.path().join(".codex/skills/external-skill"),
+        )
+        .map_err(|err| format!("cannot create external skill symlink: {err}"))?;
+    }
 
     install_command(&[
         "--config-root".to_string(),
@@ -150,6 +167,13 @@ pub(crate) fn test_install_command() -> Result<()> {
     if home.path().join(".codex/skills/not-a-skill").exists() {
         return Err("install linked a directory without SKILL.md as a Codex skill".to_string());
     }
+    if stale_managed_skill.exists() || stale_managed_skill.is_symlink() {
+        return Err("install left a stale managed Codex skill symlink behind".to_string());
+    }
+    assert_symlink_resolves_to(
+        &home.path().join(".codex/skills/external-skill"),
+        &external_skill_dir,
+    )?;
 
     install_command(&[
         "--config-root".to_string(),

@@ -1,6 +1,7 @@
 use crate::config_root::discover_config_root;
 use crate::error::Result;
 use crate::links::{link_path, require_dir};
+use std::collections::BTreeSet;
 use std::env;
 use std::fs;
 #[cfg(unix)]
@@ -21,7 +22,7 @@ pub(crate) fn install_command(args: &[String]) -> Result<()> {
     require_dir(&zsh_dir, "config zsh directory")?;
     require_dir(&ghostty_dir, "config Ghostty directory")?;
     require_dir(&relay_dir, "config Relay directory")?;
-    let codex_skill_links = prepare_codex_skill_links(&skills_dir, &home_dir)?;
+    let codex_skill_plan = prepare_codex_skill_links(&skills_dir, &home_dir)?;
     fs::create_dir_all(home_dir.join(".config/ghostty")).map_err(|err| {
         format!(
             "{}: cannot create Ghostty config directory: {err}",
@@ -65,7 +66,7 @@ pub(crate) fn install_command(args: &[String]) -> Result<()> {
         "Relay config",
         &config_root,
     )?;
-    apply_codex_skill_links(codex_skill_links)?;
+    apply_codex_skill_links(codex_skill_plan)?;
     install_config_tools_binary(&home_dir)?;
 
     println!();
@@ -191,24 +192,43 @@ fn is_probably_config_tools_binary(bytes: &[u8]) -> bool {
         .any(|window| window == b"config-tools")
 }
 
-fn prepare_codex_skill_links(
-    skills_dir: &Path,
-    home_dir: &Path,
-) -> Result<Vec<(PathBuf, PathBuf)>> {
+struct CodexSkillLinkPlan {
+    links: Vec<(PathBuf, PathBuf)>,
+    stale_managed_links: Vec<PathBuf>,
+}
+
+fn prepare_codex_skill_links(skills_dir: &Path, home_dir: &Path) -> Result<CodexSkillLinkPlan> {
     let codex_skills_dir = home_dir.join(".codex/skills");
     let system_skills_dir = codex_skills_dir.join(".system");
     require_dir(&system_skills_dir, "Codex system skills directory")?;
     verify_codex_system_skills(&system_skills_dir)?;
 
     let links = codex_skill_links(skills_dir, &codex_skills_dir)?;
+    let stale_managed_links =
+        stale_managed_codex_skill_links(&codex_skills_dir, skills_dir, &links)?;
     for (source, target) in &links {
         verify_codex_skill_target(source, target)?;
     }
-    Ok(links)
+    Ok(CodexSkillLinkPlan {
+        links,
+        stale_managed_links,
+    })
 }
 
-fn apply_codex_skill_links(links: Vec<(PathBuf, PathBuf)>) -> Result<()> {
-    for (source, target) in links {
+fn apply_codex_skill_links(plan: CodexSkillLinkPlan) -> Result<()> {
+    for target in plan.stale_managed_links {
+        fs::remove_file(&target).map_err(|err| {
+            format!(
+                "{}: cannot remove stale managed Codex skill symlink: {err}",
+                target.display()
+            )
+        })?;
+        println!(
+            "Removed stale managed Codex skill symlink: {}",
+            target.display()
+        );
+    }
+    for (source, target) in plan.links {
         link_codex_skill(&source, &target)?;
     }
     Ok(())
@@ -227,6 +247,107 @@ fn codex_skill_links(
             Ok((skill_dir.clone(), codex_skills_dir.join(name)))
         })
         .collect()
+}
+
+fn stale_managed_codex_skill_links(
+    codex_skills_dir: &Path,
+    skills_dir: &Path,
+    active_links: &[(PathBuf, PathBuf)],
+) -> Result<Vec<PathBuf>> {
+    let active_targets: BTreeSet<PathBuf> = active_links
+        .iter()
+        .map(|(_, target)| normalize_path(target))
+        .collect();
+    let managed_skills_dir = normalize_path(skills_dir);
+    let mut stale_links = Vec::new();
+
+    for entry in fs::read_dir(codex_skills_dir).map_err(|err| {
+        format!(
+            "{}: cannot read Codex skills directory: {err}",
+            codex_skills_dir.display()
+        )
+    })? {
+        let entry = entry.map_err(|err| {
+            format!(
+                "{}: cannot inspect Codex skills directory entry: {err}",
+                codex_skills_dir.display()
+            )
+        })?;
+        let target = entry.path();
+        if active_targets.contains(&normalize_path(&target)) {
+            continue;
+        }
+        let metadata = fs::symlink_metadata(&target).map_err(|err| {
+            format!(
+                "{}: cannot inspect Codex skill entry: {err}",
+                target.display()
+            )
+        })?;
+        if !metadata.file_type().is_symlink() {
+            continue;
+        }
+        let link_target = fs::read_link(&target).map_err(|err| {
+            format!(
+                "{}: cannot read Codex skill symlink: {err}",
+                target.display()
+            )
+        })?;
+        let resolved = normalize_existing_ancestor(&resolve_link_target(&target, &link_target)?);
+        if resolved.starts_with(&managed_skills_dir) {
+            stale_links.push(target);
+        }
+    }
+
+    stale_links.sort();
+    Ok(stale_links)
+}
+
+fn resolve_link_target(link_path: &Path, link_target: &Path) -> Result<PathBuf> {
+    if link_target.is_absolute() {
+        Ok(link_target.to_path_buf())
+    } else {
+        Ok(link_path
+            .parent()
+            .ok_or_else(|| format!("{}: symlink has no parent", link_path.display()))?
+            .join(link_target))
+    }
+}
+
+fn normalize_existing_ancestor(path: &Path) -> PathBuf {
+    let mut current = path.to_path_buf();
+    let mut missing = Vec::new();
+    loop {
+        if current.exists() {
+            if let Ok(mut resolved) = current.canonicalize() {
+                for component in missing.iter().rev() {
+                    resolved.push(component);
+                }
+                return normalize_path(&resolved);
+            }
+        }
+        let Some(file_name) = current.file_name().map(|name| name.to_os_string()) else {
+            break;
+        };
+        missing.push(file_name);
+        if !current.pop() {
+            break;
+        }
+    }
+    normalize_path(path)
+}
+
+fn normalize_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            other => normalized.push(other.as_os_str()),
+        }
+    }
+    normalized
 }
 
 fn discover_custom_skills(skills_dir: &Path) -> Result<Vec<PathBuf>> {
