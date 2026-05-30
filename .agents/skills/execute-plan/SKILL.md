@@ -14,7 +14,7 @@ Before editing:
 - stop instead of improvising if the plan has a blocking contradiction, stale path, impossible check, or unsafe sequence
 - emit `Artifact: <path or inline>` and `Canonical patterns: <path> for <aspect>`
 
-Use update_todo. Every task must be an observable behavior or capability with a checkable signal.
+Maintain an explicit todo or plan in chat or with the available planning tool. Every task must be an observable behavior or capability with a checkable signal.
 
 Build production code, wiring, tests, and required docs/config together. Tests must catch a named realistic regression. If no existing check can prove the behavior, add the missing targeted check instead of claiming green.
 

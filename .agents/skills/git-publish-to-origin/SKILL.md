@@ -16,14 +16,15 @@ This skill is push-only: do not create branches, open PRs, inspect PRs, update P
    - `git rev-parse --show-toplevel`
    - `git branch --show-current`
    - `git status --short`
+   - upstream/ahead state when available: `git rev-parse --abbrev-ref --symbolic-full-name @{u}` and `git rev-list --left-right --count @{u}...HEAD`
    - effective publish diff for one subject:
      - staged diff: `git diff --cached`
      - unstaged diff: `git diff`
      - relevant untracked files from `git ls-files --others --exclude-standard`, rendered or summarized as new-file diffs
-2. If there are no publishable changes, stop.
-3. Confirm the changes form one coherent subject. If not, stop and ask how to split or scope the publish.
-4. Stage intended changes unless explicitly excluded. Do not stage unrelated files.
-5. Commit with a valid Conventional Commit subject.
+2. If there are no publishable working-tree changes and no unpushed local commits, stop.
+3. If working-tree changes exist, confirm they form one coherent subject. If not, stop and ask how to split or scope the publish.
+4. If working-tree changes exist, stage intended changes unless explicitly excluded, then commit with a valid Conventional Commit subject. Do not stage unrelated files.
+5. If there are no publishable working-tree changes but the current branch has unpushed local commits, skip committing and push those commits.
 6. Push the current branch to `origin`, setting upstream if needed.
 
 Do not run tests/builds unless explicitly asked.
@@ -44,7 +45,7 @@ Rules:
 ## Final response
 
 Report:
-- commit hash
-- subject
+- commit hash, or state that no new commit was needed
+- subject, or existing unpushed commits when no new commit was needed
 - branch
 - push result

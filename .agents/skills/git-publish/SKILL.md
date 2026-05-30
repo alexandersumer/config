@@ -52,11 +52,13 @@ Rules:
 
 ## PR flow
 
-Use the smoothest safe path available. Never use Bitbucket MCP to create, list, inspect, or update pull requests during publish.
+Determine the PR provider from `git remote get-url origin` before choosing tools. Use Bitbucket/Axiom flows only for Bitbucket-compatible repositories. Use GitHub CLI only for GitHub repositories. If the provider is unsupported or required tooling is unavailable, stop after the push and report the exact PR blocker instead of trying a wrong-provider command.
 
-### Preferred path: Axiom canonical PR tools, when available
+Never use Bitbucket MCP to create, list, inspect, or update pull requests during publish. Do not add reviewers unless the user explicitly requested reviewers.
 
-Use this path when the runtime exposes canonical PR metadata tools such as `collect_pr_metadata_context`, `record_pr_metadata`, and `create_bitbucket_pr`.
+### Bitbucket/Axiom preferred path: canonical PR tools, when available
+
+Use this path when the runtime exposes canonical PR metadata tools such as `inspect_pr_context`, `save_pr_metadata`, and `ensure_bitbucket_pr`.
 
 1. Determine the target repository root from shell git, not from assumptions:
 
@@ -64,16 +66,16 @@ Use this path when the runtime exposes canonical PR metadata tools such as `coll
    git rev-parse --show-toplevel
    ```
 
-2. Collect canonical PR context for that root after the source branch is pushed. Pass `workspaceRoot` when the tool supports it. The reported `gitRoot`, source branch, and default branch must match the repository being published.
-3. Record fresh PR metadata using:
+2. Inspect canonical PR context for that root after the source branch is pushed. Pass `workspaceRoot` when the tool supports it. The reported git root, source branch, and default branch must match the repository being published.
+3. Save fresh PR metadata using:
    - the same Conventional Commit subject as the PR title
    - a grounded body describing what changed and why
-   - the exact diff fingerprint returned by the collection step
-4. Create the PR through `create_bitbucket_pr` with explicit source and destination branches.
+   - the exact diff fingerprint returned by the inspection step
+4. Ensure the PR through `ensure_bitbucket_pr` with explicit source and destination branches and no reviewers unless reviewers were explicitly requested.
 5. If the tool reports an existing PR for the branch, report that PR and stop. Do not create a duplicate.
 6. If the tool reports stale/wrong-repo metadata, regenerate metadata for the shell-reported repository root and retry once. If it still fails, stop with the exact blocker.
 
-### CLI fallback path: no-reviewer Bitbucket PR
+### Bitbucket CLI fallback path: no-reviewer PR
 
 Use this path only when canonical PR tools are unavailable or the repository/tooling is not Axiom-compatible.
 
@@ -83,11 +85,7 @@ Use this path only when canonical PR tools are unavailable or the repository/too
    twg bb prs query --source <branch> --dest <default-branch> -n 5
    ```
 
-   Treat all of these as “no existing PR”:
-   - empty output
-   - `[]`
-   - `No pull requests found.`
-   - output containing `Found 0 pull requests`
+   Treat empty output, `[]`, `No pull requests found.`, or output containing `Found 0 pull requests` as no existing PR.
 
 2. If no PR exists, create one with no reviewers:
 
@@ -95,15 +93,36 @@ Use this path only when canonical PR tools are unavailable or the repository/too
    twg bb prs create --title "<subject>" --source <branch> --dest <default-branch>
    ```
 
-   Add `--description "<body>"` only when a grounded PR body is available.
+   Add a description only when a grounded PR body is available.
 
-3. Do not pass `--reviewer`. Create PRs with no reviewers unless the user explicitly requested reviewers.
+3. Do not pass reviewer flags. Create PRs with no reviewers unless the user explicitly requested reviewers.
 4. If `twg` is unavailable, use `bb pr create` only through its interactive flow and select `Skip (no reviewers)`. Do not use fully specified non-interactive `bb pr create`, because it may apply default reviewers.
 5. If PR creation fails:
    - check once for an existing branch PR with CLI
    - if found, report it and stop
-   - otherwise retry once with the no-reviewer `twg bb prs create` path
+   - otherwise retry once with the no-reviewer `twg` Bitbucket create path
    - if it still fails, stop and report the exact blocker
+
+### GitHub CLI fallback path
+
+Use this path only when `origin` is a GitHub repository and `gh` is available.
+
+1. Check once for an existing open PR:
+
+   ```bash
+   gh pr list --head <branch> --base <default-branch> --state open --json url --limit 5
+   ```
+
+2. If no PR exists, create one without reviewers:
+
+   ```bash
+   gh pr create --title "<subject>" --body "<body>" --base <default-branch> --head <branch>
+   ```
+
+   Use a grounded body. If no body is available, use the subject as a minimal body rather than provider defaults.
+
+3. Do not pass reviewer flags unless the user explicitly requested reviewers.
+4. If `gh` is unavailable or PR creation fails, check once for an existing branch PR with `gh pr list`; if none is found, stop and report the exact blocker.
 
 ## Final response
 
