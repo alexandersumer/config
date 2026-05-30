@@ -232,3 +232,10 @@ fi
 if [ -d /opt/homebrew/opt/node@24/bin ]; then
   export PATH="/opt/homebrew/opt/node@24/bin:$PATH"
 fi
+# >>> relay pinned bun >>>
+export BUN_INSTALL="${BUN_INSTALL:-$HOME/.bun}"
+case ":$PATH:" in
+  *":$BUN_INSTALL/bin:"*) ;;
+  *) export PATH="$BUN_INSTALL/bin:$PATH" ;;
+esac
+# <<< relay pinned bun <<<
