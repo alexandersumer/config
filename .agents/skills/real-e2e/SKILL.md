@@ -6,11 +6,15 @@ register_cmd: true
 
 Create a **real** end-to-end test for `scope`, `$ARGUMENTS`, recent changes, or the conversation target, and keep going until the test exists, is wired into the appropriate lane, and has been validated or is blocked by a concrete infrastructure limitation. Real means the production engine is running and the test drives the same public boundary a user, service, CLI, worker, or protocol client depends on.
 
+The proof must have two parts unless blocked by concrete infrastructure or safety limits:
+1. **Automated E2E proof**: a test or smoke lane wired so future CI can run it.
+2. **Real-spin proof**: operate the changed system through the repo-documented real run/E2E path, outside the new test's assertions, to confirm the behavior works like it would for a real user/operator/client.
+
 This is not a planning skill. The plan/contract is only a short alignment checkpoint before implementation; it is not an acceptable final output. After writing the contract, immediately do the work: edit files, add the E2E, wire CI/scripts, run the relevant commands, fix failures caused by the new test, and prove the test would catch a real regression when safe.
 
 Gold standard: if available, inspect `~/atlassian/alta-1/tests/e2e-*` and `~/atlassian/alta-1/scripts/e2e-*-smoke.sh` before designing the test. Prefer the patterns that boot Docker/process stacks, wait for readiness, call HTTP/ACP/storage boundaries, persist or observe downstream effects, collect artifacts, and keep policy tests that prevent fake smoke lanes from creeping in.
 
-Contract checkpoint before editing: write the realness contract in chat in no more than a few bullets, then implement. Name the public behavior, top-level API/protocol/CLI/HTTP route, runtime/process/container/backends that must be live, observable success criteria, highest-risk failure mode, CI lane that will run it, allowed out-of-process simulators, and every forbidden shortcut. If any of these are unknown, inspect more or ask one focused question, then proceed as far as possible.
+Contract checkpoint before editing: write the realness contract in chat in no more than a few bullets, then implement. Name the public behavior, top-level API/protocol/CLI/HTTP route, runtime/process/container/backends that must be live, observable success criteria, highest-risk failure mode, CI lane that will run it, allowed out-of-process simulators, and every forbidden shortcut. Include the real-spin contract: which repo docs/scripts/configs describe real E2E operation, the exact manual/operator scenario to run after the automated test, and the small set of relevant edge probes to try. If any of these are unknown, inspect more or ask one focused question, then proceed as far as possible.
 
 Non-negotiables:
 - Hit a public product boundary. Do not import internals, call private helpers, or assert implementation details as the primary proof.
@@ -24,11 +28,12 @@ Non-negotiables:
 Forbidden as E2E proof: mocks, fake adapters inside the engine path, in-memory replacements for real backends under test, test-only endpoints, snapshot-only checks, “server starts” checks, mocked network clients, bypass flags that skip the real path, broad sleeps instead of readiness probes, skipped tests, weakened assertions, or tests whose main assertion is that a fake was called.
 
 Implementation loop:
-1. Study existing E2E lanes, package scripts, CI config, Docker/process startup, readiness helpers, and adjacent tests. Reuse the closest lane instead of inventing a parallel harness.
+1. Study existing E2E lanes, package scripts, CI config, Docker/process startup, readiness helpers, adjacent tests, and repo-documented real run/E2E instructions such as README files, docs, Makefiles, package scripts, compose files, or smoke scripts. Reuse the closest lane instead of inventing a parallel harness.
 2. Add the smallest high-signal test that drives the real boundary from outside the engine and observes the business outcome. Include at least one failure/edge assertion when that is the risk being protected.
 3. Wire the test into the existing E2E/smoke command and CI lane, or add the smallest adjacent lane needed for the same purpose.
 4. Add or update a policy/guardrail test when needed to prevent future drift back to fakes, internal imports, or untracked CI wiring.
 5. Run the exact E2E command and the nearest broader check. Fix failures caused by the new test or wiring. If infrastructure is unavailable locally, run the non-network policy/compile checks and state the missing command as blocked, not passed.
-6. Prove the test would catch a realistic regression when safe: make one temporary reversible break in production code, config, or fixture; confirm the E2E fails for the expected reason; restore; rerun green. If unsafe, explain the exact reason.
+6. Take the changed system for a real spin beyond rerunning tests: boot or invoke the production entrypoint as documented by the repo, drive the public behavior like a user/operator/client would, inspect the durable result or transcript, and try the smallest meaningful set of edge probes for this change, such as invalid input, empty/minimal data, repeated/idempotent calls, cleanup/retry behavior, permission/config boundaries, or persistence across restart when applicable. Fix caused issues found during this spin, then rerun the scenario.
+7. Prove the automated E2E would catch a realistic regression when safe: make one temporary reversible break in production code, config, or fixture; confirm the E2E fails for the expected reason; restore; rerun green. If unsafe, explain the exact reason.
 
-Final only after implementation: contract, boundary hit, stack/backends booted, CI lane, regression caught, commands/results, changed files, and any remaining blocker. Never end with only a plan. Never call it real E2E unless it would fail when the real engine behavior is broken.
+Final only after implementation: contract, boundary hit, stack/backends booted, CI lane, automated E2E result, real-spin scenario and edge probes exercised, regression caught, commands/results, changed files, fixes made from discovered caused issues, and any remaining blocker. Never end with only a plan. Never call it real E2E unless it would fail when the real engine behavior is broken and, when infrastructure permits, the changed system has also been operated successfully through its documented real path.
