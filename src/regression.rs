@@ -30,6 +30,7 @@ pub(crate) fn run_regression_tests() -> Result<()> {
         assert_mutation_fails(name, *mutate)?;
     }
     test_new_skill_validate_flow()?;
+    test_real_e2e_skill_requires_edge_case_proof()?;
     test_install_command()?;
     test_link_safety()?;
     test_command_failures()?;
@@ -59,6 +60,32 @@ fn test_new_skill_validate_flow() -> Result<()> {
         "--config-root".to_string(),
         fixture.path().display().to_string(),
     ])?;
+    Ok(())
+}
+
+fn test_real_e2e_skill_requires_edge_case_proof() -> Result<()> {
+    let config_root = config_root_from_exe()?;
+    let skill_path = config_root.join(".agents/skills/real-e2e/SKILL.md");
+    let text = fs::read_to_string(&skill_path).map_err(|err| {
+        format!(
+            "{}: cannot read real-e2e skill: {err}",
+            skill_path.display()
+        )
+    })?;
+    for expected in [
+        "identify a small edge-case matrix",
+        "automated E2E must include at least one meaningful edge/negative assertion",
+        "happy-path-only E2E is incomplete",
+        "edge checks performed only against mocks/fakes",
+        "edge cases intentionally omitted with reasons",
+    ] {
+        if !text.contains(expected) {
+            return Err(format!(
+                "{}: real-e2e skill must require robust edge-case proof; missing {expected:?}",
+                skill_path.display()
+            ));
+        }
+    }
     Ok(())
 }
 
