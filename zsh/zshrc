@@ -76,7 +76,7 @@ alias clear="echo 'The clear command is disabled.'"
 alias axiom="atlas relay --agent axiom"
 
 # Project navigation
-alias blog="cd $HOME/atlassian/alexandersumer.com"
+alias blog="cd $HOME/src/alexandersumer.com"
 
 __alias_atlassian_project() {
   local __project_name="$1"
@@ -94,12 +94,12 @@ __alias_atlassian_project() {
   esac
 }
 
-alias atlassian-sandbox="cd $HOME/atlassian/atlassian-sandbox"
+alias atlassian-sandbox="cd $HOME/atlassian/sandboxes"
 
 for __project_dir in "$HOME"/atlassian/*(N/); do
   __project_name="${__project_dir:t}"
   case "$__project_name" in
-    convo-ai-*|alta-contrib-[0-9]*|alta-[0-9]*|relay-[0-9]*)
+    convo-ai-<->|alta-contrib-<->|alta-<->|relay-<->)
       __alias_atlassian_project "$__project_name"
       ;;
   esac
@@ -243,7 +243,7 @@ if [[ -r "$HOME/.local/bin/env" ]]; then
 fi
 
 # bun completions
-[ -s "/Users/asumer/.bun/_bun" ] && source "/Users/asumer/.bun/_bun"
+[ -s "$HOME/.bun/_bun" ] && source "$HOME/.bun/_bun"
 
 # alta-3 Node 24.15.0 local runtime alignment
 if [ -d /opt/homebrew/opt/node@24/bin ]; then

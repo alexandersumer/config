@@ -465,19 +465,75 @@ functions home_reset_to_origin >/dev/null
 fn test_axiom_alias_zsh_wiring() -> Result<()> {
     let config_root = std::env::current_dir()
         .map_err(|err| format!("cannot determine config root for zsh alias test: {err}"))?;
+    let home = tempfile::Builder::new()
+        .prefix("tmp_config_zsh_home_")
+        .tempdir()
+        .map_err(|err| format!("cannot create temp HOME for zsh alias test: {err}"))?;
+
+    for dir in [
+        ".oh-my-zsh",
+        ".zsh",
+        "atlassian/alta-1",
+        "atlassian/alta-2",
+        "atlassian/relay-3",
+        "atlassian/relay-3-old",
+        "atlassian/alta-contrib-3",
+        "atlassian/alta-contrib-3x",
+        "atlassian/convo-ai-3",
+        "atlassian/convo-ai-test",
+        "atlassian/sandboxes",
+        "src/alexandersumer.com",
+    ] {
+        fs::create_dir_all(home.path().join(dir))
+            .map_err(|err| format!("cannot create zsh alias fixture dir {dir}: {err}"))?;
+    }
+    fs::write(home.path().join(".oh-my-zsh/oh-my-zsh.sh"), "")
+        .map_err(|err| format!("cannot write zsh alias fixture oh-my-zsh shim: {err}"))?;
+    fs::write(home.path().join(".zsh/git-functions.zsh"), "")
+        .map_err(|err| format!("cannot write zsh alias fixture git-functions shim: {err}"))?;
+
     let script = format!(
-        r#"source "{}"
-alias axiom >/dev/null
-alias atlassian >/dev/null
-alias alta-1 >/dev/null
-alias alta-2 >/dev/null
-alias alta-3 >/dev/null
-alias alta-4 >/dev/null
-alias alta-5 >/dev/null
+        r#"expect_alias() {{
+  local name="$1"
+  local expected="$2"
+  local actual
+  actual=$(alias "$name") || return $?
+  if [[ "$actual" != "$name='$expected'" ]]; then
+    printf 'expected alias %s=%q, got %s\n' "$name" "$expected" "$actual" >&2
+    return 1
+  fi
+}}
+
+source "{}"
+expect_alias axiom "atlas relay --agent axiom"
+expect_alias atlassian "cd $HOME/atlassian"
+expect_alias blog "cd $HOME/src/alexandersumer.com"
+expect_alias atlassian-sandbox "cd $HOME/atlassian/sandboxes"
+expect_alias alta-1 "cd $HOME/atlassian/alta-1"
+expect_alias alta-2 "cd $HOME/atlassian/alta-2"
+expect_alias relay-3 "cd $HOME/atlassian/relay-3"
+expect_alias alta-contrib-3 "cd $HOME/atlassian/alta-contrib-3"
+expect_alias convo-ai-3 "cd $HOME/atlassian/convo-ai-3 && sdk use java 21.0.8-amzn"
+! alias relay-3-old >/dev/null 2>&1
+! alias alta-contrib-3x >/dev/null 2>&1
+! alias convo-ai-test >/dev/null 2>&1
 "#,
         config_root.join("zsh/zshrc").display()
     );
-    run_command(&config_root, "zsh", &["-c", &script])
+    let output = Command::new("zsh")
+        .current_dir(&config_root)
+        .env("HOME", home.path())
+        .args(["-c", &script])
+        .output()
+        .map_err(|err| format!("cannot run zsh alias test: {err}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "zsh alias test failed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        ));
+    }
+    Ok(())
 }
 
 fn test_relay_axiom_config() -> Result<()> {
