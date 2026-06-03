@@ -1,5 +1,6 @@
 use crate::cli::parse_config_args;
 use crate::error::Result;
+use crate::install::check_codex_skills_command;
 use crate::registry::validate_registry;
 use crate::regression::run_regression_tests;
 use std::path::Path;
@@ -50,7 +51,15 @@ pub(crate) fn prepare_command(args: &[String]) -> Result<()> {
 }
 
 pub(crate) fn pre_commit_command(args: &[String]) -> Result<()> {
-    prepare_command(args)
+    let (config_root, _) = parse_config_args(args, false)?;
+    prepare_command(&[
+        "--config-root".to_string(),
+        config_root.display().to_string(),
+    ])?;
+    check_codex_skills_command(&[
+        "--config-root".to_string(),
+        config_root.display().to_string(),
+    ])
 }
 
 pub(crate) fn install_git_hooks_command(args: &[String]) -> Result<()> {

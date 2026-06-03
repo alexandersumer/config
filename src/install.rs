@@ -83,6 +83,34 @@ pub(crate) fn install_command(args: &[String]) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn check_codex_skills_command(args: &[String]) -> Result<()> {
+    let (config_root, home_dir) = parse_install_args(args)?;
+    let agents_dir = config_root.join(".agents");
+    let skills_dir = agents_dir.join("skills");
+
+    require_dir(&agents_dir, "config agents directory")?;
+    require_dir(&skills_dir, "config skills directory")?;
+    let codex_skill_plan = prepare_codex_skill_links(&skills_dir, &home_dir)?;
+    let errors = codex_skill_link_errors(&codex_skill_plan);
+    if errors.is_empty() {
+        println!(
+            "Custom Codex skills are in sync with {}.",
+            skills_dir.display()
+        );
+        return Ok(());
+    }
+
+    let mut output = String::from("Custom Codex skill installation drift detected:");
+    for error in errors {
+        output.push_str("\n- ");
+        output.push_str(&error);
+    }
+    output.push_str(
+        "\nRun `cargo run -- install` from the config checkout to converge ~/.codex/skills.",
+    );
+    Err(output)
+}
+
 fn install_config_tools_binary(home_dir: &Path) -> Result<()> {
     let source = env::current_exe()
         .map_err(|err| format!("cannot determine config-tools executable: {err}"))?;
@@ -232,6 +260,41 @@ fn apply_codex_skill_links(plan: CodexSkillLinkPlan) -> Result<()> {
         link_codex_skill(&source, &target)?;
     }
     Ok(())
+}
+
+fn codex_skill_link_errors(plan: &CodexSkillLinkPlan) -> Vec<String> {
+    let mut errors = Vec::new();
+    for target in &plan.stale_managed_links {
+        errors.push(format!(
+            "{} is a stale managed Codex skill symlink",
+            target.display()
+        ));
+    }
+    for (source, target) in &plan.links {
+        match fs::symlink_metadata(target) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                if let Err(err) = verify_codex_skill_target(source, target) {
+                    errors.push(err);
+                }
+            }
+            Ok(_) => errors.push(format!(
+                "{} exists but is not the expected Codex skill symlink to {}",
+                target.display(),
+                source.display()
+            )),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => errors.push(format!(
+                "{} is missing; expected symlink to {}",
+                target.display(),
+                source.display()
+            )),
+            Err(err) => errors.push(format!(
+                "{}: cannot inspect Codex skill target: {err}",
+                target.display()
+            )),
+        }
+    }
+    errors.sort();
+    errors
 }
 
 fn codex_skill_links(

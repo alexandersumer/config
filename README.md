@@ -8,6 +8,7 @@ Config tooling is implemented in Rust via the `config-tools` binary.
 
 ```bash
 cargo run -- check
+cargo run -- check-codex-skills
 cargo run -- prepare
 cargo run -- pre-commit
 cargo run -- validate
@@ -18,8 +19,9 @@ cargo run -- install
 Command roles:
 
 - `check`: non-mutating verification for formatting, build, skill validation, and regression tests.
+- `check-codex-skills`: non-mutating verification that `~/.codex/skills` mirrors custom skills from `.agents/skills`.
 - `prepare`: runs the same verification as `check`.
-- `pre-commit`: safe hook entrypoint; runs `prepare`.
+- `pre-commit`: safe hook entrypoint; runs `prepare` and `check-codex-skills`.
 - `install`: intentional home-directory mutation for `~/.agents`, custom `~/.codex/skills` symlinks, and `~/.local/bin/config-tools`.
 - `install-git-hooks`: intentional local Git config mutation for `core.hooksPath`.
 
@@ -53,6 +55,7 @@ A change is accepted only if all of these pass locally:
 cargo fmt --check
 cargo check
 cargo run -- check
+cargo run -- check-codex-skills
 cargo run -- pre-commit
 ```
 

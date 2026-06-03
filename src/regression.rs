@@ -1,7 +1,7 @@
 use crate::commands::validate_command;
 use crate::config_root::config_root_from_exe;
 use crate::error::Result;
-use crate::install::install_command;
+use crate::install::{check_codex_skills_command, install_command};
 use crate::registry::validate_registry;
 use std::fs;
 #[cfg(unix)]
@@ -131,6 +131,25 @@ pub(crate) fn test_install_command() -> Result<()> {
         .map_err(|err| format!("cannot create external skill symlink: {err}"))?;
     }
 
+    let initial_drift = check_codex_skills_command(&[
+        "--config-root".to_string(),
+        fixture.path().display().to_string(),
+        "--home".to_string(),
+        home.path().display().to_string(),
+    ])
+    .expect_err("Codex skill drift check should fail before install converges custom links");
+    for expected in [
+        "Custom Codex skill installation drift detected",
+        "is a stale managed Codex skill symlink",
+        "is missing; expected symlink",
+    ] {
+        if !initial_drift.contains(expected) {
+            return Err(format!(
+                "initial Codex skill drift check missed {expected:?}: {initial_drift}"
+            ));
+        }
+    }
+
     install_command(&[
         "--config-root".to_string(),
         fixture.path().display().to_string(),
@@ -201,8 +220,42 @@ pub(crate) fn test_install_command() -> Result<()> {
         &home.path().join(".codex/skills/external-skill"),
         &external_skill_dir,
     )?;
+    check_codex_skills_command(&[
+        "--config-root".to_string(),
+        fixture.path().display().to_string(),
+        "--home".to_string(),
+        home.path().display().to_string(),
+    ])?;
+
+    let removed_skill = home.path().join(".codex/skills/removed-skill");
+    #[cfg(unix)]
+    unix_fs::symlink(
+        fixture.path().join(".agents/skills/removed-skill"),
+        &removed_skill,
+    )
+    .map_err(|err| format!("cannot create removed managed skill symlink: {err}"))?;
+    let stale_drift = check_codex_skills_command(&[
+        "--config-root".to_string(),
+        fixture.path().display().to_string(),
+        "--home".to_string(),
+        home.path().display().to_string(),
+    ])
+    .expect_err("Codex skill drift check should fail when a removed managed skill link remains");
+    if !stale_drift.contains("removed-skill")
+        || !stale_drift.contains("is a stale managed Codex skill symlink")
+    {
+        return Err(format!(
+            "stale managed Codex skill drift check missed removed-skill: {stale_drift}"
+        ));
+    }
 
     install_command(&[
+        "--config-root".to_string(),
+        fixture.path().display().to_string(),
+        "--home".to_string(),
+        home.path().display().to_string(),
+    ])?;
+    check_codex_skills_command(&[
         "--config-root".to_string(),
         fixture.path().display().to_string(),
         "--home".to_string(),
