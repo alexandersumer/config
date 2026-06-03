@@ -10,7 +10,7 @@ Do not choose one side wholesale just to remove markers.
 
 Read conflict context and enough history from both sides. If incoming removed feature flags, dead code, deprecated APIs, or temporary constructs this branch did not introduce, accept the removal and adapt branch code.
 
-Search for `<<<<<<<`, `=======`, `>>>>>>>` after editing. Run the build if available.
+Search for `<<<<<<<`, `=======`, `>>>>>>>` after editing. Run the build or most relevant available check if practical. Do not mark files resolved while conflict markers remain or known merge-caused failures are unfixed.
 
 Final:
 - Resolved: `<files>`

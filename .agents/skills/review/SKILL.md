@@ -42,6 +42,6 @@ You do not review the code directly. Subagents do the reviewing in fresh context
 
    A validator response is invalid if it is empty, whitespace-only, truncated, or missing `VALIDATED:` with a score and evidence. Retry invalid validator output once with smaller focused file excerpts. If it is still invalid, stop with `Review inconclusive`. Drop every candidate below 80.
 
-6. **Report.** Dedupe by root cause, then rank Critical, High, Medium, Low. For each issue, include severity, `path:line`, what is wrong, why it matters, and the fix — one sentence each. End with **Ready to merge** only if every reviewer returned valid output and no validated findings remain, **Review inconclusive** if any reviewer or validator returned invalid output after retry, or **Needs attention**/**Needs work** if validated findings remain. If zero candidates survive validation, say so in one line.
+6. **Report.** Dedupe by root cause, then rank Critical, High, Medium, Low. For each issue, include severity, `path:line`, what is wrong, why it matters, and the fix — one sentence each. End with **No material findings** only if every reviewer returned valid output and no validated findings remain, **Review inconclusive** if any reviewer or validator returned invalid output after retry, or **Needs attention**/**Needs work** if validated findings remain. If zero candidates survive validation, say so in one line.
 
 Never approve, never merge, never invent line numbers. Subagents see only what you paste.

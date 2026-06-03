@@ -24,12 +24,12 @@ Non-default branches are normal publish sources. Never end with “PR not create
      - unstaged diff: `git diff`
      - relevant untracked files from `git ls-files --others --exclude-standard`, rendered or summarized as new-file diffs
 2. Build the effective changes from both sources:
-   - branch diff: committed changes ahead of the remote default branch, when on a non-default branch
+   - branch diff: committed changes reachable from `HEAD` and not in the remote default branch, including local commits on the default branch before a publish branch is created
    - working-tree diff: staged, unstaged, and relevant untracked changes
 3. If there is no branch diff and no working-tree diff, stop.
 4. Confirm the combined effective changes form one coherent subject. If the committed branch diff and working-tree diff are unrelated, stop and ask how to split or scope the publish.
 5. Choose a valid Conventional Commit subject from the combined effective changes.
-6. If currently on `main`, `master`, or the remote default branch, create a focused branch derived from the subject before staging or committing, for example `fix/short-topic`.
+6. If currently on `main`, `master`, or the remote default branch, create a focused branch from the current `HEAD` before staging or committing, named from the subject, for example `fix/short-topic`; do not push local default-branch commits directly to the default branch.
 7. If there are publishable working-tree changes, stage intended changes unless explicitly excluded, then commit them with the chosen subject before pushing. Do not stage unrelated files.
 8. If there are no publishable working-tree changes but the source branch already has a branch diff, skip committing and continue.
 9. Push the source branch to `origin`, setting upstream if needed.

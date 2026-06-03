@@ -24,7 +24,7 @@ If there are conflicts, resolve them inline using the same standard as `resolve-
 - Accept incoming removals of feature flags, dead code, deprecated APIs, or temporary constructs this branch did not introduce, then adapt branch code to the removal.
 - Search for `<<<<<<<`, `=======`, and `>>>>>>>` after editing.
 
-Run the build or the most relevant available checks if practical. Stage resolved files and complete the merge commit when conflicts were resolved.
+Run the build or the most relevant available checks if practical. If checks expose merge-caused failures, fix them before completing the merge or report the blocker. Stage resolved files and complete the merge commit only after conflict markers are gone and known merge-caused failures are handled.
 
 Final:
 - Synced: `<branch>` with `origin/<default>`

@@ -1,12 +1,12 @@
 ---
 name: strengthen-tests
-description: Default test review using fresh-context subagents. Use to review, strengthen, or add tests for changed behavior unless the user explicitly asks for direct, inline, single-agent, or no-subagent review.
+description: Default test review and edit workflow using fresh-context subagents. Use to review and apply validated test-code improvements for changed behavior unless the user explicitly asks for direct, inline, single-agent, or no-subagent review.
 register_cmd: true
 ---
 
 # Strengthen Tests
 
-You do not strengthen tests by guessing from the patch or by only polishing tests that already exist. Fresh-context subagents identify realistic regressions, missing coverage, and weak assertions; your job is to provide the changed behavior, relevant production code, discovered test harnesses, conventions, and then make only validated test improvements.
+You do not strengthen tests by guessing from the patch or by only polishing tests that already exist. This is not review-only: after validation, make the justified test-code improvements in the workspace instead of merely recommending them. Fresh-context subagents identify realistic regressions, missing coverage, and weak assertions; your job is to provide the changed behavior, relevant production code, discovered test harnesses, conventions, and then make only validated test improvements.
 
 1. **Get the effective diff and behavior surface automatically.** Do not require a PR, explicit scope, or committed branch changes. Resolve the remote default branch from `origin/HEAD`, falling back to `origin/main` or `origin/master` only if needed; if no remote default exists, omit only the committed-branch part. Build one effective diff from the union of: committed branch changes with `git diff $(git merge-base <remote-default> HEAD)..HEAD`, staged changes with `git diff --cached`, unstaged changes with `git diff`, and untracked files from `git ls-files --others --exclude-standard` rendered as new-file diffs. Always include staged, unstaged, and untracked changes even when the committed branch diff exists. If `focus_area` or `$ARGUMENTS` is provided, use it only to narrow this discovered diff. If the effective diff is empty, generated-only, formatter-only, version-bump-only, or has no behavior/test relevance, stop with `no test changes justified` and one short reason.
 
@@ -42,7 +42,7 @@ You do not strengthen tests by guessing from the patch or by only polishing test
 
    A validator response is invalid if it is empty, whitespace-only, truncated, or missing `VALIDATED:` with a score and evidence. Retry invalid validator output once with smaller focused production/test excerpts. If it is still invalid, stop with `Review inconclusive`. Drop every candidate below 80.
 
-6. **Implement only validated improvements.** Prefer public behavior over private fields or mock call order. When tests exist, strengthen or extend them at the narrowest useful level. When no suitable test exists, create the smallest idiomatic test file in the discovered harness that exercises the changed public path end-to-end enough to fail for the named regression. Replace weak assertions with exact observable outcomes. Add edge/failure cases only when tied to real changed paths. Reject tests that only prove mocks, test-only production APIs, or implementation details. If a mock becomes more complex than the behavior, prefer a public seam or integration path. Skip trivial getters, generated code, framework boilerplate, style conventions, and broad coverage goals.
+6. **Implement only validated improvements.** Validated improvements are mandatory edits, not suggestions: modify existing tests or add new test code at the narrowest useful seam. Prefer public behavior over private fields or mock call order. When tests exist, strengthen or extend them at the narrowest useful level. When no suitable test exists, create the smallest idiomatic test file in the discovered harness that exercises the changed public path end-to-end enough to fail for the named regression. Replace weak assertions with exact observable outcomes. Add edge/failure cases only when tied to real changed paths. Reject tests that only prove mocks, test-only production APIs, or implementation details. If a mock becomes more complex than the behavior, prefer a public seam or integration path. Skip trivial getters, generated code, framework boilerplate, style conventions, and broad coverage goals.
 
 7. **Run checks.** Run the targeted tests that prove each improvement, then the broader relevant check when available. If no check applies, say why.
 
