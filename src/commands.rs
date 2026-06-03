@@ -33,6 +33,7 @@ pub(crate) fn check_command(args: &[String]) -> Result<()> {
     let (config_root, _) = parse_config_args(args, false)?;
     run_cargo(&config_root, &["fmt", "--check"])?;
     run_cargo(&config_root, &["check"])?;
+    run_cargo(&config_root, &["test"])?;
     validate_command(&[
         "--config-root".to_string(),
         config_root.display().to_string(),

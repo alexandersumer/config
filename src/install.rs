@@ -1,6 +1,7 @@
 use crate::config_root::discover_config_root;
 use crate::error::Result;
 use crate::links::{link_path, require_dir};
+use crate::registry::validate_registry;
 use std::collections::BTreeSet;
 use std::env;
 use std::fs;
@@ -19,6 +20,7 @@ pub(crate) fn install_command(args: &[String]) -> Result<()> {
 
     require_dir(&agents_dir, "config agents directory")?;
     require_dir(&skills_dir, "config skills directory")?;
+    validate_config_skills(&config_root)?;
     require_dir(&zsh_dir, "config zsh directory")?;
     require_dir(&ghostty_dir, "config Ghostty directory")?;
     require_dir(&relay_dir, "config Relay directory")?;
@@ -90,6 +92,7 @@ pub(crate) fn check_codex_skills_command(args: &[String]) -> Result<()> {
 
     require_dir(&agents_dir, "config agents directory")?;
     require_dir(&skills_dir, "config skills directory")?;
+    validate_config_skills(&config_root)?;
     let codex_skill_plan = prepare_codex_skill_links(&skills_dir, &home_dir)?;
     let errors = codex_skill_link_errors(&codex_skill_plan);
     if errors.is_empty() {
@@ -109,6 +112,18 @@ pub(crate) fn check_codex_skills_command(args: &[String]) -> Result<()> {
         "\nRun `cargo run -- install` from the config checkout to converge ~/.codex/skills.",
     );
     Err(output)
+}
+
+fn validate_config_skills(config_root: &Path) -> Result<()> {
+    let errors = validate_registry(config_root);
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Skill validation failed:\n- {}",
+            errors.join("\n- ")
+        ))
+    }
 }
 
 fn install_config_tools_binary(home_dir: &Path) -> Result<()> {

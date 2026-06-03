@@ -265,6 +265,42 @@ pub(crate) fn test_install_command() -> Result<()> {
         "--home".to_string(),
         home.path().display().to_string(),
     ])?;
+
+    let missing_source_skill = fixture.path().join(".agents/skills/brainstorming");
+    fs::remove_dir_all(&missing_source_skill).map_err(|err| {
+        format!(
+            "{}: cannot remove required source skill fixture: {err}",
+            missing_source_skill.display()
+        )
+    })?;
+    let invalid_source_check = check_codex_skills_command(&[
+        "--config-root".to_string(),
+        fixture.path().display().to_string(),
+        "--home".to_string(),
+        home.path().display().to_string(),
+    ])
+    .expect_err(
+        "Codex skill drift check should fail when source registry is missing a required skill",
+    );
+    if !invalid_source_check.contains("missing required custom skills: brainstorming") {
+        return Err(format!(
+            "Codex skill drift check did not reject invalid source registry: {invalid_source_check}"
+        ));
+    }
+    let invalid_source_install = install_command(&[
+        "--config-root".to_string(),
+        fixture.path().display().to_string(),
+        "--home".to_string(),
+        home.path().display().to_string(),
+    ])
+    .expect_err(
+        "install should fail before mutating when source registry is missing a required skill",
+    );
+    if !invalid_source_install.contains("missing required custom skills: brainstorming") {
+        return Err(format!(
+            "install did not reject invalid source registry: {invalid_source_install}"
+        ));
+    }
     Ok(())
 }
 

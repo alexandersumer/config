@@ -18,7 +18,7 @@ cargo run -- install
 
 Command roles:
 
-- `check`: non-mutating verification for formatting, build, skill validation, and regression tests.
+- `check`: non-mutating verification for formatting, build, unit tests, skill validation, and regression tests.
 - `check-codex-skills`: non-mutating verification that `~/.codex/skills` mirrors custom skills from `.agents/skills`.
 - `prepare`: runs the same verification as `check`.
 - `pre-commit`: safe hook entrypoint; runs `prepare` and `check-codex-skills`.
