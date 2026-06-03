@@ -1,7 +1,6 @@
 ---
 name: study-code-oss
 description: Study local OSS repositories in ~/oss with the current agent to extract excellent, evidence-backed implementation and architecture patterns for a requested or inferred aspect.
-register_cmd: true
 ---
 
 # Study Code: OSS

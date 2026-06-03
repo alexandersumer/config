@@ -103,13 +103,21 @@ pub(crate) fn check_codex_skills_command(args: &[String]) -> Result<()> {
         let custom_skill_names = codex_skill_plan.custom_skill_names()?;
         errors.extend(codex_prompt_input_errors(
             &config_root,
+            "config checkout",
             &custom_skill_names,
         )?);
+        if !same_existing_path(&config_root, &home_dir) {
+            errors.extend(codex_prompt_input_errors(
+                &home_dir,
+                "home directory",
+                &custom_skill_names,
+            )?);
+        }
     }
     if errors.is_empty() {
         if checked_prompt_input {
             println!(
-                "Custom Codex skills are installed and visible to Codex from {}.",
+                "Custom Codex skills are installed and visible to Codex skill/prompt surfaces from {}.",
                 skills_dir.display()
             );
         } else {
@@ -398,17 +406,19 @@ fn same_existing_path(left: &Path, right: &Path) -> bool {
 }
 
 fn codex_prompt_input_errors(
-    config_root: &Path,
+    cwd: &Path,
+    label: &str,
     expected_skill_names: &[String],
 ) -> Result<Vec<String>> {
     let output = Command::new("codex")
         .args(["debug", "prompt-input", "noop"])
-        .current_dir(config_root)
+        .current_dir(cwd)
         .output()
-        .map_err(|err| format!("cannot run codex debug prompt-input noop: {err}"))?;
+        .map_err(|err| format!("cannot run codex debug prompt-input noop from {label}: {err}"))?;
     if !output.status.success() {
         return Ok(vec![format!(
-            "codex debug prompt-input noop failed with {}\nstdout:\n{}\nstderr:\n{}",
+            "codex debug prompt-input noop failed from {label} ({}) with {}\nstdout:\n{}\nstderr:\n{}",
+            cwd.display(),
             output.status,
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
@@ -425,7 +435,8 @@ fn codex_prompt_input_errors(
         let needle = format!("- {name}:");
         if !text.contains(&needle) {
             errors.push(format!(
-                "codex debug prompt-input did not include managed skill {name:?}"
+                "codex debug prompt-input from {label} ({}) did not include managed skill {name:?}",
+                cwd.display()
             ));
         }
     }

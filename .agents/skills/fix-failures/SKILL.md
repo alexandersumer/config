@@ -1,7 +1,6 @@
 ---
 name: fix-failures
 description: Fix real check failures from arguments, pasted errors, local checks, or CI. Use when tests, builds, linters, CI, pipelines, checks, validation, or error output fail and the user wants the root cause fixed with proof.
-register_cmd: true
 ---
 
 Fix the failure from `error_output`, `$ARGUMENTS`, CI, or the repo's checks.

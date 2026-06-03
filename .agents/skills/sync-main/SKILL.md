@@ -1,7 +1,6 @@
 ---
 name: sync-main
 description: Merge latest origin default branch
-register_cmd: true
 ---
 
 Fetch the latest default branch from `origin` and merge that remote-tracking branch into the current branch. If the user did not explicitly request syncing, ask before any git write.

@@ -1,7 +1,6 @@
 ---
 name: create-chat-plan
 description: Create a lightweight implementation-ready plan directly in chat. Use when planning should be robust, interrogated, and verified upfront without writing plan files.
-register_cmd: true
 ---
 
 Use `topic`, else `$ARGUMENTS`, else infer the planning target from the conversation, active design, current branch, or referenced files. Produce the plan in chat only. Do not create markdown files, do not edit code, and do not invoke subagents unless the user explicitly asks for deeper research.

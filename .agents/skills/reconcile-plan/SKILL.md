@@ -1,7 +1,6 @@
 ---
 name: reconcile-plan
 description: Reconcile plan with code
-register_cmd: true
 ---
 
 Update structured planning state to match code reality. Do not edit product code.

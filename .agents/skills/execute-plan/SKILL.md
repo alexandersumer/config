@@ -1,7 +1,6 @@
 ---
 name: execute-plan
 description: Implement a plan
-register_cmd: true
 ---
 
 Implement `artifact`, `spec`, `$ARGUMENTS`, or the most relevant discovered planning artifact.

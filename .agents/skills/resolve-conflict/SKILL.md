@@ -1,7 +1,6 @@
 ---
 name: resolve-conflict
 description: Resolve merge conflicts
-register_cmd: true
 ---
 
 Resolve conflicts while preserving current branch intent and incorporating incoming changes.

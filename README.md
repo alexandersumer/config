@@ -19,11 +19,28 @@ cargo run -- install
 Command roles:
 
 - `check`: non-mutating verification for formatting, build, unit tests, skill validation, and regression tests.
-- `check-codex-skills`: non-mutating verification that `~/.codex/skills` mirrors custom skills from `.agents/skills`, Codex config has no deprecated/disabled skill-discovery flags, and Codex prompt input sees the managed skills.
+- `check-codex-skills`: non-mutating verification that `~/.codex/skills` mirrors custom skills from `.agents/skills`, Codex config has no deprecated/disabled skill-discovery flags, and Codex prompt input sees the managed skills from both this checkout and the home directory.
 - `prepare`: runs the same verification as `check`.
 - `pre-commit`: safe hook entrypoint; runs `prepare` and `check-codex-skills`.
 - `install`: intentional home-directory mutation for `~/.agents`, custom `~/.codex/skills` symlinks, Codex config flag repair, and `~/.local/bin/config-tools`.
 - `install-git-hooks`: intentional local Git config mutation for `core.hooksPath`.
+
+## Codex skills
+
+This checkout is the source of truth for custom Codex skills:
+
+- Source: `.agents/skills/<name>/SKILL.md`
+- Installed Codex link: `~/.codex/skills/<name> -> <checkout>/.agents/skills/<name>`
+
+Codex v0.131 does not expose custom skills as `/skill-name` slash commands. The `/` menu is for built-in TUI commands such as `/skills` and `/subagents`. Invoke these custom skills with the skill mention surface instead, for example:
+
+```text
+$surgical-edit
+$review
+$git-publish-to-origin
+```
+
+Do not add `register_cmd` to skill front matter. Current Codex ignores that legacy key, so this repo rejects it to avoid implying that custom skills appear as slash commands.
 
 ## Git hooks
 

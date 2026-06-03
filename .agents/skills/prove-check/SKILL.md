@@ -1,7 +1,6 @@
 ---
 name: prove-check
 description: Prove a local check catches regressions. Use when validating that a test, script, lint, or gate fails on the bug it claims to catch.
-register_cmd: true
 ---
 
 Prove `scope`, `$ARGUMENTS`, the relevant recent check, or conversation target catches the regression it claims to catch.

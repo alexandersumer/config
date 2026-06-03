@@ -13,7 +13,6 @@ const SKILL_FRONT_MATTER_KEYS: &[&str] = &[
     "compatibility",
     "metadata",
     "allowed-tools",
-    "register_cmd",
 ];
 const MIN_SKILL_BODY_WORDS: usize = 40;
 const MIN_SKILL_BODY_LINES: usize = 3;
@@ -343,7 +342,7 @@ mod tests {
     }
 
     #[test]
-    fn skill_front_matter_allows_relay_command_registration_key() {
+    fn skill_front_matter_rejects_legacy_register_cmd_key() {
         let value = yaml_value(
             r#"
 name: surgical-edit
@@ -353,8 +352,9 @@ register_cmd: true
         );
         let metadata = value.as_mapping().expect("front matter mapping");
 
-        require_known_keys(metadata, SKILL_FRONT_MATTER_KEYS, "skill")
-            .expect("register_cmd is supported skill metadata");
+        let error = require_known_keys(metadata, SKILL_FRONT_MATTER_KEYS, "skill")
+            .expect_err("register_cmd should not be accepted because Codex does not expose custom skills as slash commands");
+        assert!(error.contains("register_cmd"));
     }
 
     #[test]
@@ -363,7 +363,6 @@ register_cmd: true
             r#"
 name: surgical-edit
 description: Apply a narrow requested code change.
-register_cmd: true
 "#,
         );
         let metadata = value.as_mapping().expect("front matter mapping");
@@ -383,7 +382,6 @@ register_cmd: true
             r#"
 name: surgical-edit
 description: Apply a narrow requested code change.
-register_cmd: true
 "#,
         );
         let metadata = value.as_mapping().expect("front matter mapping");

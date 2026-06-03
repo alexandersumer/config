@@ -1,7 +1,6 @@
 ---
 name: understand-system
 description: Understand one or more local codebases as a system. Searches ~/oss, ~/atlassian, and ~/src, then maps architecture, relationships, real flows, contracts, local runtime/debug context, validation seams, and evidence gaps.
-register_cmd: true
 ---
 
 # Understand System

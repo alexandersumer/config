@@ -1,7 +1,6 @@
 ---
 name: address-comments
 description: Address actionable PR comments
-register_cmd: true
 ---
 
 Address actionable comments on `pr_target`, or the current branch PR. Use `focus` only to narrow scope.

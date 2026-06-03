@@ -1,7 +1,6 @@
 ---
 name: git-publish
 description: Commit, push, and open a no-reviewer PR for the current changes
-register_cmd: true
 ---
 
 Commit current staged, unstaged, and relevant untracked changes, push to `origin`, then create or report a no-reviewer pull request to the remote default branch.

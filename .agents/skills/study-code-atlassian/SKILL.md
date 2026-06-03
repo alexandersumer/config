@@ -1,7 +1,6 @@
 ---
 name: study-code-atlassian
 description: Study local Atlassian repositories in ~/atlassian with the current agent to extract excellent, evidence-backed internal implementation and architecture patterns for a requested or inferred aspect.
-register_cmd: true
 ---
 
 # Study Code: Atlassian

@@ -1,7 +1,6 @@
 ---
 name: strengthen-tests-solo
 description: Direct test review and edit workflow without subagents. Use only when the user explicitly asks for direct, inline, single-agent, or no-subagent review of tests or changed behavior.
-register_cmd: true
 ---
 
 # Strengthen Tests Solo

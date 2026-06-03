@@ -1,7 +1,6 @@
 ---
 name: real-e2e
 description: "Implement real engine end-to-end tests to completion. Use when the user wants a real E2E, true E2E, smoke test, acceptance test, CI proof, or asks to boot the system and hit public APIs while rejecting mocks/fakes/workarounds. This is an execution skill: it must create or harden the test, wire it into the right lane, run it, and prove it catches real regressions unless blocked by unavailable infrastructure."
-register_cmd: true
 ---
 
 Create a **real** end-to-end test for `scope`, `$ARGUMENTS`, recent changes, or the conversation target, and keep going until the test exists, is wired into the appropriate lane, and has been validated or is blocked by a concrete infrastructure limitation. Real means the production engine is running and the test drives the same public boundary a user, service, CLI, worker, or protocol client depends on.

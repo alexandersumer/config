@@ -1,7 +1,6 @@
 ---
 name: strengthen-tests
 description: Default test review and edit workflow using fresh-context subagents. Use to review and apply validated test-code improvements for changed behavior unless the user explicitly asks for direct, inline, single-agent, or no-subagent review.
-register_cmd: true
 ---
 
 # Strengthen Tests

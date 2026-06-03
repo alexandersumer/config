@@ -1,7 +1,6 @@
 ---
 name: design-review-solo
 description: Direct design review without subagents. Use only when the user explicitly asks for direct, inline, single-agent, or no-subagent review of software design, architecture, proposals, API boundaries, module splits, data models, or design-sensitive diffs.
-register_cmd: true
 ---
 
 # Design Review Solo

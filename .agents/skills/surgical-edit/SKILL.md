@@ -1,7 +1,6 @@
 ---
 name: surgical-edit
 description: Implement a requested code change without a formal plan. Use when the user asks to edit, tweak, add, remove, rename, or adjust behavior and the work should be completed directly.
-register_cmd: true
 ---
 
 Apply `changes`, else `$ARGUMENTS`, else the conversation request, else the obvious requested change from the current branch/worktree context.

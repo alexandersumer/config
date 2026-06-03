@@ -1,7 +1,6 @@
 ---
 name: architecture-review-solo
 description: Direct codebase architecture review without subagents. Use only when the user explicitly asks for direct, inline, single-agent, or no-subagent architecture review.
-register_cmd: true
 ---
 
 # Architecture Review Solo

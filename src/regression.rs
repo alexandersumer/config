@@ -56,7 +56,7 @@ fn test_new_skill_validate_flow() -> Result<()> {
     })?;
     fs::write(
         skill_dir.join("SKILL.md"),
-        "---\nname: real-e2e-fixture\ndescription: Fixture skill proving validation discovers new valid skills through the public command path.\nregister_cmd: true\n---\n\nDrive the public command path, not a helper-only shortcut, when proving newly added skills are discoverable.\nValidate the fixture checkout exactly as the normal config command does.\nThe fixture body is intentionally concrete so failures prove skill validation behavior rather than placeholder rejection.\n",
+        "---\nname: real-e2e-fixture\ndescription: Fixture skill proving validation discovers new valid skills through the public command path.\n---\n\nDrive the public command path, not a helper-only shortcut, when proving newly added skills are discoverable.\nValidate the fixture checkout exactly as the normal config command does.\nThe fixture body is intentionally concrete so failures prove skill validation behavior rather than placeholder rejection.\n",
     )
     .map_err(|err| format!("cannot write fixture skill: {err}"))?;
 

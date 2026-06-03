@@ -1,7 +1,6 @@
 ---
 name: design-review
 description: Default design review using fresh-context subagents. Use for software design, architecture, proposals, API boundaries, module splits, data models, or design-sensitive diffs unless the user explicitly asks for direct, inline, single-agent, or no-subagent review.
-register_cmd: true
 ---
 
 # Design Review

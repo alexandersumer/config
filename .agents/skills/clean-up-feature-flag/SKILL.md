@@ -1,7 +1,6 @@
 ---
 name: clean-up-feature-flag
 description: Remove a rolled-out flag
-register_cmd: true
 ---
 
 Remove fully rolled out flag `flag_key` or `$ARGUMENTS`. Keep enabled behavior. Delete disabled behavior.

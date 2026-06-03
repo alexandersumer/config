@@ -1,7 +1,6 @@
 ---
 name: review-solo
 description: Direct code-change review without subagents. Use only when the user explicitly asks for direct, inline, single-agent, or no-subagent review of code/config/test changes.
-register_cmd: true
 ---
 
 # Review Solo

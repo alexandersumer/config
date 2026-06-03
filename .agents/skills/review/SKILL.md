@@ -1,7 +1,6 @@
 ---
 name: review
 description: Default code-change review using fresh-context subagents. Use for PRs, diffs, branches, staged changes, unstaged changes, untracked files, or any set of code/config/test changes unless the user explicitly asks for direct, inline, single-agent, or no-subagent review.
-register_cmd: true
 ---
 
 # Review

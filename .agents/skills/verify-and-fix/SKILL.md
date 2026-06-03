@@ -1,7 +1,6 @@
 ---
 name: verify-and-fix
 description: Verify behavior with acceptance-level proof and fix only proven defects. Use when the user asks to check, validate, audit, verify, confirm, reproduce, prove, or end-to-end test behavior, especially when they want certainty that a change works rather than a routine CI check.
-register_cmd: true
 ---
 
 Verify `scope`, `$ARGUMENTS`, recent changes, relevant artifact, or conversation behavior by proving the user-visible contract through the real product path.
