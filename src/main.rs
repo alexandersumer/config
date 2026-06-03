@@ -4,6 +4,7 @@ mod config_root;
 mod error;
 mod install;
 mod links;
+mod managed_config;
 mod registry;
 mod regression;
 fn main() -> std::process::ExitCode {

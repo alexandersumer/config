@@ -12,6 +12,12 @@ window-padding-balance = true
 window-new-tab-position = end
 
 # macOS
+# Avoid Ghostty/macOS 26 tabbar disappearance paths.
+macos-titlebar-style = transparent
+macos-non-native-fullscreen = false
+window-save-state = never
+window-show-tab-bar = always
+
 # Treat the left Option key as Alt/Meta for shell shortcuts while keeping
 # right Option available for macOS text input and special characters.
 macos-option-as-alt = left

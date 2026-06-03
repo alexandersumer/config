@@ -1,22 +1,24 @@
 use crate::cli::parse_config_args;
 use crate::error::Result;
 use crate::install::check_codex_skills_command;
+use crate::managed_config::validate_managed_configs;
 use crate::registry::validate_registry;
 use crate::regression::run_regression_tests;
 use std::path::Path;
 
 pub(crate) fn validate_command(args: &[String]) -> Result<()> {
     let (config_root, _) = parse_config_args(args, false)?;
-    let errors = validate_registry(&config_root);
+    let mut errors = validate_registry(&config_root);
+    errors.extend(validate_managed_configs(&config_root));
     if !errors.is_empty() {
-        let mut output = String::from("Skill validation failed:");
+        let mut output = String::from("Config validation failed:");
         for error in errors {
             output.push_str("\n- ");
             output.push_str(&error);
         }
         return Err(output);
     }
-    println!("Skill validation passed.");
+    println!("Config validation passed.");
     Ok(())
 }
 
@@ -25,7 +27,7 @@ pub(crate) fn test_validate_command(args: &[String]) -> Result<()> {
         return Err(format!("unknown option: {}", args[0]));
     }
     run_regression_tests()?;
-    println!("Skill validator regression tests passed.");
+    println!("Config regression tests passed.");
     Ok(())
 }
 

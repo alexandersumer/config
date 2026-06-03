@@ -2,6 +2,7 @@ use crate::commands::validate_command;
 use crate::config_root::config_root_from_exe;
 use crate::error::Result;
 use crate::install::{check_codex_skills_command, install_command};
+use crate::managed_config::validate_managed_configs;
 use crate::registry::validate_registry;
 use std::fs;
 #[cfg(unix)]
@@ -35,6 +36,7 @@ pub(crate) fn run_regression_tests() -> Result<()> {
     }
     test_new_skill_validate_flow()?;
     test_real_e2e_skill_requires_edge_case_proof()?;
+    test_ghostty_config_rejects_tab_disappearance_regressions()?;
     test_install_command()?;
     test_link_safety()?;
     test_command_failures()?;
@@ -42,6 +44,63 @@ pub(crate) fn run_regression_tests() -> Result<()> {
     test_home_reset_to_origin()?;
     test_axiom_alias_zsh_wiring()?;
     test_relay_axiom_config()?;
+    Ok(())
+}
+
+fn test_ghostty_config_rejects_tab_disappearance_regressions() -> Result<()> {
+    let fixture = copy_fixture()?;
+    let clean_errors = validate_managed_configs(fixture.path());
+    if !clean_errors.is_empty() {
+        return Err(format!(
+            "clean Ghostty config should pass managed-config validation:\n{}",
+            clean_errors.join("\n")
+        ));
+    }
+
+    for (name, line, expected) in [
+        (
+            "titlebar tabs",
+            "macos-titlebar-style = tabs",
+            "must not set `macos-titlebar-style` to `tabs`",
+        ),
+        (
+            "non-native fullscreen",
+            "macos-non-native-fullscreen = true",
+            "must not set `macos-non-native-fullscreen` to `true`",
+        ),
+        (
+            "forced window restore",
+            "window-save-state = always",
+            "must not set `window-save-state` to `always`",
+        ),
+    ] {
+        let fixture = copy_fixture()?;
+        let ghostty_config = fixture.path().join("ghostty/config");
+        let mut text = fs::read_to_string(&ghostty_config).map_err(|err| {
+            format!(
+                "{}: cannot read fixture Ghostty config: {err}",
+                ghostty_config.display()
+            )
+        })?;
+        text.push('\n');
+        text.push_str(line);
+        text.push('\n');
+        fs::write(&ghostty_config, text).map_err(|err| {
+            format!(
+                "{}: cannot write fixture Ghostty config: {err}",
+                ghostty_config.display()
+            )
+        })?;
+
+        let errors = validate_managed_configs(fixture.path());
+        let output = errors.join("\n");
+        if !output.contains(expected) {
+            return Err(format!(
+                "{name}: Ghostty managed-config guard missed {expected:?}\n{output}"
+            ));
+        }
+    }
+
     Ok(())
 }
 
@@ -500,7 +559,7 @@ pub(crate) fn test_command_failures() -> Result<()> {
         invalid_fixture.path().display().to_string(),
     ])
     .expect_err("validate should fail when validation errors exist");
-    if !validate_error.contains("Skill validation failed") {
+    if !validate_error.contains("Config validation failed") {
         return Err(format!("unexpected validate error: {validate_error}"));
     }
     Ok(())
