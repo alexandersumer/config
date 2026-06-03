@@ -19,10 +19,10 @@ cargo run -- install
 Command roles:
 
 - `check`: non-mutating verification for formatting, build, unit tests, skill validation, and regression tests.
-- `check-codex-skills`: non-mutating verification that `~/.codex/skills` mirrors custom skills from `.agents/skills`.
+- `check-codex-skills`: non-mutating verification that `~/.codex/skills` mirrors custom skills from `.agents/skills`, Codex config has no deprecated/disabled skill-discovery flags, and Codex prompt input sees the managed skills.
 - `prepare`: runs the same verification as `check`.
 - `pre-commit`: safe hook entrypoint; runs `prepare` and `check-codex-skills`.
-- `install`: intentional home-directory mutation for `~/.agents`, custom `~/.codex/skills` symlinks, and `~/.local/bin/config-tools`.
+- `install`: intentional home-directory mutation for `~/.agents`, custom `~/.codex/skills` symlinks, Codex config flag repair, and `~/.local/bin/config-tools`.
 - `install-git-hooks`: intentional local Git config mutation for `core.hooksPath`.
 
 ## Git hooks
@@ -101,8 +101,6 @@ git grep -n -E '^#!|python3|/usr/bin/env|cargo run --quiet --manifest-path' -- '
 The executable-file check should print only:
 
 ```text
-./.agents/skills/brainstorming/scripts/start-server.sh
-./.agents/skills/brainstorming/scripts/stop-server.sh
 ./.githooks/pre-commit
 ```
 

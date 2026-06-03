@@ -8,6 +8,7 @@ use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs as unix_fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 pub(crate) fn install_command(args: &[String]) -> Result<()> {
     let (config_root, home_dir) = parse_install_args(args)?;
@@ -25,6 +26,7 @@ pub(crate) fn install_command(args: &[String]) -> Result<()> {
     require_dir(&ghostty_dir, "config Ghostty directory")?;
     require_dir(&relay_dir, "config Relay directory")?;
     let codex_skill_plan = prepare_codex_skill_links(&skills_dir, &home_dir)?;
+    repair_codex_config(&home_dir)?;
     fs::create_dir_all(home_dir.join(".config/ghostty")).map_err(|err| {
         format!(
             "{}: cannot create Ghostty config directory: {err}",
@@ -94,12 +96,28 @@ pub(crate) fn check_codex_skills_command(args: &[String]) -> Result<()> {
     require_dir(&skills_dir, "config skills directory")?;
     validate_config_skills(&config_root)?;
     let codex_skill_plan = prepare_codex_skill_links(&skills_dir, &home_dir)?;
-    let errors = codex_skill_link_errors(&codex_skill_plan);
+    let mut errors = codex_skill_link_errors(&codex_skill_plan);
+    errors.extend(codex_config_errors(&home_dir)?);
+    let checked_prompt_input = is_current_home(&home_dir);
+    if checked_prompt_input {
+        let custom_skill_names = codex_skill_plan.custom_skill_names()?;
+        errors.extend(codex_prompt_input_errors(
+            &config_root,
+            &custom_skill_names,
+        )?);
+    }
     if errors.is_empty() {
-        println!(
-            "Custom Codex skills are in sync with {}.",
-            skills_dir.display()
-        );
+        if checked_prompt_input {
+            println!(
+                "Custom Codex skills are installed and visible to Codex from {}.",
+                skills_dir.display()
+            );
+        } else {
+            println!(
+                "Custom Codex skills are in sync with {}.",
+                skills_dir.display()
+            );
+        }
         return Ok(());
     }
 
@@ -240,6 +258,23 @@ struct CodexSkillLinkPlan {
     stale_managed_links: Vec<PathBuf>,
 }
 
+impl CodexSkillLinkPlan {
+    fn custom_skill_names(&self) -> Result<Vec<String>> {
+        self.links
+            .iter()
+            .map(|(source, _)| {
+                source
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .map(str::to_string)
+                    .ok_or_else(|| {
+                        format!("{}: skill directory has no valid name", source.display())
+                    })
+            })
+            .collect()
+    }
+}
+
 fn prepare_codex_skill_links(skills_dir: &Path, home_dir: &Path) -> Result<CodexSkillLinkPlan> {
     let codex_skills_dir = home_dir.join(".codex/skills");
     let system_skills_dir = codex_skills_dir.join(".system");
@@ -256,6 +291,168 @@ fn prepare_codex_skill_links(skills_dir: &Path, home_dir: &Path) -> Result<Codex
         links,
         stale_managed_links,
     })
+}
+
+fn repair_codex_config(home_dir: &Path) -> Result<()> {
+    let config_path = home_dir.join(".codex/config.toml");
+    let text = match fs::read_to_string(&config_path) {
+        Ok(text) => text,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => {
+            return Err(format!(
+                "{}: cannot read Codex config: {err}",
+                config_path.display()
+            ))
+        }
+    };
+    let repaired = remove_disallowed_codex_feature_flags(&text);
+    if repaired != text {
+        fs::write(&config_path, repaired).map_err(|err| {
+            format!(
+                "{}: cannot write repaired Codex config: {err}",
+                config_path.display()
+            )
+        })?;
+        println!(
+            "Removed deprecated/disabled Codex feature flags from {}",
+            config_path.display()
+        );
+    }
+    Ok(())
+}
+
+fn codex_config_errors(home_dir: &Path) -> Result<Vec<String>> {
+    let config_path = home_dir.join(".codex/config.toml");
+    let text = match fs::read_to_string(&config_path) {
+        Ok(text) => text,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(err) => {
+            return Err(format!(
+                "{}: cannot read Codex config: {err}",
+                config_path.display()
+            ))
+        }
+    };
+
+    let mut errors = Vec::new();
+    let mut in_features = false;
+    for (line_number, line) in text.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            in_features = trimmed == "[features]";
+            continue;
+        }
+        if !in_features {
+            continue;
+        }
+        if trimmed.starts_with("codex_hooks") {
+            errors.push(format!(
+                "{}:{}: deprecated [features].codex_hooks must be removed; use [features].hooks",
+                config_path.display(),
+                line_number + 1
+            ));
+        }
+        if trimmed == "apps = false" {
+            errors.push(format!(
+                "{}:{}: [features].apps must not be forced off because it hides Codex discovery surfaces",
+                config_path.display(),
+                line_number + 1
+            ));
+        }
+    }
+    Ok(errors)
+}
+
+fn remove_disallowed_codex_feature_flags(text: &str) -> String {
+    let mut output = Vec::new();
+    let mut in_features = false;
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            in_features = trimmed == "[features]";
+        }
+        if in_features && (trimmed.starts_with("codex_hooks") || trimmed == "apps = false") {
+            continue;
+        }
+        output.push(line);
+    }
+    let mut repaired = output.join("\n");
+    if text.ends_with('\n') {
+        repaired.push('\n');
+    }
+    repaired
+}
+
+fn is_current_home(home_dir: &Path) -> bool {
+    let Ok(current_home) = env::var("HOME") else {
+        return false;
+    };
+    same_existing_path(home_dir, Path::new(&current_home))
+}
+
+fn same_existing_path(left: &Path, right: &Path) -> bool {
+    left.canonicalize()
+        .ok()
+        .zip(right.canonicalize().ok())
+        .is_some_and(|(left, right)| left == right)
+}
+
+fn codex_prompt_input_errors(
+    config_root: &Path,
+    expected_skill_names: &[String],
+) -> Result<Vec<String>> {
+    let output = Command::new("codex")
+        .args(["debug", "prompt-input", "noop"])
+        .current_dir(config_root)
+        .output()
+        .map_err(|err| format!("cannot run codex debug prompt-input noop: {err}"))?;
+    if !output.status.success() {
+        return Ok(vec![format!(
+            "codex debug prompt-input noop failed with {}\nstdout:\n{}\nstderr:\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )]);
+    }
+
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .map_err(|err| format!("cannot parse codex debug prompt-input JSON: {err}"))?;
+    let mut text = String::new();
+    collect_json_text_fields(&value, &mut text);
+
+    let mut errors = Vec::new();
+    for name in expected_skill_names {
+        let needle = format!("- {name}:");
+        if !text.contains(&needle) {
+            errors.push(format!(
+                "codex debug prompt-input did not include managed skill {name:?}"
+            ));
+        }
+    }
+    Ok(errors)
+}
+
+fn collect_json_text_fields(value: &serde_json::Value, output: &mut String) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, value) in map {
+                if key == "text" {
+                    if let Some(text) = value.as_str() {
+                        output.push_str(text);
+                        output.push('\n');
+                    }
+                } else {
+                    collect_json_text_fields(value, output);
+                }
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for value in values {
+                collect_json_text_fields(value, output);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn apply_codex_skill_links(plan: CodexSkillLinkPlan) -> Result<()> {
@@ -426,6 +623,20 @@ fn normalize_path(path: &Path) -> PathBuf {
         }
     }
     normalized
+}
+
+#[cfg(test)]
+mod tests {
+    use super::remove_disallowed_codex_feature_flags;
+
+    #[test]
+    fn codex_config_repair_removes_deprecated_and_disabled_feature_flags() {
+        let input = "model = \"gpt-5.5\"\n\n[features]\n  codex_hooks = true\n  hooks = true\n  apps = false\n\n[plugins.foo]\nenabled = true\n";
+        let expected =
+            "model = \"gpt-5.5\"\n\n[features]\n  hooks = true\n\n[plugins.foo]\nenabled = true\n";
+
+        assert_eq!(remove_disallowed_codex_feature_flags(input), expected);
+    }
 }
 
 fn discover_custom_skills(skills_dir: &Path) -> Result<Vec<PathBuf>> {

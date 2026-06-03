@@ -117,6 +117,17 @@ pub(crate) fn test_install_command() -> Result<()> {
         .tempdir()
         .map_err(|err| format!("cannot create temp install home: {err}"))?;
     create_codex_system_skills(home.path())?;
+    let codex_config = home.path().join(".codex/config.toml");
+    fs::write(
+        &codex_config,
+        "model = \"gpt-5.5\"\n\n[features]\n  codex_hooks = true\n  hooks = true\n  apps = false\n",
+    )
+    .map_err(|err| {
+        format!(
+            "{}: cannot write Codex config fixture: {err}",
+            codex_config.display()
+        )
+    })?;
     let stale_managed_skill = home.path().join(".codex/skills/review-code");
     let external_skill_dir = home.path().join("external-skill");
     fs::create_dir(&external_skill_dir)
@@ -144,6 +155,8 @@ pub(crate) fn test_install_command() -> Result<()> {
     .expect_err("Codex skill drift check should fail before install converges custom links");
     for expected in [
         "Custom Codex skill installation drift detected",
+        "deprecated [features].codex_hooks must be removed",
+        "[features].apps must not be forced off",
         "is a stale managed Codex skill symlink",
         "is missing; expected symlink",
     ] {
@@ -160,6 +173,19 @@ pub(crate) fn test_install_command() -> Result<()> {
         "--home".to_string(),
         home.path().display().to_string(),
     ])?;
+    let repaired_codex_config = fs::read_to_string(&codex_config).map_err(|err| {
+        format!(
+            "{}: cannot read repaired Codex config: {err}",
+            codex_config.display()
+        )
+    })?;
+    if repaired_codex_config.contains("codex_hooks")
+        || repaired_codex_config.contains("apps = false")
+    {
+        return Err(format!(
+            "install did not repair deprecated/disabled Codex config flags:\n{repaired_codex_config}"
+        ));
+    }
 
     assert_symlink_resolves_to(
         &home.path().join(".agents"),
@@ -266,7 +292,7 @@ pub(crate) fn test_install_command() -> Result<()> {
         home.path().display().to_string(),
     ])?;
 
-    let missing_source_skill = fixture.path().join(".agents/skills/brainstorming");
+    let missing_source_skill = fixture.path().join(".agents/skills/address-comments");
     fs::remove_dir_all(&missing_source_skill).map_err(|err| {
         format!(
             "{}: cannot remove required source skill fixture: {err}",
@@ -282,7 +308,7 @@ pub(crate) fn test_install_command() -> Result<()> {
     .expect_err(
         "Codex skill drift check should fail when source registry is missing a required skill",
     );
-    if !invalid_source_check.contains("missing required custom skills: brainstorming") {
+    if !invalid_source_check.contains("missing required custom skills: address-comments") {
         return Err(format!(
             "Codex skill drift check did not reject invalid source registry: {invalid_source_check}"
         ));
@@ -296,7 +322,7 @@ pub(crate) fn test_install_command() -> Result<()> {
     .expect_err(
         "install should fail before mutating when source registry is missing a required skill",
     );
-    if !invalid_source_install.contains("missing required custom skills: brainstorming") {
+    if !invalid_source_install.contains("missing required custom skills: address-comments") {
         return Err(format!(
             "install did not reject invalid source registry: {invalid_source_install}"
         ));
@@ -869,14 +895,14 @@ fn mutate_missing_skill_file(config_root: &Path) -> Result<&'static str> {
 }
 
 fn mutate_missing_required_custom_skill(config_root: &Path) -> Result<&'static str> {
-    let skill_dir = config_root.join(".agents/skills/brainstorming");
+    let skill_dir = config_root.join(".agents/skills/address-comments");
     fs::remove_dir_all(&skill_dir).map_err(|err| {
         format!(
             "{}: cannot remove required fixture skill directory: {err}",
             skill_dir.display()
         )
     })?;
-    Ok("missing required custom skills: brainstorming")
+    Ok("missing required custom skills: address-comments")
 }
 
 fn mutate_front_matter_name_mismatch(config_root: &Path) -> Result<&'static str> {

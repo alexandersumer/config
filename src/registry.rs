@@ -21,7 +21,6 @@ const REQUIRED_CUSTOM_SKILL_NAMES: &[&str] = &[
     "address-comments",
     "architecture-review",
     "architecture-review-solo",
-    "brainstorming",
     "clean-up-feature-flag",
     "create-chat-plan",
     "create-plan",
@@ -356,11 +355,6 @@ register_cmd: true
 
         require_known_keys(metadata, SKILL_FRONT_MATTER_KEYS, "skill")
             .expect("register_cmd is supported skill metadata");
-    }
-
-    #[test]
-    fn required_custom_skills_include_brainstorming() {
-        assert!(REQUIRED_CUSTOM_SKILL_NAMES.contains(&"brainstorming"));
     }
 
     #[test]
