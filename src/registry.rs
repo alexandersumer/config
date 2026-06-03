@@ -17,6 +17,40 @@ const SKILL_FRONT_MATTER_KEYS: &[&str] = &[
 ];
 const MIN_SKILL_BODY_WORDS: usize = 40;
 const MIN_SKILL_BODY_LINES: usize = 3;
+const REQUIRED_CUSTOM_SKILL_NAMES: &[&str] = &[
+    "address-comments",
+    "architecture-review",
+    "architecture-review-solo",
+    "brainstorming",
+    "clean-up-feature-flag",
+    "create-chat-plan",
+    "create-plan",
+    "describe-branch",
+    "describe-diff",
+    "design-review",
+    "design-review-solo",
+    "diagnose",
+    "execute-plan",
+    "fix-failures",
+    "git-publish",
+    "git-publish-to-origin",
+    "grill-me",
+    "prove-check",
+    "real-e2e",
+    "reconcile-plan",
+    "resolve-conflict",
+    "review",
+    "review-solo",
+    "strengthen-tests",
+    "strengthen-tests-solo",
+    "study-code-atlassian",
+    "study-code-oss",
+    "surgical-edit",
+    "sync-main",
+    "understand-system",
+    "verify-and-fix",
+    "write-up",
+];
 
 fn parse_front_matter(path: &Path) -> Result<Mapping> {
     let text = fs::read_to_string(path)
@@ -259,7 +293,25 @@ fn collect_skill_names(config_root: &Path) -> Result<HashSet<String>> {
     if seen_names.is_empty() {
         return Err(format!("{}: no skills found", skills_root.display()));
     }
+    require_required_custom_skills(&skills_root, &seen_names)?;
     Ok(seen_names)
+}
+
+fn require_required_custom_skills(skills_root: &Path, seen_names: &HashSet<String>) -> Result<()> {
+    let missing: Vec<&str> = REQUIRED_CUSTOM_SKILL_NAMES
+        .iter()
+        .copied()
+        .filter(|name| !seen_names.contains(*name))
+        .collect();
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "{}: missing required custom skills: {}",
+            skills_root.display(),
+            missing.join(", ")
+        ))
+    }
 }
 
 pub(crate) fn validate_registry(config_root: &Path) -> Vec<String> {
@@ -304,6 +356,11 @@ register_cmd: true
 
         require_known_keys(metadata, SKILL_FRONT_MATTER_KEYS, "skill")
             .expect("register_cmd is supported skill metadata");
+    }
+
+    #[test]
+    fn required_custom_skills_include_brainstorming() {
+        assert!(REQUIRED_CUSTOM_SKILL_NAMES.contains(&"brainstorming"));
     }
 
     #[test]

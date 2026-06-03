@@ -19,6 +19,10 @@ pub(crate) fn run_regression_tests() -> Result<()> {
     let mutations: &[(&str, Mutation)] = &[
         ("missing skill file", mutate_missing_skill_file),
         (
+            "missing required custom skill",
+            mutate_missing_required_custom_skill,
+        ),
+        (
             "front matter name mismatch",
             mutate_front_matter_name_mismatch,
         ),
@@ -826,6 +830,17 @@ fn mutate_missing_skill_file(config_root: &Path) -> Result<&'static str> {
         }
     }
     Ok("no skills found")
+}
+
+fn mutate_missing_required_custom_skill(config_root: &Path) -> Result<&'static str> {
+    let skill_dir = config_root.join(".agents/skills/brainstorming");
+    fs::remove_dir_all(&skill_dir).map_err(|err| {
+        format!(
+            "{}: cannot remove required fixture skill directory: {err}",
+            skill_dir.display()
+        )
+    })?;
+    Ok("missing required custom skills: brainstorming")
 }
 
 fn mutate_front_matter_name_mismatch(config_root: &Path) -> Result<&'static str> {
