@@ -1,11 +1,11 @@
 ---
-name: review
-description: Default code-change review using fresh-context subagents. Use for PRs, diffs, branches, staged changes, unstaged changes, untracked files, or any set of code/config/test changes unless the user explicitly asks for direct, inline, single-agent, or no-subagent review.
+name: review-deep
+description: Heavyweight code-change review using fresh-context subagents and validation. Use when the user asks for deep, thorough, multi-agent, high-confidence, or heavyweight review of PRs, diffs, branches, staged changes, unstaged changes, untracked files, or any set of code/config/test changes. Use review-solo for ordinary/direct single-agent review.
 ---
 
-# Review
+# Review Deep
 
-You do not review the code directly. Subagents do the reviewing in fresh context because session history biases the reviewer toward the author's framing and burns tokens on noise. Your job is dispatching and aggregating.
+This is the heavyweight code-review path. You do not review the code directly. Subagents do the reviewing in fresh context because session history biases the reviewer toward the author's framing and burns tokens on noise. Your job is dispatching and aggregating.
 
 1. **Get the effective review diff automatically.** Do not require a PR, explicit scope, or committed branch changes. Resolve the remote default branch from `origin/HEAD`, falling back to `origin/main` or `origin/master` only if needed; if no remote default exists, omit only the committed-branch part. Build one effective diff from the union of: committed branch changes with `git diff $(git merge-base <remote-default> HEAD)..HEAD`, staged changes with `git diff --cached`, unstaged changes with `git diff`, and untracked files from `git ls-files --others --exclude-standard` rendered as new-file diffs. Always include staged, unstaged, and untracked changes even when the committed branch diff exists. If `focus_area` or `$ARGUMENTS` is provided, use it only to narrow this discovered diff. If the effective review diff is empty, draft-only, formatter-only, version-bump-only, or already reviewed in this thread, stop with a one-line note.
 

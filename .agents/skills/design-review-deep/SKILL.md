@@ -1,11 +1,11 @@
 ---
-name: design-review
-description: Default design review using fresh-context subagents. Use for software design, architecture, proposals, API boundaries, module splits, data models, or design-sensitive diffs unless the user explicitly asks for direct, inline, single-agent, or no-subagent review.
+name: design-review-deep
+description: Heavyweight design review using fresh-context subagents and validation. Use when the user asks for deep, thorough, multi-agent, high-confidence, or heavyweight review of a software design, architecture proposal, API boundary, module split, data model, or design-sensitive diff. Use design-review-solo for ordinary/direct single-agent design review.
 ---
 
-# Design Review
+# Design Review Deep
 
-You do not rely on the author's framing alone. Fresh-context subagents challenge the design from different angles; your job is to provide the design artifact, relevant code context, conventions, and then aggregate only validated architectural findings.
+This is the heavyweight design-review path. You do not rely on the author's framing alone. Fresh-context subagents challenge the design from different angles; your job is to provide the design artifact, relevant code context, conventions, and then aggregate only validated architectural findings.
 
 1. **Resolve the scope and effective diff automatically.** Use `scope`, `$ARGUMENTS`, the conversation, artifact, or file when provided; otherwise default to the effective branch/worktree diff. Do not require a PR, explicit scope, or committed branch changes. For diff review, resolve the remote default branch from `origin/HEAD`, falling back to `origin/main` or `origin/master` only if needed; if no remote default exists, omit only the committed-branch part. Build one effective diff from the union of: committed branch changes with `git diff $(git merge-base <remote-default> HEAD)..HEAD`, staged changes with `git diff --cached`, unstaged changes with `git diff`, and untracked files from `git ls-files --others --exclude-standard` rendered as new-file diffs. Always include staged, unstaged, and untracked changes even when the committed branch diff exists. If `scope` or `$ARGUMENTS` is provided, use it only to narrow this discovered diff unless it names a separate artifact or file. If no artifact/file/diff can be discovered and the design target is still unclear after reading available context, ask one precise question and stop.
 

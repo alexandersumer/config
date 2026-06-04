@@ -1,11 +1,11 @@
 ---
 name: strengthen-tests-solo
-description: Direct test review and edit workflow without subagents. Use only when the user explicitly asks for direct, inline, single-agent, or no-subagent review of tests or changed behavior.
+description: Direct test review and edit workflow without subagents. Use for ordinary, direct, inline, single-agent, or no-subagent review of tests or changed behavior. Use strengthen-tests-deep when the user asks for deep, thorough, multi-agent, high-confidence, or heavyweight test strengthening.
 ---
 
 # Strengthen Tests Solo
 
-Review and strengthen tests directly in this session. This is not review-only: after validation, make the justified test-code improvements in the workspace instead of merely recommending them. Do not invoke subagents. Preserve the same quality bar as `strengthen-tests` by identifying changed behavior first, finding the real test seam, and implementing only test improvements that catch named realistic regressions.
+Review and strengthen tests directly in this session. This is not review-only: after validation, make the justified test-code improvements in the workspace instead of merely recommending them. Do not invoke subagents. Preserve the same quality bar as `strengthen-tests-deep` by identifying changed behavior first, finding the real test seam, and implementing only test improvements that catch named realistic regressions.
 
 1. **Get the effective diff and behavior surface automatically.** Do not require a PR, explicit scope, or committed branch changes. Resolve the remote default branch from `origin/HEAD`, falling back to `origin/main` or `origin/master` only if needed; if no remote default exists, omit only the committed-branch part. Build one effective diff from the union of: committed branch changes with `git diff $(git merge-base <remote-default> HEAD)..HEAD`, staged changes with `git diff --cached`, unstaged changes with `git diff`, and untracked files from `git ls-files --others --exclude-standard` rendered as new-file diffs. Always include staged, unstaged, and untracked changes even when the committed branch diff exists. If `focus_area` or `$ARGUMENTS` is provided, use it only to narrow this discovered diff. If the effective diff is empty, generated-only, formatter-only, version-bump-only, or has no behavior/test relevance, stop with `no test changes justified` and one short reason.
 

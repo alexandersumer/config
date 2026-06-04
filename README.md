@@ -36,7 +36,8 @@ Codex v0.131 does not expose custom skills as `/skill-name` slash commands. The 
 
 ```text
 $surgical-edit
-$review
+$review-solo
+$review-deep
 $git-publish-to-origin
 ```
 

@@ -29,5 +29,5 @@ Implemented:
 Checks: `<command>` -> <result> or `not run — <reason>`
 Deferred:
 - <item or None>: <reason>
-Next: review, then git-publish.
+Next: review-solo or review-deep as appropriate, then git-publish.
 ```

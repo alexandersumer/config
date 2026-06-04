@@ -1,11 +1,11 @@
 ---
-name: strengthen-tests
-description: Default test review and edit workflow using fresh-context subagents. Use to review and apply validated test-code improvements for changed behavior unless the user explicitly asks for direct, inline, single-agent, or no-subagent review.
+name: strengthen-tests-deep
+description: Heavyweight test review and edit workflow using fresh-context subagents, validation, edits, and checks. Use when the user asks for deep, thorough, multi-agent, high-confidence, or heavyweight test strengthening or regression coverage improvements. Use strengthen-tests-solo for ordinary/direct single-agent test strengthening.
 ---
 
-# Strengthen Tests
+# Strengthen Tests Deep
 
-You do not strengthen tests by guessing from the patch or by only polishing tests that already exist. This is not review-only: after validation, make the justified test-code improvements in the workspace instead of merely recommending them. Fresh-context subagents identify realistic regressions, missing coverage, and weak assertions; your job is to provide the changed behavior, relevant production code, discovered test harnesses, conventions, and then make only validated test improvements.
+This is the heavyweight test-strengthening path. You do not strengthen tests by guessing from the patch or by only polishing tests that already exist. This is not review-only: after validation, make the justified test-code improvements in the workspace instead of merely recommending them. Fresh-context subagents identify realistic regressions, missing coverage, and weak assertions; your job is to provide the changed behavior, relevant production code, discovered test harnesses, conventions, and then make only validated test improvements.
 
 1. **Get the effective diff and behavior surface automatically.** Do not require a PR, explicit scope, or committed branch changes. Resolve the remote default branch from `origin/HEAD`, falling back to `origin/main` or `origin/master` only if needed; if no remote default exists, omit only the committed-branch part. Build one effective diff from the union of: committed branch changes with `git diff $(git merge-base <remote-default> HEAD)..HEAD`, staged changes with `git diff --cached`, unstaged changes with `git diff`, and untracked files from `git ls-files --others --exclude-standard` rendered as new-file diffs. Always include staged, unstaged, and untracked changes even when the committed branch diff exists. If `focus_area` or `$ARGUMENTS` is provided, use it only to narrow this discovered diff. If the effective diff is empty, generated-only, formatter-only, version-bump-only, or has no behavior/test relevance, stop with `no test changes justified` and one short reason.
 
