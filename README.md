@@ -83,7 +83,7 @@ Config-internal preparation and home install behavior must also be verified with
 cargo run -- prepare
 
 tmp_home="$(mktemp -d)"
-for skill in skill-creator skill-installer openai-docs; do
+for skill in skill-creator skill-installer; do
   mkdir -p "$tmp_home/.codex/skills/.system/$skill"
   printf 'fixture\n' > "$tmp_home/.codex/skills/.system/$skill/SKILL.md"
 done

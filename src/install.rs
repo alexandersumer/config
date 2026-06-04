@@ -685,7 +685,7 @@ fn discover_custom_skills(skills_dir: &Path) -> Result<Vec<PathBuf>> {
 }
 
 fn verify_codex_system_skills(system_skills_dir: &Path) -> Result<()> {
-    for skill in ["skill-creator", "skill-installer", "openai-docs"] {
+    for skill in ["skill-creator", "skill-installer"] {
         let skill_file = system_skills_dir.join(skill).join("SKILL.md");
         if !skill_file.is_file() {
             return Err(format!(

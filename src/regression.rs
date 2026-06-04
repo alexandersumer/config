@@ -857,7 +857,7 @@ pub(crate) fn assert_clean_fixture_passes() -> Result<()> {
 }
 
 fn create_codex_system_skills(home: &Path) -> Result<()> {
-    for skill in ["skill-creator", "skill-installer", "openai-docs"] {
+    for skill in ["skill-creator", "skill-installer"] {
         let skill_dir = home.join(".codex/skills/.system").join(skill);
         fs::create_dir_all(&skill_dir).map_err(|err| {
             format!(
