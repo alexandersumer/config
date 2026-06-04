@@ -11,6 +11,7 @@ cargo run -- check
 cargo run -- check-codex-skills
 cargo run -- prepare
 cargo run -- pre-commit
+cargo run -- repair-codex-config
 cargo run -- validate
 cargo run -- test-validate
 cargo run -- install
@@ -20,9 +21,10 @@ Command roles:
 
 - `check`: non-mutating verification for formatting, build, unit tests, skill validation, and regression tests.
 - `check-codex-skills`: non-mutating verification that `~/.codex/skills` mirrors custom skills from `.agents/skills`, Codex config has no deprecated/disabled skill-discovery flags, and Codex prompt input sees the managed skills from both this checkout and the home directory.
+- `repair-codex-config`: removes deprecated/disabled Codex feature flags from `~/.codex/config.toml`.
 - `prepare`: runs the same verification as `check`.
 - `pre-commit`: safe hook entrypoint; runs `prepare` and `check-codex-skills`.
-- `install`: intentional home-directory mutation for `~/.agents`, custom `~/.codex/skills` symlinks, Codex config flag repair, and `~/.local/bin/config-tools`.
+- `install`: intentional home-directory mutation for `~/.agents`, custom `~/.codex/skills` symlinks, Codex config flag repair, `~/.local/bin/config-tools`, and a `~/.local/bin/codex` launcher that repairs deprecated flags before delegating to Homebrew Codex.
 - `install-git-hooks`: intentional local Git config mutation for `core.hooksPath`.
 
 ## Codex skills
@@ -100,6 +102,7 @@ Expected symlink behavior:
 - `~/.config/ghostty/config` links to this config checkout's `ghostty/config` file.
 - `~/.relay/config.toml` links to this config checkout's `relay/config.toml` file.
 - `~/.local/bin/config-tools` is a runnable copy of the config helper.
+- `~/.local/bin/codex` is a managed launcher that repairs deprecated Codex config flags before delegating to `/opt/homebrew/bin/codex`.
 - `~/.codex/skills/.system` remains a Codex-owned directory with Codex system skills.
 - Each custom top-level `.agents/skills/<name>/SKILL.md` directory links into `~/.codex/skills/<name>`.
 - Hidden skill directories and directories without `SKILL.md` are not linked into Codex.

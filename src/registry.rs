@@ -46,7 +46,6 @@ const REQUIRED_CUSTOM_SKILL_NAMES: &[&str] = &[
     "surgical-edit",
     "sync-main",
     "understand-system",
-    "verify-and-fix",
     "write-up",
 ];
 

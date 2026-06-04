@@ -17,6 +17,8 @@ export ZSH_COMPDUMP="$ZSH_CACHE_DIR/.zcompdump-$HOST"
 # PATH setup
 ########################################
 typeset -U PATH
+# User-local managed tools, including the Codex launcher wrapper.
+[[ -d "$HOME/.local/bin" ]] && path=("$HOME/.local/bin" $path)
 # Homebrew and util-linux
 for __path in /opt/homebrew/bin /usr/local/opt/util-linux/bin /opt/homebrew/opt/util-linux/bin; do
   [[ -d "$__path" ]] && path+=("$__path")
