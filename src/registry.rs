@@ -37,6 +37,7 @@ const REQUIRED_CUSTOM_SKILL_NAMES: &[&str] = &[
     "real-e2e",
     "reconcile-plan",
     "resolve-conflict",
+    "resume-branch-work",
     "review-deep",
     "review-solo",
     "strengthen-tests-deep",
