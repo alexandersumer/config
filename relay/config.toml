@@ -3,17 +3,30 @@ config_version = 1
 
 [ui]
 theme = "catppuccin-mocha"
-collapse_thinking = true
+thread_worktree_location = "relay"
 tool_result_preview_lines = 5
+thinking_preview_lines = 1
 succinct_tool_results = true
 color_tool_names = true
 color_markdown_headings = false
+slash_panel_position = "bottom"
+vim_keybindings = false
+show_tips = true
+agent_summaries = false
 
 [notifications]
 enabled = false
 volume = 0.5
-min_tool_calls = 1
-min_duration_seconds = 5
+
+[logging]
+level = "info"
+
+[plugins]
+enabled = false
+allow_project_plugins = false
+paths = []
+trusted_workspaces = []
+disabled = ["bundled:j-gonzalez"]
 
 [agents]
 default = "axiom"

@@ -1,4 +1,4 @@
-use crate::config_root::discover_config_root;
+use crate::config_root::default_config_root;
 use crate::error::Result;
 use crate::links::{link_path, require_dir};
 use crate::registry::validate_registry;
@@ -33,10 +33,10 @@ pub(crate) fn install_command(args: &[String]) -> Result<()> {
             home_dir.join(".config/ghostty").display()
         )
     })?;
-    fs::create_dir_all(home_dir.join(".relay")).map_err(|err| {
+    fs::create_dir_all(home_dir.join(".config/relay")).map_err(|err| {
         format!(
             "{}: cannot create Relay config directory: {err}",
-            home_dir.join(".relay").display()
+            home_dir.join(".config/relay").display()
         )
     })?;
 
@@ -66,10 +66,11 @@ pub(crate) fn install_command(args: &[String]) -> Result<()> {
     )?;
     link_path(
         &relay_dir.join("config.toml"),
-        &home_dir.join(".relay/config.toml"),
+        &home_dir.join(".config/relay/config.toml"),
         "Relay config",
         &config_root,
     )?;
+    cleanup_legacy_relay_config(&home_dir, &relay_dir.join("config.toml"))?;
     apply_codex_skill_links(codex_skill_plan)?;
     install_config_tools_binary(&home_dir)?;
     install_codex_launcher(&home_dir)?;
@@ -88,55 +89,137 @@ pub(crate) fn install_command(args: &[String]) -> Result<()> {
     Ok(())
 }
 
+fn cleanup_legacy_relay_config(home_dir: &Path, managed_relay_config: &Path) -> Result<()> {
+    let legacy_dir = home_dir.join(".relay");
+    let legacy_config = legacy_dir.join("config.toml");
+
+    if legacy_config_matches_managed(&legacy_config, managed_relay_config)? {
+        fs::remove_file(&legacy_config).map_err(|err| {
+            format!(
+                "{}: cannot remove legacy Relay config: {err}",
+                legacy_config.display()
+            )
+        })?;
+        println!("Removed legacy Relay config: {}", legacy_config.display());
+    }
+
+    match fs::remove_dir(&legacy_dir) {
+        Ok(()) => println!(
+            "Removed empty legacy Relay config directory: {}",
+            legacy_dir.display()
+        ),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) if err.kind() == std::io::ErrorKind::DirectoryNotEmpty => {}
+        Err(err) => {
+            return Err(format!(
+                "{}: cannot remove legacy Relay config directory: {err}",
+                legacy_dir.display()
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn legacy_config_matches_managed(
+    legacy_config: &Path,
+    managed_relay_config: &Path,
+) -> Result<bool> {
+    let metadata = match fs::symlink_metadata(legacy_config) {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(err) => {
+            return Err(format!(
+                "{}: cannot inspect legacy Relay config: {err}",
+                legacy_config.display()
+            ));
+        }
+    };
+
+    if metadata.file_type().is_symlink() {
+        let managed_resolved = managed_relay_config.canonicalize().map_err(|err| {
+            format!(
+                "{}: cannot resolve managed Relay config: {err}",
+                managed_relay_config.display()
+            )
+        })?;
+        return match legacy_config.canonicalize() {
+            Ok(legacy_resolved) => Ok(legacy_resolved == managed_resolved),
+            Err(_) => Ok(false),
+        };
+    }
+
+    if metadata.is_file() {
+        let managed_bytes = fs::read(managed_relay_config).map_err(|err| {
+            format!(
+                "{}: cannot read managed Relay config: {err}",
+                managed_relay_config.display()
+            )
+        })?;
+        let legacy_bytes = fs::read(legacy_config).map_err(|err| {
+            format!(
+                "{}: cannot read legacy Relay config: {err}",
+                legacy_config.display()
+            )
+        })?;
+        return Ok(legacy_bytes == managed_bytes);
+    }
+
+    Ok(false)
+}
+
 pub(crate) fn repair_codex_config_command(args: &[String]) -> Result<()> {
     let home_dir = parse_home_arg(args)?;
     repair_codex_config(&home_dir)
 }
 
+pub(crate) fn check_install_command(args: &[String]) -> Result<()> {
+    let (config_root, home_dir) = parse_install_args(args)?;
+    let mut errors = managed_install_link_errors(&config_root, &home_dir)?;
+    errors.extend(managed_binary_errors(&home_dir)?);
+
+    let codex_check = codex_skill_installation_check(&config_root, &home_dir)?;
+    errors.extend(codex_check.errors);
+
+    if errors.is_empty() {
+        println!(
+            "Managed config installation is in sync for {}.",
+            home_dir.display()
+        );
+        return Ok(());
+    }
+
+    let mut output = String::from("Managed config installation drift detected:");
+    for error in errors {
+        output.push_str("\n- ");
+        output.push_str(&error);
+    }
+    output.push_str(
+        "\nRun `cargo run -- install` from the config checkout to converge managed config links.",
+    );
+    Err(output)
+}
+
 pub(crate) fn check_codex_skills_command(args: &[String]) -> Result<()> {
     let (config_root, home_dir) = parse_install_args(args)?;
-    let agents_dir = config_root.join(".agents");
-    let skills_dir = agents_dir.join("skills");
-
-    require_dir(&agents_dir, "config agents directory")?;
-    require_dir(&skills_dir, "config skills directory")?;
-    validate_config_skills(&config_root)?;
-    let codex_skill_plan = prepare_codex_skill_links(&skills_dir, &home_dir)?;
-    let mut errors = codex_skill_link_errors(&codex_skill_plan);
-    errors.extend(codex_config_errors(&home_dir)?);
-    let checked_prompt_input = is_current_home(&home_dir);
-    if checked_prompt_input {
-        let custom_skill_names = codex_skill_plan.custom_skill_names()?;
-        errors.extend(codex_prompt_input_errors(
-            &config_root,
-            "config checkout",
-            &custom_skill_names,
-        )?);
-        if !same_existing_path(&config_root, &home_dir) {
-            errors.extend(codex_prompt_input_errors(
-                &home_dir,
-                "home directory",
-                &custom_skill_names,
-            )?);
-        }
-    }
-    if errors.is_empty() {
-        if checked_prompt_input {
+    let codex_check = codex_skill_installation_check(&config_root, &home_dir)?;
+    if codex_check.errors.is_empty() {
+        if codex_check.checked_prompt_input {
             println!(
                 "Custom Codex skills are installed and visible to Codex skill/prompt surfaces from {}.",
-                skills_dir.display()
+                codex_check.skills_dir.display()
             );
         } else {
             println!(
                 "Custom Codex skills are in sync with {}.",
-                skills_dir.display()
+                codex_check.skills_dir.display()
             );
         }
         return Ok(());
     }
 
     let mut output = String::from("Custom Codex skill installation drift detected:");
-    for error in errors {
+    for error in codex_check.errors {
         output.push_str("\n- ");
         output.push_str(&error);
     }
@@ -144,6 +227,260 @@ pub(crate) fn check_codex_skills_command(args: &[String]) -> Result<()> {
         "\nRun `cargo run -- install` from the config checkout to converge ~/.codex/skills.",
     );
     Err(output)
+}
+
+struct CodexSkillInstallationCheck {
+    skills_dir: PathBuf,
+    checked_prompt_input: bool,
+    errors: Vec<String>,
+}
+
+fn codex_skill_installation_check(
+    config_root: &Path,
+    home_dir: &Path,
+) -> Result<CodexSkillInstallationCheck> {
+    let agents_dir = config_root.join(".agents");
+    let skills_dir = agents_dir.join("skills");
+
+    require_dir(&agents_dir, "config agents directory")?;
+    require_dir(&skills_dir, "config skills directory")?;
+    validate_config_skills(config_root)?;
+    let codex_skill_plan = prepare_codex_skill_links(&skills_dir, home_dir)?;
+    let mut errors = codex_skill_link_errors(&codex_skill_plan);
+    errors.extend(codex_config_errors(home_dir)?);
+    let checked_prompt_input = is_current_home(home_dir);
+    if checked_prompt_input {
+        let custom_skill_names = codex_skill_plan.custom_skill_names()?;
+        errors.extend(codex_prompt_input_errors(
+            config_root,
+            "config checkout",
+            &custom_skill_names,
+        )?);
+        if !same_existing_path(config_root, home_dir) {
+            errors.extend(codex_prompt_input_errors(
+                home_dir,
+                "home directory",
+                &custom_skill_names,
+            )?);
+        }
+    }
+
+    Ok(CodexSkillInstallationCheck {
+        skills_dir,
+        checked_prompt_input,
+        errors,
+    })
+}
+
+fn managed_install_link_errors(config_root: &Path, home_dir: &Path) -> Result<Vec<String>> {
+    let managed_links = [
+        ManagedLink {
+            label: "global agents directory",
+            source: config_root.join(".agents"),
+            target: home_dir.join(".agents"),
+        },
+        ManagedLink {
+            label: "zsh config directory",
+            source: config_root.join("zsh"),
+            target: home_dir.join(".zsh"),
+        },
+        ManagedLink {
+            label: "zshrc",
+            source: config_root.join("zsh/zshrc"),
+            target: home_dir.join(".zshrc"),
+        },
+        ManagedLink {
+            label: "Ghostty config",
+            source: config_root.join("ghostty/config"),
+            target: home_dir.join(".config/ghostty/config"),
+        },
+        ManagedLink {
+            label: "Relay config",
+            source: config_root.join("relay/config.toml"),
+            target: home_dir.join(".config/relay/config.toml"),
+        },
+    ];
+
+    let mut errors = Vec::new();
+    for link in managed_links {
+        if let Some(error) = managed_link_error(&link)? {
+            errors.push(error);
+        }
+    }
+    errors.extend(legacy_relay_config_errors(home_dir)?);
+    errors.sort();
+    Ok(errors)
+}
+
+struct ManagedLink {
+    label: &'static str,
+    source: PathBuf,
+    target: PathBuf,
+}
+
+fn managed_link_error(link: &ManagedLink) -> Result<Option<String>> {
+    if !link.source.exists() {
+        return Ok(Some(format!(
+            "source for {} is missing: {}",
+            link.label,
+            link.source.display()
+        )));
+    }
+
+    let source_resolved = link.source.canonicalize().map_err(|err| {
+        format!(
+            "{}: cannot resolve source for {}: {err}",
+            link.source.display(),
+            link.label
+        )
+    })?;
+
+    match fs::symlink_metadata(&link.target) {
+        Ok(metadata) if metadata.file_type().is_symlink() => match link.target.canonicalize() {
+            Ok(target_resolved) if target_resolved == source_resolved => Ok(None),
+            Ok(target_resolved) => Ok(Some(format!(
+                "{} points to {}; expected {}",
+                link.target.display(),
+                target_resolved.display(),
+                source_resolved.display()
+            ))),
+            Err(err) => Ok(Some(format!(
+                "{}: cannot resolve installed {} symlink: {err}",
+                link.target.display(),
+                link.label
+            ))),
+        },
+        Ok(metadata) if metadata.is_file() => Ok(Some(format!(
+            "{} is a regular file; expected symlink to {}",
+            link.target.display(),
+            source_resolved.display()
+        ))),
+        Ok(metadata) if metadata.is_dir() => Ok(Some(format!(
+            "{} is a directory; expected symlink to {}",
+            link.target.display(),
+            source_resolved.display()
+        ))),
+        Ok(_) => Ok(Some(format!(
+            "{} exists but is not the expected symlink to {}",
+            link.target.display(),
+            source_resolved.display()
+        ))),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(Some(format!(
+            "{} is missing; expected symlink to {}",
+            link.target.display(),
+            source_resolved.display()
+        ))),
+        Err(err) => Err(format!(
+            "{}: cannot inspect installed {}: {err}",
+            link.target.display(),
+            link.label
+        )),
+    }
+}
+
+fn legacy_relay_config_errors(home_dir: &Path) -> Result<Vec<String>> {
+    let legacy_dir = home_dir.join(".relay");
+    match fs::symlink_metadata(&legacy_dir) {
+        Ok(_) => Ok(vec![format!(
+            "{} remains but Relay now reads ~/.config/relay; remove it after backing up anything intentional",
+            legacy_dir.display()
+        )]),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(err) => Err(format!(
+            "{}: cannot inspect legacy Relay config directory: {err}",
+            legacy_dir.display()
+        )),
+    }
+}
+
+fn managed_binary_errors(home_dir: &Path) -> Result<Vec<String>> {
+    let mut errors = Vec::new();
+    errors.extend(config_tools_binary_errors(home_dir)?);
+    errors.extend(codex_launcher_errors(home_dir)?);
+    errors.sort();
+    Ok(errors)
+}
+
+fn config_tools_binary_errors(home_dir: &Path) -> Result<Vec<String>> {
+    let target = home_dir.join(".local/bin/config-tools");
+    match fs::symlink_metadata(&target) {
+        Ok(metadata) if metadata.is_file() => {
+            if !is_executable_file(&metadata) {
+                return Ok(vec![format!("{} is not executable", target.display())]);
+            }
+            let bytes = fs::read(&target).map_err(|err| {
+                format!(
+                    "{}: cannot read config-tools binary: {err}",
+                    target.display()
+                )
+            })?;
+            if is_probably_config_tools_binary(&bytes) {
+                Ok(Vec::new())
+            } else {
+                Ok(vec![format!(
+                    "{} does not look like the managed config-tools binary",
+                    target.display()
+                )])
+            }
+        }
+        Ok(metadata) if metadata.file_type().is_symlink() => Ok(vec![format!(
+            "{} is a symlink; expected managed config-tools executable file",
+            target.display()
+        )]),
+        Ok(_) => Ok(vec![format!(
+            "{} exists but is not the managed config-tools executable file",
+            target.display()
+        )]),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(vec![format!(
+            "{} is missing; expected managed config-tools executable file",
+            target.display()
+        )]),
+        Err(err) => Err(format!(
+            "{}: cannot inspect config-tools binary: {err}",
+            target.display()
+        )),
+    }
+}
+
+fn codex_launcher_errors(home_dir: &Path) -> Result<Vec<String>> {
+    let target = home_dir.join(".local/bin/codex");
+    match fs::symlink_metadata(&target) {
+        Ok(metadata) if metadata.is_file() => {
+            if !is_executable_file(&metadata) {
+                return Ok(vec![format!("{} is not executable", target.display())]);
+            }
+            let existing = fs::read_to_string(&target).map_err(|err| {
+                format!(
+                    "{}: cannot read managed Codex launcher: {err}",
+                    target.display()
+                )
+            })?;
+            if existing == codex_launcher_script() {
+                Ok(Vec::new())
+            } else {
+                Ok(vec![format!(
+                    "{} does not match the managed Codex launcher",
+                    target.display()
+                )])
+            }
+        }
+        Ok(metadata) if metadata.file_type().is_symlink() => Ok(vec![format!(
+            "{} is a symlink; expected managed Codex launcher file",
+            target.display()
+        )]),
+        Ok(_) => Ok(vec![format!(
+            "{} exists but is not the managed Codex launcher file",
+            target.display()
+        )]),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(vec![format!(
+            "{} is missing; expected managed Codex launcher file",
+            target.display()
+        )]),
+        Err(err) => Err(format!(
+            "{}: cannot inspect managed Codex launcher: {err}",
+            target.display()
+        )),
+    }
 }
 
 fn validate_config_skills(config_root: &Path) -> Result<()> {
@@ -888,10 +1225,7 @@ fn parse_install_args(args: &[String]) -> Result<(PathBuf, PathBuf)> {
 
     let config_root = match config_root {
         Some(path) => path,
-        None => discover_config_root(
-            &env::current_exe()
-                .map_err(|err| format!("cannot determine current executable: {err}"))?,
-        )?,
+        None => default_config_root()?,
     }
     .canonicalize()
     .map_err(|err| format!("cannot resolve config root: {err}"))?;

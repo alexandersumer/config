@@ -2,9 +2,11 @@ use crate::commands::{
     check_command, install_git_hooks_command, pre_commit_command, prepare_command,
     test_validate_command, validate_command,
 };
-use crate::config_root::discover_config_root;
+use crate::config_root::default_config_root;
 use crate::error::Result;
-use crate::install::{check_codex_skills_command, install_command, repair_codex_config_command};
+use crate::install::{
+    check_codex_skills_command, check_install_command, install_command, repair_codex_config_command,
+};
 use std::env;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -26,6 +28,7 @@ pub(crate) fn run() -> Result<ExitCode> {
         "check-codex-skills" => {
             check_codex_skills_command(command_args).map(|()| ExitCode::SUCCESS)
         }
+        "check-install" => check_install_command(command_args).map(|()| ExitCode::SUCCESS),
         "repair-codex-config" => {
             repair_codex_config_command(command_args).map(|()| ExitCode::SUCCESS)
         }
@@ -43,7 +46,7 @@ fn print_help() {
 }
 
 fn help_text() -> &'static str {
-    "Usage: config-tools <command> [options]\n\nCommands:\n  validate [--config-root PATH]\n  test-validate\n  check [--config-root PATH]\n  prepare [--config-root PATH]\n  pre-commit [--config-root PATH]\n  install-git-hooks [--config-root PATH]\n  check-codex-skills [--config-root PATH] [--home PATH]\n  repair-codex-config [--home PATH]\n  install [--config-root PATH] [--home PATH]\n"
+    "Usage: config-tools <command> [options]\n\nCommands:\n  validate [--config-root PATH]\n  test-validate\n  check [--config-root PATH]\n  prepare [--config-root PATH]\n  pre-commit [--config-root PATH]\n  install-git-hooks [--config-root PATH]\n  check-codex-skills [--config-root PATH] [--home PATH]\n  check-install [--config-root PATH] [--home PATH]\n  repair-codex-config [--home PATH]\n  install [--config-root PATH] [--home PATH]\n"
 }
 
 pub(crate) fn parse_config_args(args: &[String], allow_check: bool) -> Result<(PathBuf, bool)> {
@@ -66,10 +69,7 @@ pub(crate) fn parse_config_args(args: &[String], allow_check: bool) -> Result<(P
 
     let root = match config_root {
         Some(path) => path,
-        None => discover_config_root(
-            &env::current_exe()
-                .map_err(|err| format!("cannot determine current executable: {err}"))?,
-        )?,
+        None => default_config_root()?,
     };
     root.canonicalize()
         .map(|root| (root, check))

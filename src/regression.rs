@@ -1,7 +1,7 @@
 use crate::commands::validate_command;
 use crate::config_root::config_root_from_exe;
 use crate::error::Result;
-use crate::install::{check_codex_skills_command, install_command};
+use crate::install::{check_codex_skills_command, check_install_command, install_command};
 use crate::managed_config::validate_managed_configs;
 use crate::registry::validate_registry;
 use std::fs;
@@ -176,6 +176,20 @@ pub(crate) fn test_install_command() -> Result<()> {
         .tempdir()
         .map_err(|err| format!("cannot create temp install home: {err}"))?;
     create_codex_system_skills(home.path())?;
+    fs::create_dir_all(home.path().join(".relay"))
+        .map_err(|err| format!("cannot create legacy Relay config fixture dir: {err}"))?;
+    #[cfg(unix)]
+    unix_fs::symlink(
+        fixture.path().join("relay/config.toml"),
+        home.path().join(".relay/config.toml"),
+    )
+    .map_err(|err| format!("cannot create legacy Relay config fixture symlink: {err}"))?;
+    #[cfg(not(unix))]
+    fs::copy(
+        fixture.path().join("relay/config.toml"),
+        home.path().join(".relay/config.toml"),
+    )
+    .map_err(|err| format!("cannot create legacy Relay config fixture file: {err}"))?;
     let codex_config = home.path().join(".codex/config.toml");
     fs::write(
         &codex_config,
@@ -205,25 +219,40 @@ pub(crate) fn test_install_command() -> Result<()> {
         .map_err(|err| format!("cannot create external skill symlink: {err}"))?;
     }
 
-    let initial_drift = check_codex_skills_command(&[
+    let initial_install_drift = check_install_command(&[
+        "--config-root".to_string(),
+        fixture.path().display().to_string(),
+        "--home".to_string(),
+        home.path().display().to_string(),
+    ])
+    .expect_err("install drift check should fail before install converges managed config");
+    for expected in [
+        "Managed config installation drift detected",
+        ".config/relay/config.toml",
+        ".relay remains but Relay now reads ~/.config/relay",
+        "deprecated [features].codex_hooks must be removed",
+        "[features].apps must not be forced off",
+        "is a stale managed Codex skill symlink",
+        "is missing; expected symlink",
+    ] {
+        if !initial_install_drift.contains(expected) {
+            return Err(format!(
+                "initial install drift check missed {expected:?}: {initial_install_drift}"
+            ));
+        }
+    }
+
+    let initial_codex_drift = check_codex_skills_command(&[
         "--config-root".to_string(),
         fixture.path().display().to_string(),
         "--home".to_string(),
         home.path().display().to_string(),
     ])
     .expect_err("Codex skill drift check should fail before install converges custom links");
-    for expected in [
-        "Custom Codex skill installation drift detected",
-        "deprecated [features].codex_hooks must be removed",
-        "[features].apps must not be forced off",
-        "is a stale managed Codex skill symlink",
-        "is missing; expected symlink",
-    ] {
-        if !initial_drift.contains(expected) {
-            return Err(format!(
-                "initial Codex skill drift check missed {expected:?}: {initial_drift}"
-            ));
-        }
+    if !initial_codex_drift.contains("Custom Codex skill installation drift detected") {
+        return Err(format!(
+            "initial Codex skill drift check reported unexpected output: {initial_codex_drift}"
+        ));
     }
 
     install_command(&[
@@ -268,9 +297,18 @@ pub(crate) fn test_install_command() -> Result<()> {
         &fixture.path().join("ghostty/config"),
     )?;
     assert_symlink_resolves_to(
-        &home.path().join(".relay/config.toml"),
+        &home.path().join(".config/relay/config.toml"),
         &fixture.path().join("relay/config.toml"),
     )?;
+    if home.path().join(".relay").exists() {
+        return Err("install should remove empty legacy ~/.relay config directory".to_string());
+    }
+    check_install_command(&[
+        "--config-root".to_string(),
+        fixture.path().display().to_string(),
+        "--home".to_string(),
+        home.path().display().to_string(),
+    ])?;
     let installed_binary = home.path().join(".local/bin/config-tools");
     if !installed_binary.is_file() {
         return Err(format!(

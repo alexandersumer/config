@@ -9,6 +9,7 @@ Config tooling is implemented in Rust via the `config-tools` binary.
 ```bash
 cargo run -- check
 cargo run -- check-codex-skills
+cargo run -- check-install
 cargo run -- prepare
 cargo run -- pre-commit
 cargo run -- repair-codex-config
@@ -21,9 +22,10 @@ Command roles:
 
 - `check`: non-mutating verification for formatting, build, unit tests, skill validation, and regression tests.
 - `check-codex-skills`: non-mutating verification that `~/.codex/skills` mirrors custom skills from `.agents/skills`, Codex config has no deprecated/disabled skill-discovery flags, and Codex prompt input sees the managed skills from both this checkout and the home directory.
+- `check-install`: non-mutating verification that all managed home config links, Codex skills/config, and managed local launchers match this checkout.
 - `repair-codex-config`: removes deprecated/disabled Codex feature flags from `~/.codex/config.toml`.
 - `prepare`: runs the same verification as `check`.
-- `pre-commit`: safe hook entrypoint; runs `prepare` and `check-codex-skills`.
+- `pre-commit`: safe hook entrypoint; runs `prepare` and `check-install`.
 - `install`: intentional home-directory mutation for `~/.agents`, custom `~/.codex/skills` symlinks, Codex config flag repair, `~/.local/bin/config-tools`, and a `~/.local/bin/codex` launcher that repairs deprecated flags before delegating to Homebrew Codex.
 - `install-git-hooks`: intentional local Git config mutation for `core.hooksPath`.
 
@@ -76,6 +78,7 @@ cargo fmt --check
 cargo check
 cargo run -- check
 cargo run -- check-codex-skills
+cargo run -- check-install
 cargo run -- pre-commit
 ```
 
@@ -100,7 +103,7 @@ Expected symlink behavior:
 - `~/.zsh` links to this config checkout's `zsh` directory.
 - `~/.zshrc` links to this config checkout's `zsh/zshrc` file.
 - `~/.config/ghostty/config` links to this config checkout's `ghostty/config` file.
-- `~/.relay/config.toml` links to this config checkout's `relay/config.toml` file.
+- `~/.config/relay/config.toml` links to this config checkout's `relay/config.toml` file.
 - `~/.local/bin/config-tools` is a runnable copy of the config helper.
 - `~/.local/bin/codex` is a managed launcher that repairs deprecated Codex config flags before delegating to `/opt/homebrew/bin/codex`.
 - `~/.codex/skills/.system` remains a Codex-owned directory with Codex system skills.
