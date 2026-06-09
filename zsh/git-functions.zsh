@@ -10,23 +10,68 @@ function _branch_from_remote_head_ref() {
     echo "${remote_head_ref#$prefix}"
 }
 
+function _branch_from_remote_symref_output() {
+    local line="$1"
+    local prefix="ref: refs/heads/"
+    local suffix=$'\tHEAD'
+
+    [[ "$line" == "$prefix"*"$suffix" ]] || return 1
+    line="${line#$prefix}"
+    echo "${line%$suffix}"
+}
+
+function _get_default_branch_from_remote() {
+    local remote="${1:-origin}"
+    local line
+    local branch_candidate
+
+    while IFS= read -r line; do
+        if branch_candidate=$(_branch_from_remote_symref_output "$line"); then
+            echo "$branch_candidate"
+            return 0
+        fi
+    done < <(git ls-remote --symref "$remote" HEAD 2>/dev/null)
+
+    return 1
+}
+
+function _set_remote_head_ref() {
+    local remote="${1:-origin}"
+    local branch="$2"
+
+    [[ -n "$branch" ]] || return 1
+    git symbolic-ref "refs/remotes/$remote/HEAD" "refs/remotes/$remote/$branch" >/dev/null 2>&1 || true
+}
+
 function _get_default_branch() {
     local remote="${1:-origin}"
     local remote_head_ref
     local branch_candidate
 
-    # First try to get from remote HEAD
+    # Prefer the remote's current HEAD. Local refs/remotes/<remote>/HEAD can be
+    # stale after a default-branch rename (for example master -> main), and git
+    # fetch/prune does not update it automatically.
+    if branch_candidate=$(_get_default_branch_from_remote "$remote"); then
+        _set_remote_head_ref "$remote" "$branch_candidate"
+        echo "$branch_candidate"
+        return 0
+    fi
+
+    # Fall back to local remote HEAD only when its target exists locally.
     remote_head_ref=$(git symbolic-ref --quiet "refs/remotes/$remote/HEAD" 2>/dev/null)
     if [[ -n "$remote_head_ref" ]]; then
         if branch_candidate=$(_branch_from_remote_head_ref "$remote" "$remote_head_ref"); then
-            echo "$branch_candidate"
-            return 0
+            if git show-ref --verify --quiet "refs/remotes/$remote/$branch_candidate"; then
+                echo "$branch_candidate"
+                return 0
+            fi
         fi
     fi
 
-    # Fall back to checking for main or master
+    # Fall back to checking common default branch names locally.
     for branch_candidate in main master; do
         if git show-ref --verify --quiet "refs/remotes/$remote/$branch_candidate"; then
+            _set_remote_head_ref "$remote" "$branch_candidate"
             echo "$branch_candidate"
             return 0
         fi
@@ -332,8 +377,7 @@ function _reset_to_remote_default_single() {
     local branch=""
     local arg
     local -a positional_args=()
-    local remote_head_ref branch_candidate upstream_ref
-    local -a branch_candidates=()
+    local upstream_ref
     local -i branch_from_arg=0
     local -i sync_fetch=0
     local -i do_prune=1
@@ -391,20 +435,7 @@ function _reset_to_remote_default_single() {
 
         # ── Resolve target branch from full fetch ──────────────────────
         if (( branch_from_arg == 0 )); then
-            remote_head_ref=$(git symbolic-ref --quiet "refs/remotes/$remote/HEAD" 2>/dev/null)
-            if [[ -n "$remote_head_ref" ]]; then
-                branch=$(_branch_from_remote_head_ref "$remote" "$remote_head_ref")
-            fi
-        fi
-
-        if [[ -z "$branch" ]]; then
-            branch_candidates=(main master)
-            for branch_candidate in "${branch_candidates[@]}"; do
-                if git show-ref --verify --quiet "refs/remotes/$remote/$branch_candidate"; then
-                    branch="$branch_candidate"
-                    break
-                fi
-            done
+            branch=$(_get_default_branch "$remote")
         fi
     else
         # ── Fast single-branch fetch ──────────────────────────────────

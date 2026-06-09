@@ -35,12 +35,14 @@ pub(crate) fn run_regression_tests() -> Result<()> {
         assert_mutation_fails(name, *mutate)?;
     }
     test_new_skill_validate_flow()?;
-    test_real_e2e_skill_requires_edge_case_proof()?;
+    test_real_e2e_automated_tests_skill_requires_edge_case_proof()?;
+    test_real_e2e_live_check_skill_rejects_test_lane_proof()?;
     test_ghostty_config_rejects_tab_disappearance_regressions()?;
     test_install_command()?;
     test_link_safety()?;
     test_command_failures()?;
     test_git_fetch_ref_cleanup()?;
+    test_get_default_branch_refreshes_stale_remote_head()?;
     test_home_reset_to_origin()?;
     test_axiom_alias_zsh_wiring()?;
     test_relay_axiom_config()?;
@@ -126,25 +128,91 @@ fn test_new_skill_validate_flow() -> Result<()> {
     Ok(())
 }
 
-fn test_real_e2e_skill_requires_edge_case_proof() -> Result<()> {
+fn test_real_e2e_automated_tests_skill_requires_edge_case_proof() -> Result<()> {
     let config_root = config_root_from_exe()?;
-    let skill_path = config_root.join(".agents/skills/real-e2e/SKILL.md");
+    let skill_path = config_root.join(".agents/skills/real-e2e-automated-tests/SKILL.md");
     let text = fs::read_to_string(&skill_path).map_err(|err| {
         format!(
-            "{}: cannot read real-e2e skill: {err}",
+            "{}: cannot read real-e2e-automated-tests skill: {err}",
             skill_path.display()
         )
     })?;
     for expected in [
+        "Repo Discovery Protocol",
+        "source-backed route map",
+        "Realness contract is binary",
+        "Confidence is achieved only for the exact checked contract",
+        "Persistence standard",
+        "Blocked is a last resort",
+        "not yet a blocker",
+        "perform blocker burn-down",
+        "Report blocked only when no safe source-backed next action remains",
+        "request required approval",
+        "Completion gate before final",
+        "keep going or report blocked only after blocker burn-down; never produce a complete confidence line",
+        "no unresolved realness-critical unknown",
+        "real public boundary",
+        "Realistic regression proof failed for the expected reason",
+        "Never hand-roll deployed auth",
+        "Before adding a new E2E lane, prove no existing lane owns the boundary",
+        "package-script-name guesses",
         "identify a small edge-case matrix",
         "automated E2E must include at least one meaningful edge/negative assertion",
         "happy-path-only E2E is incomplete",
         "edge checks performed only against mocks/fakes",
         "edge cases intentionally omitted with reasons",
+        "Confidence: complete for the stated automated E2E contract",
+        "Confidence: not achieved because <blocker>",
     ] {
         if !text.contains(expected) {
             return Err(format!(
-                "{}: real-e2e skill must require robust edge-case proof; missing {expected:?}",
+                "{}: real-e2e-automated-tests skill must require robust edge-case proof; missing {expected:?}",
+                skill_path.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn test_real_e2e_live_check_skill_rejects_test_lane_proof() -> Result<()> {
+    let config_root = config_root_from_exe()?;
+    let skill_path = config_root.join(".agents/skills/real-e2e-live-check/SKILL.md");
+    let text = fs::read_to_string(&skill_path).map_err(|err| {
+        format!(
+            "{}: cannot read real-e2e-live-check skill: {err}",
+            skill_path.display()
+        )
+    })?;
+    for expected in [
+        "Repo Discovery Protocol",
+        "source-backed route map",
+        "Realness contract is binary",
+        "Confidence is achieved only for the exact checked contract",
+        "Persistence standard",
+        "Blocked is a last resort",
+        "not yet a blocker",
+        "perform blocker burn-down",
+        "Report blocked only when no safe source-backed next action remains",
+        "request required approval",
+        "Completion gate before final",
+        "keep going or report blocked only after blocker burn-down; never produce a complete confidence line",
+        "no unresolved realness-critical unknown",
+        "Real public boundary operated",
+        "Post-operation health",
+        "Never hand-roll deployed auth",
+        "Do not proceed from package-script names alone",
+        "without writing automated tests",
+        "without running CI/test lanes",
+        "Environment selection ladder",
+        "safety class",
+        "Choose ACP/acpx/acp-link only when the behavior is observable through the agent protocol",
+        "Report blocked instead",
+        "Confidence: complete for the stated live-check contract",
+        "Confidence: not achieved because <blocker>",
+    ] {
+        if !text.contains(expected) {
+            return Err(format!(
+                "{}: real-e2e-live-check skill must reject test-lane proof and require safe live evidence; missing {expected:?}",
                 skill_path.display()
             ));
         }
@@ -688,6 +756,108 @@ git update-ref -d refs/remotes/origin/feature || exit $?
     );
     run_command(work.path(), "zsh", &["-c", &script])?;
     assert_ref_missing(work.path(), "refs/remotes/origin/feature")?;
+    Ok(())
+}
+
+fn test_get_default_branch_refreshes_stale_remote_head() -> Result<()> {
+    let config_root = std::env::current_dir()
+        .map_err(|err| format!("cannot determine config root for default branch test: {err}"))?;
+    if !config_root.join("zsh/git-functions.zsh").is_file() {
+        return Err(format!(
+            "{}: default branch test must run from config repo root",
+            config_root.display()
+        ));
+    }
+
+    let seed = tempfile::Builder::new()
+        .prefix("tmp_default_branch_seed_")
+        .tempdir()
+        .map_err(|err| format!("cannot create temp seed repo: {err}"))?;
+    let remote = tempfile::Builder::new()
+        .prefix("tmp_default_branch_remote_")
+        .tempdir()
+        .map_err(|err| format!("cannot create temp remote repo: {err}"))?;
+    let work_parent = tempfile::Builder::new()
+        .prefix("tmp_default_branch_work_")
+        .tempdir()
+        .map_err(|err| format!("cannot create temp work parent: {err}"))?;
+    let work = work_parent.path().join("work");
+
+    run_command(seed.path(), "git", &["init", "--initial-branch=master"])?;
+    run_command(
+        seed.path(),
+        "git",
+        &["config", "user.email", "test@example.com"],
+    )?;
+    run_command(seed.path(), "git", &["config", "user.name", "Test User"])?;
+    fs::write(seed.path().join("file.txt"), "master\n")
+        .map_err(|err| format!("cannot write seed fixture file: {err}"))?;
+    run_command(seed.path(), "git", &["add", "file.txt"])?;
+    run_command(seed.path(), "git", &["commit", "-m", "master"])?;
+
+    run_command(remote.path(), "git", &["init", "--bare"])?;
+    run_command(
+        remote.path(),
+        "git",
+        &["symbolic-ref", "HEAD", "refs/heads/master"],
+    )?;
+    run_command(
+        seed.path(),
+        "git",
+        &[
+            "remote",
+            "add",
+            "origin",
+            remote.path().to_string_lossy().as_ref(),
+        ],
+    )?;
+    run_command(seed.path(), "git", &["push", "-u", "origin", "master"])?;
+    run_command(
+        work_parent.path(),
+        "git",
+        &[
+            "clone",
+            remote.path().to_string_lossy().as_ref(),
+            work.to_string_lossy().as_ref(),
+        ],
+    )?;
+
+    run_command(seed.path(), "git", &["checkout", "-b", "main"])?;
+    fs::write(seed.path().join("file.txt"), "main\n")
+        .map_err(|err| format!("cannot update seed fixture file: {err}"))?;
+    run_command(seed.path(), "git", &["commit", "-am", "main"])?;
+    run_command(seed.path(), "git", &["push", "-u", "origin", "main"])?;
+    run_command(
+        remote.path(),
+        "git",
+        &["symbolic-ref", "HEAD", "refs/heads/main"],
+    )?;
+    run_command(&work, "git", &["fetch", "origin", "main"])?;
+
+    let stale_head =
+        run_command_output(&work, "git", &["symbolic-ref", "refs/remotes/origin/HEAD"])?;
+    if stale_head.trim() != "refs/remotes/origin/master" {
+        return Err(format!(
+            "fixture should start with stale origin/HEAD; got {stale_head:?}"
+        ));
+    }
+
+    let script = format!(
+        r#"source "{}"
+default_branch=$(_get_default_branch origin) || exit $?
+remote_head=$(git symbolic-ref refs/remotes/origin/HEAD) || exit $?
+[[ "$default_branch" == "main" ]] || {{
+    print -r -- "expected main, got $default_branch"
+    exit 1
+}}
+[[ "$remote_head" == "refs/remotes/origin/main" ]] || {{
+    print -r -- "expected refreshed origin/HEAD, got $remote_head"
+    exit 1
+}}
+"#,
+        config_root.join("zsh/git-functions.zsh").display()
+    );
+    run_command(&work, "zsh", &["-c", &script])?;
     Ok(())
 }
 
