@@ -1,17 +1,17 @@
 ---
 name: review-deep
-description: Heavyweight code-change review using fresh-context subagents and validation. Use when the user asks for deep, thorough, multi-agent, high-confidence, or heavyweight review of PRs, diffs, branches, staged changes, unstaged changes, untracked files, or any set of code/config/test changes. Use review-solo for ordinary/direct single-agent review.
+description: Heavyweight code-change review using fresh-context Reviewer candidate generation and direct Axiom validation. Use when the user asks for deep, thorough, multi-agent, high-confidence, or heavyweight review of PRs, diffs, branches, staged changes, unstaged changes, untracked files, or any set of code/config/test changes. Use review-solo for ordinary/direct single-agent review.
 ---
 
 # Review Deep
 
-This is the heavyweight code-review path. You do not review the code directly. Subagents do the reviewing in fresh context because session history biases the reviewer toward the author's framing and burns tokens on noise. Your job is dispatching and aggregating.
+This is the heavyweight code-review path. Fresh-context Reviewers generate candidate evidence because session history biases the reviewer toward the author's framing and burns tokens on noise. Reviewer output is candidate evidence, not authority. Axiom owns validation and final judgment.
 
 1. **Get the effective review diff automatically.** Do not require a PR, explicit scope, or committed branch changes. Resolve the remote default branch from `origin/HEAD`, falling back to `origin/main` or `origin/master` only if needed; if no remote default exists, omit only the committed-branch part. Build one effective diff from the union of: committed branch changes with `git diff $(git merge-base <remote-default> HEAD)..HEAD`, staged changes with `git diff --cached`, unstaged changes with `git diff`, and untracked files from `git ls-files --others --exclude-standard` rendered as new-file diffs. Always include staged, unstaged, and untracked changes even when the committed branch diff exists. If `focus_area` or `$ARGUMENTS` is provided, use it only to narrow this discovered diff. If the effective review diff is empty, draft-only, formatter-only, version-bump-only, or already reviewed in this thread, stop with a one-line note.
 
 2. **Read conventions yourself.** Find every `CLAUDE.md`, `AGENTS.md`, or `REVIEW.md` whose directory is an ancestor of any changed file. Read them and paste the relevant convention text into reviewer prompts.
 
-3. **Dispatch four fresh-context reviewers in parallel.** Before dispatch, confirm `{DIFF}` contains non-empty pasted diff text or focused excerpts, not a path, filename, or summary. Each reviewer gets this prompt verbatim, with `{ROLE}`, `{DIFF}`, and `{CONVENTIONS}` filled in. No session context — only what you paste:
+3. **Dispatch four fresh-context Reviewer passes in parallel.** Before dispatch, confirm `{DIFF}` contains non-empty pasted diff text or focused excerpts, not a path, filename, or summary. Each Reviewer pass gets this prompt verbatim, with `{ROLE}`, `{DIFF}`, and `{CONVENTIONS}` filled in. No session context — only what you paste:
 
    > You are reviewing a code change as **{ROLE}**. Diff: {DIFF}. Conventions: {CONVENTIONS}. One issue = one root cause. Skip nitpicks, style, "consider also". If it is not a real defect or risk, drop it. Return exactly one of:
    >
@@ -33,14 +33,10 @@ This is the heavyweight code-review path. You do not review the code directly. S
    - **Security** — injection, auth, secrets, unsafe deserialization, missing validation
    - **Conventions** — rules scoped to changed files; skip what a linter catches
 
-4. **Validate reviewer output before candidate validation.** A reviewer response is valid only if it contains either `CANDIDATES:` or `NO_FINDINGS`. Empty, whitespace-only, truncated, or otherwise unstructured output is invalid. If any reviewer output is invalid, retry that reviewer once with a smaller pasted diff/context packet. If it is still invalid, stop with `Review inconclusive`. Never treat invalid output as no findings.
+4. **Validate Reviewer output shape before candidate validation.** A Reviewer response is valid only if it contains either `CANDIDATES:` or `NO_FINDINGS`. Empty, whitespace-only, truncated, or otherwise unstructured output is invalid. If any Reviewer output is invalid, retry that Reviewer once with a smaller pasted diff/context packet. If it is still invalid, stop with `Review inconclusive`. Never treat invalid output as no findings.
 
-5. **Validate every candidate.** Use one fresh Task subagent per candidate issue. Each validator gets this prompt verbatim, with `{ISSUE}`, `{FILES}`, and `{CONVENTIONS}` filled in:
+5. **Validate every candidate directly in Axiom.** Do not delegate validation of Reviewer findings to another subagent, validator, or recursive review chain. For each candidate, Axiom must inspect the relevant files, functions, callers, tests, and conventions itself. Confirm or refute the issue with concrete evidence: triggering input or state, execution path, the line or rule violated, and realistic user/system impact. Drop anything Axiom cannot demonstrate concretely with score-equivalent confidence of at least 80. Unvalidated candidates are never reported as findings; if required evidence cannot be obtained after focused inspection, mark the review inconclusive instead of forwarding the candidate.
 
-   > Issue: {ISSUE}. Relevant files in full: {FILES}. Conventions: {CONVENTIONS}. Confirm or refute. Return `VALIDATED:` with concrete evidence — triggering input, line that executes wrong, rule violated — and score 0–100. Anything you cannot demonstrate concretely scores under 80.
+6. **Report.** Dedupe by root cause, then rank Critical, High, Medium, Low. For each issue, include severity, `path:line`, what is wrong, why it matters, and the fix — one sentence each. End with **No material findings** only if every Reviewer returned valid output and no directly validated findings remain, **Review inconclusive** if any Reviewer output is invalid after retry or Axiom cannot obtain required validation evidence, or **Needs attention**/**Needs work** if directly validated findings remain. If zero candidates survive validation, say so in one line.
 
-   A validator response is invalid if it is empty, whitespace-only, truncated, or missing `VALIDATED:` with a score and evidence. Retry invalid validator output once with smaller focused file excerpts. If it is still invalid, stop with `Review inconclusive`. Drop every candidate below 80.
-
-6. **Report.** Dedupe by root cause, then rank Critical, High, Medium, Low. For each issue, include severity, `path:line`, what is wrong, why it matters, and the fix — one sentence each. End with **No material findings** only if every reviewer returned valid output and no validated findings remain, **Review inconclusive** if any reviewer or validator returned invalid output after retry, or **Needs attention**/**Needs work** if validated findings remain. If zero candidates survive validation, say so in one line.
-
-Never approve, never merge, never invent line numbers. Subagents see only what you paste.
+Never approve, never merge, never invent line numbers. Reviewers see only what you paste. Axiom validates directly and owns final judgment.
