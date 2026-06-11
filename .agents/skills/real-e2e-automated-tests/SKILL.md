@@ -36,7 +36,7 @@ Do not choose an E2E approach until you can cite the repo-local source that owns
 - existing local command, package script, Makefile target, CI step, or smoke lane that owns this boundary;
 - chosen route, explicit unknowns, and blocker threshold.
 
-Prefer repo-local skills and runbooks over inferred commands. Search for skills/docs/scripts with names or descriptions that mention e2e, local, staging, dev-shard, smoke, runtime, browser, ACP, acpx, CLI, deploy, provider, auth, Slauth, service-proxy, LocalStack, Docker, Compose, or Kind. Use automated tests and CI files as map sources for payloads, startup, auth, readiness, lane ownership, and edge cases, but do not assume a script is the right lane from its name alone.
+Prefer repo-local skills and runbooks over inferred commands. Search for skills/docs/scripts with names or descriptions that mention e2e, local, staging, dev-shard, smoke, runtime, browser, agent protocol, CLI, deploy, provider, auth, service-proxy, LocalStack, Docker, Compose, or Kind. Use automated tests and CI files as map sources for payloads, startup, auth, readiness, lane ownership, and edge cases, but do not assume a script is the right lane from its name alone.
 
 Prefer repo-owned CLIs, SDK clients, browser drivers, or protocol clients over raw `curl` when they wrap auth, routing, request headers, tenant context, staging behavior, or service-proxy behavior. Never hand-roll deployed auth, Slauth, ASAP, tenant, service-proxy, staging, or production headers unless repo context proves that is the intended path.
 

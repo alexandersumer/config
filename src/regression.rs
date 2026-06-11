@@ -205,7 +205,7 @@ fn test_real_e2e_live_check_skill_rejects_test_lane_proof() -> Result<()> {
         "without running CI/test lanes",
         "Environment selection ladder",
         "safety class",
-        "Choose ACP/acpx/acp-link only when the behavior is observable through the agent protocol",
+        "Choose an agent protocol client only when the behavior is observable through the agent protocol",
         "Report blocked instead",
         "Confidence: complete for the stated live-check contract",
         "Confidence: not achieved because <blocker>",

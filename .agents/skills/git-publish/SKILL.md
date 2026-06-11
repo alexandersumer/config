@@ -51,13 +51,13 @@ Rules:
 
 ## PR flow
 
-Determine the PR provider from `git remote get-url origin` before choosing tools. Use Bitbucket/Axiom flows only for Bitbucket-compatible repositories. Use GitHub CLI only for GitHub repositories. If the provider is unsupported or required tooling is unavailable, stop after the push and report the exact PR blocker instead of trying a wrong-provider command.
+Determine the PR provider from `git remote get-url origin` before choosing tools. Use Bitbucket flows only for Bitbucket-compatible repositories. Use GitHub CLI only for GitHub repositories. If the provider is unsupported or required tooling is unavailable, stop after the push and report the exact PR blocker instead of trying a wrong-provider command.
 
 Never use Bitbucket MCP to create, list, inspect, or update pull requests during publish. Do not add reviewers unless the user explicitly requested reviewers.
 
-### Bitbucket/Axiom preferred path: canonical PR tools, when available
+### Bitbucket canonical-tool preferred path, when available
 
-Use this path when the runtime exposes canonical PR metadata tools such as `inspect_pr_context`, `save_pr_metadata`, and `ensure_bitbucket_pr`.
+Use this path when the current harness exposes canonical PR metadata tools such as `inspect_pr_context`, `save_pr_metadata`, and `ensure_bitbucket_pr`.
 
 1. Determine the target repository root from shell git, not from assumptions:
 
@@ -76,7 +76,7 @@ Use this path when the runtime exposes canonical PR metadata tools such as `insp
 
 ### Bitbucket CLI fallback path: no-reviewer PR
 
-Use this path only when canonical PR tools are unavailable or the repository/tooling is not Axiom-compatible.
+Use this path only when canonical PR tools are unavailable or the repository/tooling is not compatible with the current harness's PR tools.
 
 1. Check once for an existing open PR:
 

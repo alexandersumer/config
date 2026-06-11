@@ -1,6 +1,6 @@
 ---
 name: real-e2e-live-check
-description: "Operate a real running system end to end without writing automated tests or running CI/test lanes. Use when the user wants live E2E QA of the current effective diff through local real services, ACP/acpx, CLI, browser, HTTP APIs, staging/dev shards, or deployed resources. The skill discovers the most appropriate real-enough environment, drives the public boundary, covers relevant edge cases, captures evidence, cleans up, and reports blockers honestly."
+description: "Operate a real running system end to end without writing automated tests or running CI/test lanes. Use when the user wants live E2E QA of the current effective diff through local real services, agent protocol clients, CLI, browser, HTTP APIs, staging/dev shards, or deployed resources. The skill discovers the most appropriate real-enough environment, drives the public boundary, covers relevant edge cases, captures evidence, cleans up, and reports blockers honestly."
 ---
 
 Operate the current effective diff through a **real running system** and prove the behavior works end to end without creating automated tests and without running CI/test lanes. Real means a user, operator, service, CLI, browser, protocol client, or API caller drives the same public boundary the product depends on while the relevant runtime, service, worker, container, persistence, queue, cache, object store, browser app, or deployed resource is live.
@@ -33,7 +33,7 @@ Do not choose a live-check approach until you can cite the repo-local source tha
 - cleanup/artifact/log source;
 - chosen route, explicit unknowns, and blocker threshold.
 
-Prefer repo-local skills and runbooks over inferred commands. Search for skills/docs/scripts with names or descriptions that mention e2e, local, staging, dev-shard, smoke, runtime, browser, ACP, acpx, CLI, deploy, provider, auth, Slauth, service-proxy, LocalStack, Docker, Compose, or Kind. Use automated tests and CI files as map sources for payloads, startup, auth, readiness, cleanup, and edge cases, but do not run them as the live-check proof.
+Prefer repo-local skills and runbooks over inferred commands. Search for skills/docs/scripts with names or descriptions that mention e2e, local, staging, dev-shard, smoke, runtime, browser, agent protocol, CLI, deploy, provider, auth, service-proxy, LocalStack, Docker, Compose, or Kind. Use automated tests and CI files as map sources for payloads, startup, auth, readiness, cleanup, and edge cases, but do not run them as the live-check proof.
 
 Prefer repo-owned CLIs, SDK clients, browser drivers, or protocol clients over raw `curl` when they wrap auth, routing, request headers, tenant context, staging behavior, or service-proxy behavior. Never hand-roll deployed auth, Slauth, ASAP, tenant, service-proxy, staging, or production headers unless repo context proves that is the intended path.
 
@@ -41,7 +41,7 @@ Do not proceed from package-script names alone. Do not treat process start as re
 
 Before operating anything, write a short live-check contract in chat:
 - changed behavior and current effective diff being checked;
-- public boundary to drive: browser, CLI, ACP/acpx/acp-link, SDK, HTTP API, worker trigger, webhook, deployed endpoint, or another real user/operator surface;
+- public boundary to drive: browser, CLI, agent protocol client, SDK, HTTP API, worker trigger, webhook, deployed endpoint, or another real user/operator surface;
 - chosen environment and why it is real enough: existing local process, repo-documented local real stack, dev shard, staging, or deployed resource;
 - safety class: local only, staging/dev mutating, production read-only, or production mutating;
 - required tools, auth, ports, credentials, resources, and approval needs;
@@ -50,7 +50,7 @@ Before operating anything, write a short live-check contract in chat:
 Environment selection ladder:
 1. Use an already-running local system when it is clearly the correct composition root and reaches the changed public boundary.
 2. Prefer the repo-documented local real stack when it faithfully exercises the changed path: local servers, Docker Compose, Kind, Lima, local storage/cache/object stores, local provider stacks, real CLIs, browser automation, or protocol bridges.
-3. Use the real client surface that matches the changed behavior. Choose ACP/acpx/acp-link only when the behavior is observable through the agent protocol; choose browser for UI flows, CLI for operator flows, SDK/API clients for programmatic flows, and direct HTTP only when that is the product boundary.
+3. Use the real client surface that matches the changed behavior. Choose an agent protocol client only when the behavior is observable through the agent protocol; choose browser for UI flows, CLI for operator flows, SDK/API clients for programmatic flows, and direct HTTP only when that is the product boundary.
 4. Use a dev shard or staging resource when local cannot faithfully cover the behavior, such as deployed auth, TLS/ALB, service mesh, multi-node scheduling, production image wiring, network policy, architecture-specific runtime behavior, published catalog/config, or a bug that only appears on deployed paths.
 5. Use production only with explicit user approval. Prefer read-only probes; for any production mutation, require a narrow resource scope, unique names, rollback/cleanup, and clear user authorization before acting.
 
@@ -67,7 +67,7 @@ Choose edge probes from the risk in the current diff: invalid or minimal input, 
 Forbidden proof:
 - writing automated tests, adding test fixtures, wiring CI/test lanes, or claiming a test run is the live-check result;
 - mocks, fake adapters inside the changed path, test-only endpoints, bypass flags, broad sleeps, skipped/ignored failures, or assertions only against internals;
-- package-script-name guesses, hand-rolled deployed headers, or using ACP/acpx, browser, CLI, or HTTP just because it is convenient when another public boundary is the real user surface;
+- package-script-name guesses, hand-rolled deployed headers, or using an agent protocol client, browser, CLI, or HTTP just because it is convenient when another public boundary is the real user surface;
 - mutating shared deployed resources without a safety class, unique identifiers, cleanup plan, and required approval;
 - downgrading to fake/local-only evidence when the contract requires deployed infrastructure. Report blocked instead.
 
