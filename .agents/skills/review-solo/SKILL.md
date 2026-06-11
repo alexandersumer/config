@@ -13,8 +13,8 @@ Review the code directly in this session. Do not invoke subagents. Preserve the 
 
 3. **Run four direct review passes.** Do not report during the passes. Collect candidate issues only when they have a concrete root cause and plausible user/system impact:
    - **Correctness** — logic errors, wrong returns, violated contracts, stale state, wrong ordering, broken data flow.
-   - **Failure modes** — null/boundary inputs, races, swallowed errors, leaks, retries, partial failures, regressions in adjacent touched code.
-   - **Security** — injection, auth/permission gaps, secrets, unsafe deserialization, missing validation, trust-boundary mistakes.
+   - **Failure modes** — null/boundary inputs, races, swallowed errors, unclear or misleading error messages, missing diagnostic context, noisy or low-signal logging, leaks, retries, partial failures, regressions in adjacent touched code.
+   - **Security** — injection, auth/permission gaps, secrets or sensitive data in logs/errors, unsafe deserialization, missing validation, trust-boundary mistakes.
    - **Conventions** — rules scoped to changed files, local patterns, ownership boundaries; skip what a linter catches.
 
 4. **Validate every candidate yourself.** For each candidate, inspect the relevant file/function/caller/test path in enough detail to confirm or refute it. Prefer concrete execution paths, triggering input, violated rule, or a targeted command. Drop anything you cannot demonstrate concretely. Never keep a finding because it sounds plausible.

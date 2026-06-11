@@ -9,7 +9,7 @@ Review codebase architecture directly in this session. Do not invoke subagents. 
 
 1. **Resolve scope.** Use `scope`, `$ARGUMENTS`, the conversation target, or the current repo. Prefer the smallest coherent surface with callers, tests, and future change pressure. If that cannot be bounded quickly after reading available context, ask one narrowing question.
 
-2. **Build the context packet for yourself.** Read relevant `CONTEXT.md`, `CONTEXT-MAP.md`, `docs/adr/**`, `AGENTS.md`, `CLAUDE.md`, `REVIEW.md`, README, entry points, key interfaces, representative callers, and nearby tests. Keep excerpts focused. Capture domain vocabulary and ADR constraints so you do not invent names or re-litigate decisions.
+2. **Build the context packet for yourself.** Read relevant `CONTEXT.md`, `CONTEXT-MAP.md`, `docs/adr/**`, `AGENTS.md`, `CLAUDE.md`, `REVIEW.md`, README, entry points, key interfaces, representative callers, error/logging paths, and nearby tests. Keep excerpts focused. Capture domain vocabulary and ADR constraints so you do not invent names or re-litigate decisions.
 
 3. **Shared vocabulary.** A module has an interface and implementation. Interface means everything callers must know: types, invariants, errors, ordering, config, lifecycle. Depth means much behavior behind a small interface. A seam lets behavior vary without editing callers. Locality means one behavior change touches few places. Leverage means callers get more capability than the interface costs. Use the deletion test: deleting a shallow module makes complexity vanish; deleting a deep module spreads complexity across callers.
 
@@ -35,11 +35,11 @@ Review codebase architecture directly in this session. Do not invoke subagents. 
 
    - **Seam and Test Surface Pass**
      - Mission: find seams that make behavior easier to test and vary.
-     - Inspect: IO/time/network/global state, over-mocking, test-only pure functions with no locality, fake seams with one adapter, missing public test surfaces.
+     - Inspect: IO/time/network/global state, diagnostics/logging emitted far from the owning concept, noisy cross-cutting logs, unclear error surfaces, over-mocking, test-only pure functions with no locality, fake seams with one adapter, missing public test surfaces.
      - Reject: seams with no plausible second adapter or tests that only assert implementation detail.
      - Prefer moves where the interface becomes the test surface.
 
-5. **Cluster, filter, and validate yourself.** Dedupe by root cause. Drop candidates without file evidence, without a realistic future change path, or whose payoff is aesthetic. Validate at most the six strongest by re-reading the relevant files/artifacts in full or focused excerpts. Keep only candidates that can show concrete evidence: current friction, future change path, why the current module/interface/seam/invariant is costly, smallest safe design move, locality/leverage/testability payoff, and accepted trade-off.
+5. **Cluster, filter, and validate yourself.** Dedupe by root cause. Drop candidates without file evidence, without a realistic future change path or regression-investigation path, or whose payoff is aesthetic. Validate at most the six strongest by re-reading the relevant files/artifacts in full or focused excerpts. Keep only candidates that can show concrete evidence: current friction, future change path, why the current module/interface/seam/invariant is costly, smallest safe design move, locality/leverage/debuggability/testability payoff, and accepted trade-off.
 
 6. **Report validated moves only.** Rank by confidence, payoff, and smallness. For each survivor include: `Files`, `Friction`, `Future change path`, `Move`, `Payoff`, `Trade-off`, `Confidence`. If none survive, say no high-leverage architecture improvement was found in the reviewed scope. Stop after candidates and ask which one to investigate, plan, or implement. Ask before updating `CONTEXT.md` or ADRs.
 

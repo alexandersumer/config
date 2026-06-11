@@ -29,8 +29,8 @@ This is the heavyweight code-review path. Fresh-context Reviewers generate candi
 
    Roles:
    - **Correctness** — logic errors, wrong returns, violated contracts
-   - **Failure modes** — null/boundary inputs, races, swallowed errors, leaks, regressions in adjacent code the diff touches
-   - **Security** — injection, auth, secrets, unsafe deserialization, missing validation
+   - **Failure modes** — null/boundary inputs, races, swallowed errors, unclear or misleading error messages, missing diagnostic context, noisy or low-signal logging, leaks, regressions in adjacent code the diff touches
+   - **Security** — injection, auth, secrets or sensitive data in logs/errors, unsafe deserialization, missing validation
    - **Conventions** — rules scoped to changed files; skip what a linter catches
 
 4. **Validate Reviewer output shape before candidate validation.** A Reviewer response is valid only if it contains either `CANDIDATES:` or `NO_FINDINGS`. Empty, whitespace-only, truncated, unavailable, timed out, or otherwise unstructured output is invalid. If any Reviewer output is invalid, retry that Reviewer once with a smaller pasted diff/context packet through the same direct reviewer mechanism. If it is still invalid, stop with `Review inconclusive`. Never treat invalid output as no findings, and never fall back to arbitrary external agent CLIs.

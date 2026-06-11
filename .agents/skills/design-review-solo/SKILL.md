@@ -14,10 +14,10 @@ Review the design directly in this session. Do not invoke subagents. Preserve th
 3. **Run four direct design passes.** Do not report during the passes. Collect candidate issues only when grounded in code, artifact text, or a concrete future change path:
    - **Boundaries and ownership** — wrong module/API seams, leaked decisions, change amplification, misplaced responsibility.
    - **Domain and invariants** — collapsed concepts, broken aggregate/data invariants, weak ubiquitous language, invalid state transitions.
-   - **Evolution and operability** — migration/rollout/rollback risk, observability gaps, concurrency/idempotency, persistence/API compatibility, future change cost.
+   - **Evolution and operability** — migration/rollout/rollback risk, observability gaps, unclear diagnostic/error model, low-signal or noisy logging strategy, concurrency/idempotency, persistence/API compatibility, future change cost.
    - **Simplicity and abstraction** — shallow wrappers, pass-through APIs, generic non-abstractions, configuration sprawl, temporal decomposition, unnecessary layers.
 
-4. **Validate every candidate yourself.** Confirm or refute each issue with concrete evidence: boundary crossed, invariant weakened, compatibility risk introduced, change path made expensive, operational gap created, or convention violated. Drop anything speculative, taste-based, generic, or not material to the scoped design. Do not keep a finding merely because it sounds architecturally sophisticated.
+4. **Validate every candidate yourself.** Confirm or refute each issue with concrete evidence: boundary crossed, invariant weakened, compatibility risk introduced, change path made expensive, regression investigation made materially harder by poor errors/logging, operational gap created, or convention violated. Drop anything speculative, taste-based, generic, or not material to the scoped design. Do not keep a finding merely because it sounds architecturally sophisticated.
 
 5. **Report.** Dedupe by root cause and rank Critical, High, Medium, Low. For each surviving issue, include severity, location/artifact section if available, architectural judgment, evidence, design move, and accepted trade-off — one concise paragraph each. If the cheapest good design is no change, say so. If the review surface is too large to validate directly, say `Review limited` and name the residual risk. If no material issue remains, say in one line that no material design issue was found and name the review surface.
 
