@@ -12,7 +12,7 @@ Act as a fresh agent inheriting an in-progress branch or dirty worktree. Do not 
 Inspect and record the basics:
 - repo root, current branch, `git status --short`, and upstream/ahead state when available
 - local instructions governing changed or untracked paths, including relevant `AGENTS.md`, `CLAUDE.md`, README, CONTRIBUTING, and nearby docs
-- comparison ref for committed branch changes: use `origin/HEAD` only when it resolves to `origin/main`; otherwise use `origin/main` if present; otherwise use the resolved remote default branch. When a ref is available, set `base` with `git merge-base <comparison-ref> HEAD`.
+- comparison ref for committed branch changes: resolve the remote default branch from `origin/HEAD`; fall back to `origin/main` or `origin/master` only if `origin/HEAD` cannot be resolved. When a ref is available, set `base` with `git merge-base <comparison-ref> HEAD`.
 
 Build one effective change set from every available source:
 - committed branch changes: `git log base..HEAD --oneline` and `git diff base..HEAD` when `base` exists

@@ -97,9 +97,10 @@ Use this path only when canonical PR tools are unavailable or the repository/too
 3. Do not pass reviewer flags. Create PRs with no reviewers unless the user explicitly requested reviewers.
 4. If `twg` is unavailable, use `bb pr create` only through its interactive flow and select `Skip (no reviewers)`. Do not use fully specified non-interactive `bb pr create`, because it may apply default reviewers.
 5. If PR creation fails:
-   - check once for an existing branch PR with CLI
+   - check once for an existing branch PR with whichever CLI is available
    - if found, report it and stop
-   - otherwise retry once with the no-reviewer `twg` Bitbucket create path
+   - if the failed create path used `twg`, retry once with the no-reviewer `twg` Bitbucket create path
+   - if `twg` was unavailable and the interactive `bb pr create` fallback failed, do not retry `twg`; report the exact `bb` blocker
    - if it still fails, stop and report the exact blocker
 
 ### GitHub CLI fallback path

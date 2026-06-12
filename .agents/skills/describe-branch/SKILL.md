@@ -13,6 +13,8 @@ Resolve the comparison base from the remote default branch: use `origin/HEAD`, f
 
 Build one effective change set from every available source: `git log base..HEAD --oneline` and `git diff base..HEAD` when `base` exists, staged changes with `git diff --cached`, unstaged changes with `git diff`, and untracked files from `git ls-files --others --exclude-standard` rendered as new-file diffs. Always include staged, unstaged, and untracked changes even when the committed branch diff exists. If the committed branch diff is empty but the working tree has staged, unstaged, or untracked changes, describe those changes instead of treating the branch as empty. Ignore generated files, lockfiles, and formatting noise unless they are the change.
 
+If the effective change set is empty, output `clean` and stop.
+
 The cumulative effective diff is the source of truth. Use conversation context only to clarify intent that is supported by the diff; never let the most recent agent edit, latest local fix, or last commit dominate the title unless it is the primary branch-level change.
 
 Before writing, identify the highest-level user-visible or system-behavior change that explains most meaningful diffs. If the diff is implementation-heavy, read enough changed code, callers, or tests to infer the observable what and why. The subject should name the branch-level intent. Logging, tests, cleanup, refactors, and follow-up fixes belong in the body only when they support the main change, unless they are the actual purpose of the branch. If the effective change set contains unrelated changes, do not invent a single purpose; use the safest accurate subject and explain the split plainly in the body.
