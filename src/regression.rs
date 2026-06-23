@@ -37,6 +37,7 @@ pub(crate) fn run_regression_tests() -> Result<()> {
     test_new_skill_validate_flow()?;
     test_real_e2e_automated_tests_skill_requires_edge_case_proof()?;
     test_real_e2e_live_check_skill_rejects_test_lane_proof()?;
+    test_git_publish_skills_keep_local_first_contract()?;
     test_ghostty_config_rejects_tab_disappearance_regressions()?;
     test_install_command()?;
     test_link_safety()?;
@@ -217,6 +218,90 @@ fn test_real_e2e_live_check_skill_rejects_test_lane_proof() -> Result<()> {
             ));
         }
     }
+    Ok(())
+}
+
+fn test_git_publish_skills_keep_local_first_contract() -> Result<()> {
+    let config_root = config_root_from_exe()?;
+    let to_origin_path = config_root.join(".agents/skills/git-publish-to-origin/SKILL.md");
+    let to_origin = fs::read_to_string(&to_origin_path).map_err(|err| {
+        format!(
+            "{}: cannot read git-publish-to-origin skill: {err}",
+            to_origin_path.display()
+        )
+    })?;
+    let publish_path = config_root.join(".agents/skills/git-publish/SKILL.md");
+    let publish = fs::read_to_string(&publish_path).map_err(|err| {
+        format!(
+            "{}: cannot read git-publish skill: {err}",
+            publish_path.display()
+        )
+    })?;
+
+    for expected in [
+        "This skill is push-only: do not create branches, open PRs, inspect PRs, update PRs",
+        "Normal path contract: local-first, direct push, push-verified",
+        "Do not run remote-default discovery in the normal path",
+        "Treat the actual `git push` result as the authoritative network freshness and safety check",
+        "Resolve the push target directly as branch `<current-branch>` on `origin`",
+        "local push target evidence: `git remote get-url --push --all origin`",
+        "Push `HEAD` to branch `<current-branch>` on `origin`",
+    ] {
+        if !to_origin.contains(expected) {
+            return Err(format!(
+                "{}: git-publish-to-origin must stay a direct local-first push workflow; missing {expected:?}",
+                to_origin_path.display()
+            ));
+        }
+    }
+    for forbidden in [
+        "remote default branch from",
+        "`git remote show origin`",
+        "`git ls-remote --symref origin HEAD`",
+        "Inspect canonical PR context",
+        "ensure_bitbucket_pr",
+        "twg bb prs create",
+        "gh pr create",
+    ] {
+        if to_origin.contains(forbidden) {
+            return Err(format!(
+                "{}: git-publish-to-origin must not make direct push depend on PR/default-discovery workflow text; found {forbidden:?}",
+                to_origin_path.display()
+            ));
+        }
+    }
+
+    for expected in [
+        "local-first default branch resolver",
+        "Use `refs/remotes/origin/HEAD` only when it resolves to an existing local `refs/remotes/origin/<branch>` ref.",
+        "Otherwise use a local `origin/main` or `origin/master` candidate only when exactly one exists.",
+        "Run live remote discovery only when a PR destination is required and local refs are missing, stale, or conflicting.",
+        "Determine the PR provider from `git remote get-url --push origin`",
+        "After the source branch has been pushed",
+        "Do not add reviewers unless the user explicitly requested reviewers.",
+        "Save fresh PR metadata",
+        "Ensure the PR through `ensure_bitbucket_pr` with explicit source and destination branches and no reviewers unless reviewers were explicitly requested.",
+    ] {
+        if !publish.contains(expected) {
+            return Err(format!(
+                "{}: git-publish must keep PR-grade local-first destination safety; missing {expected:?}",
+                publish_path.display()
+            ));
+        }
+    }
+    for forbidden in [
+        "usually from `git remote show origin`",
+        "`git remote show origin`",
+        "`git ls-remote --symref origin HEAD`",
+    ] {
+        if publish.contains(forbidden) {
+            return Err(format!(
+                "{}: git-publish must not describe expensive live default discovery as the usual resolver; found {forbidden:?}",
+                publish_path.display()
+            ));
+        }
+    }
+
     Ok(())
 }
 
