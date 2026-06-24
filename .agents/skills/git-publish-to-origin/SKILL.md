@@ -5,41 +5,64 @@ description: Commit and push current branch to origin, including main/default wh
 
 Commit staged, unstaged, and relevant untracked changes only when needed, then push the current branch to the same branch name on `origin`.
 
-Invoking this skill is explicit authorization to perform the required git writes for publishing: stage intended changes, create a commit when needed, and push the current branch to `origin`. Treat the skill invocation itself as naming the current branch as the push target. This includes `main` and `master`; if the current branch is also the remote default, that does not change the direct-push path or require remote-default discovery.
+Invoking this skill explicitly authorizes only the git writes required for that publish:
 
-Default-branch publishing is an expected supported path of this skill, not a risk by itself. Do not ask the user to retype `push main`/`push master`/`push <branch>` solely for branch-name confirmation.
+- stage intended working-tree changes
+- create one commit when working-tree changes need committing
+- push `HEAD` to `origin/<current-branch>` and set upstream when needed
+
+Default-branch publishing is an expected supported path of this skill. This includes `main` and `master`; the branch name alone is not a reason to ask for confirmation.
+
+This skill is push-only: do not create branches, open PRs, inspect PRs, update PRs, run tests or builds, pull, merge, rebase, force-push, switch branches, or change the push target.
+
+Normal path contract: local-first, direct push, push-verified. Use cheap local git state for deterministic push decisions. Do not run remote-default discovery in the normal path. Treat the actual `git push` result as the authoritative network freshness and safety check; if the remote rejects the push, stop and report that exact push blocker instead of doing speculative network discovery.
 
 Do not pause to ask for publish permission unless the inspected changes, repository, remote, or push target are incoherent, risky, or ambiguous.
 
-This skill is push-only: do not create branches, open PRs, inspect PRs, update PRs, run unrequested checks, or use an invalid subject.
+## Target
 
-Normal path contract: local-first, direct push, push-verified. Use cheap local git state for deterministic push decisions. Do not run remote-default discovery in the normal path. Treat the actual `git push` result as the authoritative network freshness and safety check; if the remote rejects the push, stop and report that exact push blocker instead of doing speculative preflight network discovery.
+Resolve the push target directly as branch `<current-branch>` on `origin`.
+
+Use `git push -u origin HEAD:<current-branch>` for the push. If the remote branch does not exist, that push may create it; this is part of publishing the current branch and is not the same as creating or switching local branches.
+
+Whether the current branch is also the remote default does not change the target or require extra confirmation.
 
 ## Workflow
 
 1. Inspect repository context before any write:
    - `git rev-parse --show-toplevel`
    - `git branch --show-current`
+   - `git rev-parse --verify HEAD`
    - local push target evidence: `git remote get-url --push --all origin`
    - `git status --short`
-   - upstream/ahead state when available: `git rev-parse --abbrev-ref --symbolic-full-name @{u}` and `git rev-list --left-right --count @{u}...HEAD`
-   - committed local changes not yet on the upstream or matching `origin/<current-branch>`, when available
+   - upstream state when available: `git rev-parse --abbrev-ref --symbolic-full-name @{u}`
+   - target state from local refs only:
+     - if upstream exists and is `origin/<current-branch>`, use `@{u}` as the effective target
+     - else if local ref `refs/remotes/origin/<current-branch>` exists, use `origin/<current-branch>` as the effective target
+     - else treat the remote target branch as absent
+   - ahead and behind state when the effective target exists: `git rev-list --left-right --count <effective-target>...HEAD`
+   - committed local changes not yet on the effective target, when the target exists: `git log --oneline <effective-target>..HEAD`
    - effective publish diff for one subject:
      - unpushed commit diff when local commits exist
      - staged diff: `git diff --cached`
      - unstaged diff: `git diff`
      - relevant untracked files from `git ls-files --others --exclude-standard`, rendered or summarized as new-file diffs
-2. Resolve the push target directly as branch `<current-branch>` on `origin`.
-   - The skill invocation is the explicit branch-target request, including when the current branch is `main` or `master`; if it also happens to be the remote default, the direct-push path is unchanged.
-   - Do not run remote-default discovery before direct push; the current branch name is the target.
-   - Stop before writes if HEAD is detached, the current branch is empty/unknown, `origin` is missing, the push URL is missing or ambiguous, local upstream state says the branch is behind and needs pull/merge/rebase handling, or the inspected repository/remote/diff makes the publish risky or ambiguous for a reason other than the branch name alone.
-3. If there are no publishable working-tree changes and no unpushed local commits, stop.
-4. Confirm the combined effective publish diff forms one coherent push. If unpushed local commits and working-tree changes are unrelated, stop and ask how to split or scope the publish.
-5. If working-tree changes exist, stage intended changes unless explicitly excluded, then commit with a valid Conventional Commit subject grounded in those staged changes and compatible with the existing unpushed commits. Do not stage unrelated files.
-6. If there are no publishable working-tree changes but the current branch has unpushed local commits, skip committing and push those commits.
-7. Push `HEAD` to branch `<current-branch>` on `origin`, setting upstream if needed, for example `git push -u origin HEAD:<current-branch>`. If the remote rejects the push, report the exact rejection as the blocker; do not auto-pull, rebase, force-push, retry with a new strategy, or mask the rejection with speculative preflight checks.
+2. Stop before writes if any of these are true:
+   - HEAD is detached, `HEAD` has no commit, or the current branch name is empty
+   - `origin` is missing
+   - the push URL is missing or multiple push URLs make the target ambiguous
+   - an existing upstream is not `origin/<current-branch>`
+   - local git state says the effective target has commits not in `HEAD`
+   - the inspected repository, remote, or diff makes the publish risky or ambiguous for a reason other than the branch name alone
+3. If there are no working-tree changes and no commits to publish, stop.
+   - Commits to publish exist when `HEAD` has commits not on the effective target.
+   - If the remote target branch is absent, a valid `HEAD` counts as publishable because the push publishes the current branch to `origin`.
+4. Confirm the combined effective publish diff forms one coherent push. If unpushed commits and working-tree changes are unrelated, stop and ask how to split or scope the publish.
+5. If working-tree changes exist, stage only intended changes and commit them with a valid Conventional Commit subject grounded in the staged diff and compatible with any existing unpushed commits. Leave unrelated untracked files unstaged.
+6. If there are no working-tree changes but there are unpushed local commits, skip committing and push those commits.
+7. Push `HEAD` to branch `<current-branch>` on `origin` with `git push -u origin HEAD:<current-branch>`. If the remote rejects the push, report the exact rejection as the blocker. Do not auto-pull, rebase, force-push, retry with a new strategy, or hide the rejection behind speculative preflight checks.
 
-Do not run tests/builds unless explicitly asked.
+Do not run tests or builds unless explicitly asked.
 
 ## Subject rules
 
@@ -50,13 +73,15 @@ Subject regex:
 ```
 
 Rules:
+
 - Use a grounded Conventional Commit subject from the actual diff.
-- No branch names, issue-title summaries, issue-key prefixes, chat summaries, provider defaults, or trailing period.
+- Do not use branch names, issue-title summaries, issue-key prefixes, chat summaries, provider defaults, or trailing periods.
 - Keep the subject human-readable and specific.
 
 ## Final response
 
 Report:
+
 - commit hash, or state that no new commit was needed
 - subject, or existing unpushed commits when no new commit was needed
 - branch

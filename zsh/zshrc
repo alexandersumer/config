@@ -66,6 +66,45 @@ source "$ZSH/oh-my-zsh.sh"
 autoload -U promptinit; promptinit
 prompt pure
 
+__prompt_pure_sync_git_info() {
+  emulate -L zsh
+
+  (( $+functions[prompt_pure_preprompt_render] )) || return 0
+
+  local previous_top git_top git_branch
+  typeset -gA prompt_pure_vcs_info
+  previous_top=${prompt_pure_vcs_info[top]}
+
+  if ! git_top=$(command git rev-parse --show-toplevel 2>/dev/null); then
+    git_top=
+    git_branch=
+  else
+    git_branch=$(command git symbolic-ref --quiet --short HEAD 2>/dev/null) ||
+      git_branch=$(command git rev-parse --short HEAD 2>/dev/null) ||
+      git_branch=
+  fi
+
+  if [[ "$git_top" != "$previous_top" ]]; then
+    unset prompt_pure_git_dirty
+    unset prompt_pure_git_last_dirty_check_timestamp
+    unset prompt_pure_git_arrows
+    unset prompt_pure_git_stash
+    unset prompt_pure_git_fetch_pattern
+  fi
+
+  prompt_pure_vcs_info=(
+    [pwd]=$PWD
+    [top]=$git_top
+    [branch]=${git_branch//\%/%%}
+    [action]=
+  )
+}
+
+autoload -Uz add-zsh-hook
+add-zsh-hook precmd __prompt_pure_sync_git_info
+# Pure renders from psvar in its own precmd hook, so sync Git state first.
+precmd_functions=(__prompt_pure_sync_git_info ${precmd_functions:#__prompt_pure_sync_git_info})
+
 ########################################
 # Aliases
 ########################################

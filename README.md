@@ -43,6 +43,7 @@ $surgical-edit
 $review-solo
 $review-deep
 $git-publish-to-origin
+$one-clear-sentence
 ```
 
 Do not add `register_cmd` to skill front matter. Current Codex ignores that legacy key, so this repo rejects it to avoid implying that custom skills appear as slash commands.

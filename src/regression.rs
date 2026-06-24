@@ -35,6 +35,7 @@ pub(crate) fn run_regression_tests() -> Result<()> {
         assert_mutation_fails(name, *mutate)?;
     }
     test_new_skill_validate_flow()?;
+    test_one_clear_sentence_skill_rewrites_recent_context()?;
     test_real_e2e_automated_tests_skill_requires_edge_case_proof()?;
     test_real_e2e_live_check_skill_rejects_test_lane_proof()?;
     test_git_publish_skills_keep_local_first_contract()?;
@@ -46,6 +47,7 @@ pub(crate) fn run_regression_tests() -> Result<()> {
     test_get_default_branch_refreshes_stale_remote_head()?;
     test_home_reset_to_origin()?;
     test_axiom_alias_zsh_wiring()?;
+    test_pure_prompt_syncs_git_branch_after_cd()?;
     test_relay_axiom_config()?;
     Ok(())
 }
@@ -126,6 +128,34 @@ fn test_new_skill_validate_flow() -> Result<()> {
         "--config-root".to_string(),
         fixture.path().display().to_string(),
     ])?;
+    Ok(())
+}
+
+fn test_one_clear_sentence_skill_rewrites_recent_context() -> Result<()> {
+    let config_root = config_root_from_exe()?;
+    let skill_path = config_root.join(".agents/skills/one-clear-sentence/SKILL.md");
+    let text = fs::read_to_string(&skill_path).map_err(|err| {
+        format!(
+            "{}: cannot read one-clear-sentence skill: {err}",
+            skill_path.display()
+        )
+    })?;
+    for expected in [
+        "The most recent substantive assistant answer, tool result, pasted block, draft, or discussion",
+        "compress the user's current target into the single most useful sentence",
+        "extract the relevant takeaway rather than preserving every detail",
+        "drop file inventories, examples, subtask lists, and incidental evidence",
+        "Do not acknowledge, confirm, promise future behavior",
+        "Got it",
+        "I will use that style",
+    ] {
+        if !text.contains(expected) {
+            return Err(format!(
+                "{}: one-clear-sentence skill must rewrite recent context instead of acknowledging style; missing {expected:?}",
+                skill_path.display()
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -1029,6 +1059,86 @@ expect_alias convo-ai-3 "cd $HOME/atlassian/convo-ai-3 && sdk use java 21.0.8-am
             String::from_utf8_lossy(&output.stderr),
         ));
     }
+    Ok(())
+}
+
+fn test_pure_prompt_syncs_git_branch_after_cd() -> Result<()> {
+    let config_root = std::env::current_dir()
+        .map_err(|err| format!("cannot determine config root for zsh prompt test: {err}"))?;
+    let home = tempfile::Builder::new()
+        .prefix("tmp_config_zsh_prompt_home_")
+        .tempdir()
+        .map_err(|err| format!("cannot create temp HOME for zsh prompt test: {err}"))?;
+    let repo = home.path().join("workspace/example-repo");
+
+    fs::create_dir_all(home.path().join(".oh-my-zsh"))
+        .map_err(|err| format!("cannot create zsh prompt fixture oh-my-zsh dir: {err}"))?;
+    fs::create_dir_all(home.path().join(".zsh"))
+        .map_err(|err| format!("cannot create zsh prompt fixture .zsh dir: {err}"))?;
+    fs::create_dir_all(&repo)
+        .map_err(|err| format!("cannot create zsh prompt fixture repo: {err}"))?;
+    fs::write(home.path().join(".oh-my-zsh/oh-my-zsh.sh"), "")
+        .map_err(|err| format!("cannot write zsh prompt fixture oh-my-zsh shim: {err}"))?;
+    fs::write(home.path().join(".zsh/git-functions.zsh"), "")
+        .map_err(|err| format!("cannot write zsh prompt fixture git-functions shim: {err}"))?;
+
+    run_command(&repo, "git", &["init", "--initial-branch=main"])?;
+    run_command(&repo, "git", &["config", "user.email", "test@example.com"])?;
+    run_command(&repo, "git", &["config", "user.name", "Test User"])?;
+    fs::write(repo.join("file.txt"), "base\n")
+        .map_err(|err| format!("cannot write zsh prompt fixture file: {err}"))?;
+    run_command(&repo, "git", &["add", "file.txt"])?;
+    run_command(&repo, "git", &["commit", "-m", "base"])?;
+    run_command(&repo, "git", &["checkout", "-b", "feature/prompt-branch"])?;
+
+    let script = r#"
+source "$CONFIG_ROOT/zsh/zshrc"
+render_prompt() {
+  for hook in $precmd_functions; do
+    "$hook" >/dev/null 2>&1 || exit $?
+  done
+  expanded="${(%)PROMPT}"
+  print -r -- "$expanded"
+}
+cd "$PROMPT_REPO" || exit 1
+render_prompt
+[[ "$expanded" == *feature/prompt-branch* ]] || {
+  print -r -- "expected prompt to include feature/prompt-branch" >&2
+  exit 1
+}
+git checkout main >/dev/null 2>&1 || exit $?
+render_prompt
+[[ "$expanded" == *main* ]] || {
+  print -r -- "expected prompt to include main after checkout" >&2
+  exit 1
+}
+[[ "$expanded" != *feature/prompt-branch* ]] || {
+  print -r -- "expected prompt to stop showing feature/prompt-branch after checkout" >&2
+  exit 1
+}
+"#;
+    let output = Command::new("zsh")
+        .current_dir(&config_root)
+        .env("HOME", home.path())
+        .env("CONFIG_ROOT", &config_root)
+        .env("PROMPT_REPO", &repo)
+        .args(["-fic", script])
+        .output()
+        .map_err(|err| format!("cannot run zsh prompt test: {err}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "zsh prompt test failed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        ));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if !stdout.contains("feature/prompt-branch") {
+        return Err(format!(
+            "zsh prompt test did not render branch in prompt output:\n{stdout}"
+        ));
+    }
+
     Ok(())
 }
 
