@@ -1001,6 +1001,8 @@ fn test_axiom_alias_zsh_wiring() -> Result<()> {
         ".zsh",
         "atlassian/alta-1",
         "atlassian/alta-2",
+        "atlassian/alta-6",
+        "atlassian/alta-7",
         "atlassian/relay-3",
         "atlassian/relay-3-old",
         "atlassian/alta-contrib-3",
@@ -1037,6 +1039,8 @@ expect_alias blog "cd $HOME/src/alexandersumer.com"
 expect_alias atlassian-sandbox "cd $HOME/atlassian/sandboxes"
 expect_alias alta-1 "cd $HOME/atlassian/alta-1"
 expect_alias alta-2 "cd $HOME/atlassian/alta-2"
+expect_alias alta-6 "cd $HOME/atlassian/alta-6"
+expect_alias alta-7 "cd $HOME/atlassian/alta-7"
 expect_alias relay-3 "cd $HOME/atlassian/relay-3"
 expect_alias alta-contrib-3 "cd $HOME/atlassian/alta-contrib-3"
 expect_alias convo-ai-3 "cd $HOME/atlassian/convo-ai-3 && sdk use java 21.0.8-amzn"
