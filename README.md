@@ -9,6 +9,7 @@ Config tooling is implemented in Rust via the `config-tools` binary.
 ```bash
 cargo run -- check
 cargo run -- check-codex-skills
+cargo run -- check-claude-skills
 cargo run -- check-install
 cargo run -- prepare
 cargo run -- pre-commit
@@ -22,19 +23,26 @@ Command roles:
 
 - `check`: non-mutating verification for formatting, build, unit tests, skill validation, and regression tests.
 - `check-codex-skills`: non-mutating verification that `~/.codex/skills` mirrors custom skills from `.agents/skills`, Codex config has no deprecated/disabled skill-discovery flags, and Codex prompt input sees the managed skills from both this checkout and the home directory.
-- `check-install`: non-mutating verification that all managed home config links, Codex skills/config, and managed local launchers match this checkout.
+- `check-claude-skills`: non-mutating verification that `~/.claude/skills` mirrors custom skills from `.agents/skills`, with every managed link resolving to its registry-validated source and no stale managed links left behind.
+- `check-install`: non-mutating verification that all managed home config links, Codex skills/config, Claude Code skills, and managed local launchers match this checkout.
 - `repair-codex-config`: removes deprecated/disabled Codex feature flags from `~/.codex/config.toml`.
 - `prepare`: runs the same verification as `check`.
 - `pre-commit`: safe hook entrypoint; runs `prepare` and `check-install`.
-- `install`: intentional home-directory mutation for `~/.agents`, custom `~/.codex/skills` symlinks, Codex config flag repair, `~/.local/bin/config-tools`, and a `~/.local/bin/codex` launcher that repairs deprecated flags before delegating to Homebrew Codex.
+- `install`: intentional home-directory mutation for `~/.agents`, custom `~/.codex/skills` and `~/.claude/skills` symlinks, Codex config flag repair, `~/.local/bin/config-tools`, and a `~/.local/bin/codex` launcher that repairs deprecated flags before delegating to Homebrew Codex.
 - `install-git-hooks`: intentional local Git config mutation for `core.hooksPath`.
 
-## Codex skills
+## Custom skills
 
-This checkout is the source of truth for custom Codex skills:
+This checkout is the single source of truth for custom skills. One `SKILL.md` per skill is shared by every consumer; install only adds per-consumer symlinks that point back at it:
 
 - Source: `.agents/skills/<name>/SKILL.md`
-- Installed Codex link: `~/.codex/skills/<name> -> <checkout>/.agents/skills/<name>`
+- Agent runtime: `~/.agents -> <checkout>/.agents`
+- Codex link: `~/.codex/skills/<name> -> <checkout>/.agents/skills/<name>`
+- Claude Code link: `~/.claude/skills/<name> -> <checkout>/.agents/skills/<name>`
+
+The same discovery rule applies to every consumer: a top-level, non-hidden `.agents/skills/<name>` directory containing `SKILL.md` is linked; hidden directories and directories without `SKILL.md` are skipped. Linking is idempotent, never clobbers an existing non-managed entry, and removes managed links whose source skill no longer exists.
+
+### Codex
 
 Codex v0.131 does not expose custom skills as `/skill-name` slash commands. The `/` menu is for built-in TUI commands such as `/skills` and `/subagents`. Invoke these custom skills with the skill mention surface instead, for example:
 
@@ -47,6 +55,10 @@ $one-clear-sentence
 ```
 
 Do not add `register_cmd` to skill front matter. Current Codex ignores that legacy key, so this repo rejects it to avoid implying that custom skills appear as slash commands.
+
+### Claude Code
+
+Claude Code discovers personal skills from `~/.claude/skills/<name>/SKILL.md`, which is the same `SKILL.md` format the registry already validates (`name`, `description`, `allowed-tools`). Install links every custom skill into `~/.claude/skills`, creating the directory if it does not exist. Discoverability is proven deterministically: `check-claude-skills` asserts each `~/.claude/skills/<name>` resolves to its registry-validated source, which is exactly the contract Claude Code's loader requires.
 
 ## Git hooks
 
@@ -79,6 +91,7 @@ cargo fmt --check
 cargo check
 cargo run -- check
 cargo run -- check-codex-skills
+cargo run -- check-claude-skills
 cargo run -- check-install
 cargo run -- pre-commit
 ```
@@ -108,8 +121,9 @@ Expected symlink behavior:
 - `~/.local/bin/config-tools` is a runnable copy of the config helper.
 - `~/.local/bin/codex` is a managed launcher that repairs deprecated Codex config flags before delegating to `/opt/homebrew/bin/codex`.
 - `~/.codex/skills/.system` remains a Codex-owned directory with Codex system skills.
-- Each custom top-level `.agents/skills/<name>/SKILL.md` directory links into `~/.codex/skills/<name>`.
-- Hidden skill directories and directories without `SKILL.md` are not linked into Codex.
+- Each custom top-level `.agents/skills/<name>/SKILL.md` directory links into `~/.codex/skills/<name>` and `~/.claude/skills/<name>`.
+- `~/.claude/skills` is created if missing; the directory itself is not symlinked, only the per-skill entries inside it.
+- Hidden skill directories and directories without `SKILL.md` are not linked into Codex or Claude Code.
 - Existing non-empty files/directories or unrelated symlinks are not replaced automatically.
 
 ## Executable-code check

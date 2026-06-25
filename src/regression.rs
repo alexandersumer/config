@@ -1,7 +1,9 @@
 use crate::commands::validate_command;
 use crate::config_root::config_root_from_exe;
 use crate::error::Result;
-use crate::install::{check_codex_skills_command, check_install_command, install_command};
+use crate::install::{
+    check_claude_skills_command, check_codex_skills_command, check_install_command, install_command,
+};
 use crate::managed_config::validate_managed_configs;
 use crate::registry::validate_registry;
 use std::fs;
@@ -438,6 +440,19 @@ pub(crate) fn test_install_command() -> Result<()> {
         ));
     }
 
+    let initial_claude_drift = check_claude_skills_command(&[
+        "--config-root".to_string(),
+        fixture.path().display().to_string(),
+        "--home".to_string(),
+        home.path().display().to_string(),
+    ])
+    .expect_err("Claude skill drift check should fail before install converges custom links");
+    if !initial_claude_drift.contains("Custom Claude Code skill installation drift detected") {
+        return Err(format!(
+            "initial Claude skill drift check reported unexpected output: {initial_claude_drift}"
+        ));
+    }
+
     install_command(&[
         "--config-root".to_string(),
         fixture.path().display().to_string(),
@@ -468,6 +483,14 @@ pub(crate) fn test_install_command() -> Result<()> {
     )?;
     assert_symlink_resolves_to(
         &home.path().join(".codex/skills/describe-branch"),
+        &fixture.path().join(".agents/skills/describe-branch"),
+    )?;
+    assert_symlink_resolves_to(
+        &home.path().join(".claude/skills/surgical-edit"),
+        &fixture.path().join(".agents/skills/surgical-edit"),
+    )?;
+    assert_symlink_resolves_to(
+        &home.path().join(".claude/skills/describe-branch"),
         &fixture.path().join(".agents/skills/describe-branch"),
     )?;
     assert_symlink_resolves_to(
@@ -556,6 +579,55 @@ pub(crate) fn test_install_command() -> Result<()> {
         &external_skill_dir,
     )?;
     check_codex_skills_command(&[
+        "--config-root".to_string(),
+        fixture.path().display().to_string(),
+        "--home".to_string(),
+        home.path().display().to_string(),
+    ])?;
+    if home.path().join(".claude/skills/not-a-skill").exists() {
+        return Err("install linked a directory without SKILL.md as a Claude skill".to_string());
+    }
+    if home.path().join(".claude/skills/.system").exists() {
+        return Err("install linked hidden .system as a Claude skill".to_string());
+    }
+    check_claude_skills_command(&[
+        "--config-root".to_string(),
+        fixture.path().display().to_string(),
+        "--home".to_string(),
+        home.path().display().to_string(),
+    ])?;
+
+    let removed_claude_skill = home.path().join(".claude/skills/removed-skill");
+    #[cfg(unix)]
+    unix_fs::symlink(
+        fixture.path().join(".agents/skills/removed-skill"),
+        &removed_claude_skill,
+    )
+    .map_err(|err| format!("cannot create removed managed Claude skill symlink: {err}"))?;
+    let stale_claude_drift = check_claude_skills_command(&[
+        "--config-root".to_string(),
+        fixture.path().display().to_string(),
+        "--home".to_string(),
+        home.path().display().to_string(),
+    ])
+    .expect_err("Claude skill drift check should fail when a removed managed link remains");
+    if !stale_claude_drift.contains("removed-skill")
+        || !stale_claude_drift.contains("is a stale managed Claude Code skill symlink")
+    {
+        return Err(format!(
+            "stale managed Claude skill drift check missed removed-skill: {stale_claude_drift}"
+        ));
+    }
+    install_command(&[
+        "--config-root".to_string(),
+        fixture.path().display().to_string(),
+        "--home".to_string(),
+        home.path().display().to_string(),
+    ])?;
+    if removed_claude_skill.exists() || removed_claude_skill.is_symlink() {
+        return Err("install left a stale managed Claude skill symlink behind".to_string());
+    }
+    check_claude_skills_command(&[
         "--config-root".to_string(),
         fixture.path().display().to_string(),
         "--home".to_string(),
@@ -685,6 +757,39 @@ pub(crate) fn test_link_safety() -> Result<()> {
     }
     if !conflicting_skill.join("keep").is_file() {
         return Err("install removed data from conflicting Codex skill directory".to_string());
+    }
+
+    let claude_conflict_fixture = copy_fixture()?;
+    let claude_conflict_home = tempfile::Builder::new()
+        .prefix("tmp_claude_install_conflict_")
+        .tempdir()
+        .map_err(|err| format!("cannot create Claude conflict home: {err}"))?;
+    create_codex_system_skills(claude_conflict_home.path())?;
+    let conflicting_claude_skill = claude_conflict_home
+        .path()
+        .join(".claude/skills/surgical-edit");
+    fs::create_dir_all(&conflicting_claude_skill).map_err(|err| {
+        format!(
+            "{}: cannot create conflicting Claude skill: {err}",
+            conflicting_claude_skill.display()
+        )
+    })?;
+    fs::write(conflicting_claude_skill.join("keep"), "do not delete")
+        .map_err(|err| format!("cannot write conflicting Claude skill file: {err}"))?;
+    let claude_conflict_error = install_command(&[
+        "--config-root".to_string(),
+        claude_conflict_fixture.path().display().to_string(),
+        "--home".to_string(),
+        claude_conflict_home.path().display().to_string(),
+    ])
+    .expect_err("install should reject existing conflicting Claude skill entries");
+    if !claude_conflict_error.contains("expected Claude Code skill symlink") {
+        return Err(format!(
+            "unexpected Claude conflict error: {claude_conflict_error}"
+        ));
+    }
+    if !conflicting_claude_skill.join("keep").is_file() {
+        return Err("install removed data from conflicting Claude skill directory".to_string());
     }
 
     let install_fixture = copy_fixture()?;

@@ -5,7 +5,8 @@ use crate::commands::{
 use crate::config_root::default_config_root;
 use crate::error::Result;
 use crate::install::{
-    check_codex_skills_command, check_install_command, install_command, repair_codex_config_command,
+    check_claude_skills_command, check_codex_skills_command, check_install_command,
+    install_command, repair_codex_config_command,
 };
 use std::env;
 use std::path::PathBuf;
@@ -28,6 +29,9 @@ pub(crate) fn run() -> Result<ExitCode> {
         "check-codex-skills" => {
             check_codex_skills_command(command_args).map(|()| ExitCode::SUCCESS)
         }
+        "check-claude-skills" => {
+            check_claude_skills_command(command_args).map(|()| ExitCode::SUCCESS)
+        }
         "check-install" => check_install_command(command_args).map(|()| ExitCode::SUCCESS),
         "repair-codex-config" => {
             repair_codex_config_command(command_args).map(|()| ExitCode::SUCCESS)
@@ -46,7 +50,7 @@ fn print_help() {
 }
 
 fn help_text() -> &'static str {
-    "Usage: config-tools <command> [options]\n\nCommands:\n  validate [--config-root PATH]\n  test-validate\n  check [--config-root PATH]\n  prepare [--config-root PATH]\n  pre-commit [--config-root PATH]\n  install-git-hooks [--config-root PATH]\n  check-codex-skills [--config-root PATH] [--home PATH]\n  check-install [--config-root PATH] [--home PATH]\n  repair-codex-config [--home PATH]\n  install [--config-root PATH] [--home PATH]\n"
+    "Usage: config-tools <command> [options]\n\nCommands:\n  validate [--config-root PATH]\n  test-validate\n  check [--config-root PATH]\n  prepare [--config-root PATH]\n  pre-commit [--config-root PATH]\n  install-git-hooks [--config-root PATH]\n  check-codex-skills [--config-root PATH] [--home PATH]\n  check-claude-skills [--config-root PATH] [--home PATH]\n  check-install [--config-root PATH] [--home PATH]\n  repair-codex-config [--home PATH]\n  install [--config-root PATH] [--home PATH]\n"
 }
 
 pub(crate) fn parse_config_args(args: &[String], allow_check: bool) -> Result<(PathBuf, bool)> {

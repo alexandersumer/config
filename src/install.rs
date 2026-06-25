@@ -26,6 +26,7 @@ pub(crate) fn install_command(args: &[String]) -> Result<()> {
     require_dir(&ghostty_dir, "config Ghostty directory")?;
     require_dir(&relay_dir, "config Relay directory")?;
     let codex_skill_plan = prepare_codex_skill_links(&skills_dir, &home_dir)?;
+    let claude_skill_plan = prepare_claude_skill_links(&skills_dir, &home_dir)?;
     repair_codex_config(&home_dir)?;
     fs::create_dir_all(home_dir.join(".config/ghostty")).map_err(|err| {
         format!(
@@ -71,7 +72,15 @@ pub(crate) fn install_command(args: &[String]) -> Result<()> {
         &config_root,
     )?;
     cleanup_legacy_relay_config(&home_dir, &relay_dir.join("config.toml"))?;
-    apply_codex_skill_links(codex_skill_plan)?;
+    apply_skill_links(codex_skill_plan)?;
+    let claude_skills_dir = home_dir.join(".claude/skills");
+    fs::create_dir_all(&claude_skills_dir).map_err(|err| {
+        format!(
+            "{}: cannot create Claude Code skills directory: {err}",
+            claude_skills_dir.display()
+        )
+    })?;
+    apply_skill_links(claude_skill_plan)?;
     install_config_tools_binary(&home_dir)?;
     install_codex_launcher(&home_dir)?;
 
@@ -82,6 +91,10 @@ pub(crate) fn install_command(args: &[String]) -> Result<()> {
     );
     println!("~/.agents points at {}.", agents_dir.display());
     println!("Custom Codex skills point at {}.", skills_dir.display());
+    println!(
+        "Custom Claude Code skills point at {}.",
+        skills_dir.display()
+    );
     println!(
         "Relay config points at {}.",
         relay_dir.join("config.toml").display()
@@ -181,6 +194,9 @@ pub(crate) fn check_install_command(args: &[String]) -> Result<()> {
     let codex_check = codex_skill_installation_check(&config_root, &home_dir)?;
     errors.extend(codex_check.errors);
 
+    let claude_check = claude_skill_installation_check(&config_root, &home_dir)?;
+    errors.extend(claude_check.errors);
+
     if errors.is_empty() {
         println!(
             "Managed config installation is in sync for {}.",
@@ -229,6 +245,28 @@ pub(crate) fn check_codex_skills_command(args: &[String]) -> Result<()> {
     Err(output)
 }
 
+pub(crate) fn check_claude_skills_command(args: &[String]) -> Result<()> {
+    let (config_root, home_dir) = parse_install_args(args)?;
+    let claude_check = claude_skill_installation_check(&config_root, &home_dir)?;
+    if claude_check.errors.is_empty() {
+        println!(
+            "Custom Claude Code skills are in sync with {}.",
+            claude_check.skills_dir.display()
+        );
+        return Ok(());
+    }
+
+    let mut output = String::from("Custom Claude Code skill installation drift detected:");
+    for error in claude_check.errors {
+        output.push_str("\n- ");
+        output.push_str(&error);
+    }
+    output.push_str(
+        "\nRun `cargo run -- install` from the config checkout to converge ~/.claude/skills.",
+    );
+    Err(output)
+}
+
 struct CodexSkillInstallationCheck {
     skills_dir: PathBuf,
     checked_prompt_input: bool,
@@ -246,7 +284,7 @@ fn codex_skill_installation_check(
     require_dir(&skills_dir, "config skills directory")?;
     validate_config_skills(config_root)?;
     let codex_skill_plan = prepare_codex_skill_links(&skills_dir, home_dir)?;
-    let mut errors = codex_skill_link_errors(&codex_skill_plan);
+    let mut errors = skill_link_errors(&codex_skill_plan);
     errors.extend(codex_config_errors(home_dir)?);
     let checked_prompt_input = is_current_home(home_dir);
     if checked_prompt_input {
@@ -270,6 +308,27 @@ fn codex_skill_installation_check(
         checked_prompt_input,
         errors,
     })
+}
+
+struct ClaudeSkillInstallationCheck {
+    skills_dir: PathBuf,
+    errors: Vec<String>,
+}
+
+fn claude_skill_installation_check(
+    config_root: &Path,
+    home_dir: &Path,
+) -> Result<ClaudeSkillInstallationCheck> {
+    let agents_dir = config_root.join(".agents");
+    let skills_dir = agents_dir.join("skills");
+
+    require_dir(&agents_dir, "config agents directory")?;
+    require_dir(&skills_dir, "config skills directory")?;
+    validate_config_skills(config_root)?;
+    let claude_skill_plan = prepare_claude_skill_links(&skills_dir, home_dir)?;
+    let errors = skill_link_errors(&claude_skill_plan);
+
+    Ok(ClaudeSkillInstallationCheck { skills_dir, errors })
 }
 
 fn managed_install_link_errors(config_root: &Path, home_dir: &Path) -> Result<Vec<String>> {
@@ -696,12 +755,13 @@ fn is_probably_config_tools_binary(bytes: &[u8]) -> bool {
         .any(|window| window == b"config-tools")
 }
 
-struct CodexSkillLinkPlan {
+struct SkillLinkPlan {
+    label: &'static str,
     links: Vec<(PathBuf, PathBuf)>,
     stale_managed_links: Vec<PathBuf>,
 }
 
-impl CodexSkillLinkPlan {
+impl SkillLinkPlan {
     fn custom_skill_names(&self) -> Result<Vec<String>> {
         self.links
             .iter()
@@ -718,19 +778,31 @@ impl CodexSkillLinkPlan {
     }
 }
 
-fn prepare_codex_skill_links(skills_dir: &Path, home_dir: &Path) -> Result<CodexSkillLinkPlan> {
+fn prepare_codex_skill_links(skills_dir: &Path, home_dir: &Path) -> Result<SkillLinkPlan> {
     let codex_skills_dir = home_dir.join(".codex/skills");
     let system_skills_dir = codex_skills_dir.join(".system");
     require_dir(&system_skills_dir, "Codex system skills directory")?;
     verify_codex_system_skills(&system_skills_dir)?;
+    prepare_skill_links(skills_dir, &codex_skills_dir, "Codex")
+}
 
-    let links = codex_skill_links(skills_dir, &codex_skills_dir)?;
-    let stale_managed_links =
-        stale_managed_codex_skill_links(&codex_skills_dir, skills_dir, &links)?;
+fn prepare_claude_skill_links(skills_dir: &Path, home_dir: &Path) -> Result<SkillLinkPlan> {
+    let claude_skills_dir = home_dir.join(".claude/skills");
+    prepare_skill_links(skills_dir, &claude_skills_dir, "Claude Code")
+}
+
+fn prepare_skill_links(
+    skills_dir: &Path,
+    target_skills_dir: &Path,
+    label: &'static str,
+) -> Result<SkillLinkPlan> {
+    let links = skill_links(skills_dir, target_skills_dir)?;
+    let stale_managed_links = stale_managed_skill_links(target_skills_dir, skills_dir, &links)?;
     for (source, target) in &links {
-        verify_codex_skill_target(source, target)?;
+        verify_skill_target(source, target, label)?;
     }
-    Ok(CodexSkillLinkPlan {
+    Ok(SkillLinkPlan {
+        label,
         links,
         stale_managed_links,
     })
@@ -901,42 +973,44 @@ fn collect_json_text_fields(value: &serde_json::Value, output: &mut String) {
     }
 }
 
-fn apply_codex_skill_links(plan: CodexSkillLinkPlan) -> Result<()> {
+fn apply_skill_links(plan: SkillLinkPlan) -> Result<()> {
+    let label = plan.label;
     for target in plan.stale_managed_links {
         fs::remove_file(&target).map_err(|err| {
             format!(
-                "{}: cannot remove stale managed Codex skill symlink: {err}",
+                "{}: cannot remove stale managed {label} skill symlink: {err}",
                 target.display()
             )
         })?;
         println!(
-            "Removed stale managed Codex skill symlink: {}",
+            "Removed stale managed {label} skill symlink: {}",
             target.display()
         );
     }
     for (source, target) in plan.links {
-        link_codex_skill(&source, &target)?;
+        link_skill(&source, &target, label)?;
     }
     Ok(())
 }
 
-fn codex_skill_link_errors(plan: &CodexSkillLinkPlan) -> Vec<String> {
+fn skill_link_errors(plan: &SkillLinkPlan) -> Vec<String> {
+    let label = plan.label;
     let mut errors = Vec::new();
     for target in &plan.stale_managed_links {
         errors.push(format!(
-            "{} is a stale managed Codex skill symlink",
+            "{} is a stale managed {label} skill symlink",
             target.display()
         ));
     }
     for (source, target) in &plan.links {
         match fs::symlink_metadata(target) {
             Ok(metadata) if metadata.file_type().is_symlink() => {
-                if let Err(err) = verify_codex_skill_target(source, target) {
+                if let Err(err) = verify_skill_target(source, target, label) {
                     errors.push(err);
                 }
             }
             Ok(_) => errors.push(format!(
-                "{} exists but is not the expected Codex skill symlink to {}",
+                "{} exists but is not the expected {label} skill symlink to {}",
                 target.display(),
                 source.display()
             )),
@@ -946,7 +1020,7 @@ fn codex_skill_link_errors(plan: &CodexSkillLinkPlan) -> Vec<String> {
                 source.display()
             )),
             Err(err) => errors.push(format!(
-                "{}: cannot inspect Codex skill target: {err}",
+                "{}: cannot inspect {label} skill target: {err}",
                 target.display()
             )),
         }
@@ -955,23 +1029,20 @@ fn codex_skill_link_errors(plan: &CodexSkillLinkPlan) -> Vec<String> {
     errors
 }
 
-fn codex_skill_links(
-    skills_dir: &Path,
-    codex_skills_dir: &Path,
-) -> Result<Vec<(PathBuf, PathBuf)>> {
+fn skill_links(skills_dir: &Path, target_skills_dir: &Path) -> Result<Vec<(PathBuf, PathBuf)>> {
     discover_custom_skills(skills_dir)?
         .into_iter()
         .map(|skill_dir| {
             let name = skill_dir
                 .file_name()
                 .ok_or_else(|| format!("{}: skill directory has no name", skill_dir.display()))?;
-            Ok((skill_dir.clone(), codex_skills_dir.join(name)))
+            Ok((skill_dir.clone(), target_skills_dir.join(name)))
         })
         .collect()
 }
 
-fn stale_managed_codex_skill_links(
-    codex_skills_dir: &Path,
+fn stale_managed_skill_links(
+    target_skills_dir: &Path,
     skills_dir: &Path,
     active_links: &[(PathBuf, PathBuf)],
 ) -> Result<Vec<PathBuf>> {
@@ -982,37 +1053,34 @@ fn stale_managed_codex_skill_links(
     let managed_skills_dir = normalize_path(skills_dir);
     let mut stale_links = Vec::new();
 
-    for entry in fs::read_dir(codex_skills_dir).map_err(|err| {
-        format!(
-            "{}: cannot read Codex skills directory: {err}",
-            codex_skills_dir.display()
-        )
-    })? {
+    let entries = match fs::read_dir(target_skills_dir) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(err) => {
+            return Err(format!(
+                "{}: cannot read skills directory: {err}",
+                target_skills_dir.display()
+            ))
+        }
+    };
+    for entry in entries {
         let entry = entry.map_err(|err| {
             format!(
-                "{}: cannot inspect Codex skills directory entry: {err}",
-                codex_skills_dir.display()
+                "{}: cannot inspect skills directory entry: {err}",
+                target_skills_dir.display()
             )
         })?;
         let target = entry.path();
         if active_targets.contains(&normalize_path(&target)) {
             continue;
         }
-        let metadata = fs::symlink_metadata(&target).map_err(|err| {
-            format!(
-                "{}: cannot inspect Codex skill entry: {err}",
-                target.display()
-            )
-        })?;
+        let metadata = fs::symlink_metadata(&target)
+            .map_err(|err| format!("{}: cannot inspect skill entry: {err}", target.display()))?;
         if !metadata.file_type().is_symlink() {
             continue;
         }
-        let link_target = fs::read_link(&target).map_err(|err| {
-            format!(
-                "{}: cannot read Codex skill symlink: {err}",
-                target.display()
-            )
-        })?;
+        let link_target = fs::read_link(&target)
+            .map_err(|err| format!("{}: cannot read skill symlink: {err}", target.display()))?;
         let resolved = normalize_existing_ancestor(&resolve_link_target(&target, &link_target)?);
         if resolved.starts_with(&managed_skills_dir) {
             stale_links.push(target);
@@ -1132,10 +1200,10 @@ fn verify_codex_system_skills(system_skills_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-fn verify_codex_skill_target(source: &Path, target: &Path) -> Result<()> {
+fn verify_skill_target(source: &Path, target: &Path, label: &str) -> Result<()> {
     let source_resolved = source.canonicalize().map_err(|err| {
         format!(
-            "{}: cannot resolve Codex skill source: {err}",
+            "{}: cannot resolve {label} skill source: {err}",
             source.display()
         )
     })?;
@@ -1143,16 +1211,13 @@ fn verify_codex_skill_target(source: &Path, target: &Path) -> Result<()> {
     match fs::symlink_metadata(target) {
         Ok(metadata) if metadata.file_type().is_symlink() => {
             let target_resolved = target.canonicalize().map_err(|err| {
-                format!(
-                    "{}: cannot resolve Codex skill symlink: {err}",
-                    target.display()
-                )
+                format!("{}: cannot resolve {label} skill symlink: {err}", target.display())
             })?;
             if target_resolved == source_resolved {
                 Ok(())
             } else {
                 let existing = fs::read_link(target).map_err(|err| {
-                    format!("{}: cannot read Codex skill symlink: {err}", target.display())
+                    format!("{}: cannot read {label} skill symlink: {err}", target.display())
                 })?;
                 Err(format!(
                     "Error: {} is already a symlink to {}\nBack it up and remove it first if you want to replace it.",
@@ -1162,40 +1227,43 @@ fn verify_codex_skill_target(source: &Path, target: &Path) -> Result<()> {
             }
         }
         Ok(_) => Err(format!(
-            "Error: {} already exists and is not the expected Codex skill symlink.\nBack it up and remove it first, then re-run this command.",
+            "Error: {} already exists and is not the expected {label} skill symlink.\nBack it up and remove it first, then re-run this command.",
             target.display()
         )),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(err) => Err(format!(
-            "{}: cannot inspect Codex skill target: {err}",
+            "{}: cannot inspect {label} skill target: {err}",
             target.display()
         )),
     }
 }
 
-fn link_codex_skill(source: &Path, target: &Path) -> Result<()> {
+fn link_skill(source: &Path, target: &Path, label: &str) -> Result<()> {
     if target.exists() || target.is_symlink() {
-        println!("Codex skill already linked correctly: {}", target.display());
+        println!(
+            "{label} skill already linked correctly: {}",
+            target.display()
+        );
     } else {
-        create_codex_skill_symlink(source, target)?;
-        println!("Linked Codex skill -> {}", source.display());
+        create_skill_symlink(source, target, label)?;
+        println!("Linked {label} skill -> {}", source.display());
     }
     Ok(())
 }
 
-fn create_codex_skill_symlink(source: &Path, target: &Path) -> Result<()> {
+fn create_skill_symlink(source: &Path, target: &Path, label: &str) -> Result<()> {
     #[cfg(unix)]
     {
         unix_fs::symlink(source, target).map_err(|err| {
             format!(
-                "{}: cannot create Codex skill symlink: {err}",
+                "{}: cannot create {label} skill symlink: {err}",
                 target.display()
             )
         })
     }
     #[cfg(not(unix))]
     {
-        let _ = (source, target);
+        let _ = (source, target, label);
         Err("install requires unix symlink support".to_string())
     }
 }
