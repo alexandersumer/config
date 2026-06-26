@@ -3,13 +3,9 @@ name: surgical-edit
 description: Implement a requested code change without a formal plan. Use when the user asks to edit, tweak, add, remove, rename, or adjust behavior and the work should be completed directly.
 ---
 
-## Validation reuse and check scope
+## Proof policy
 
-Before running a slow, broad, external, stateful, or CI-equivalent command, check whether this conversation or current-SHA CI/artifacts already contain usable proof. Reuse prior passing evidence instead of rerunning only when it is visible, ran after the last relevant edit, covers the same command/scenario and behavior, edge case, or public boundary, and no touched file, config, dependency, fixture, generated output, runtime state, or environment assumption it depends on changed afterward. If uncertain, run the narrowest freshness check that resolves the uncertainty before escalating.
-
-Default to the narrowest honest proof. Run broader suites, full builds, CI reruns, or live/E2E flows only when required by blast radius, merge/release policy, changed shared API/schema/build/test infrastructure/dependencies/auth/security/persistence/concurrency, merge/conflict integration risk, missing targeted seams, or because the broad command is the only proof that covers the behavior.
-
-Final reports must distinguish reused proof, newly run commands, and checks intentionally not run.
+Reuse proof only when it is visible, same-scope, after the last relevant edit, and not invalidated by touched files, config, dependencies, fixtures, generated output, runtime state, or environment. Otherwise run the narrowest check that proves the claim, artifact, or behavior; broaden only when risk or policy requires it. Final reports must separate reused proof, new commands, and checks not run.
 
 Apply `changes`, else `$ARGUMENTS`, else the conversation request, else the obvious requested change from the current branch/worktree context.
 
@@ -21,7 +17,7 @@ A complete edit may include production code, wiring, fixtures, tests, docs, or c
 
 Prefer fixing the root cause over patching the nearest symptom. If the requested change conflicts with repo conventions, existing behavior, or safety, stop and explain the conflict instead of improvising.
 
-Validate through the reuse/scope policy: reuse fresh prior proof when valid, otherwise run the narrowest check that proves the changed behavior. Add or update a targeted check when the repo has an appropriate seam and the change would otherwise be unproven. Run broader checks only when justified. Do not claim fixed, complete, ready, or passing without fresh proof from this conversation or current-SHA artifacts.
+Validate through the proof policy: reuse proof when valid, otherwise run the narrowest check that proves the changed behavior. Add or update a targeted check when the repo has an appropriate seam and the change would otherwise be unproven. Run broader checks only when justified. Do not claim fixed, complete, ready, or passing without fresh or validly reused proof.
 
 Final:
 - Intent: `<requested behavior>`

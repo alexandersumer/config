@@ -3,13 +3,9 @@ name: clean-up-feature-flag
 description: Remove a rolled-out flag
 ---
 
-## Validation reuse and check scope
+## Proof policy
 
-Before running a slow, broad, external, stateful, or CI-equivalent command, check whether this conversation or current-SHA CI/artifacts already contain usable proof. Reuse prior passing evidence instead of rerunning only when it is visible, ran after the last relevant edit, covers the same command/scenario and behavior, edge case, or public boundary, and no touched file, config, dependency, fixture, generated output, runtime state, or environment assumption it depends on changed afterward. If uncertain, run the narrowest freshness check that resolves the uncertainty before escalating.
-
-Default to the narrowest honest proof. Run broader suites, full builds, CI reruns, or live/E2E flows only when required by blast radius, merge/release policy, changed shared API/schema/build/test infrastructure/dependencies/auth/security/persistence/concurrency, merge/conflict integration risk, missing targeted seams, or because the broad command is the only proof that covers the behavior.
-
-Final reports must distinguish reused proof, newly run commands, and checks intentionally not run.
+Reuse proof only when it is visible, same-scope, after the last relevant edit, and not invalidated by touched files, config, dependencies, fixtures, generated output, runtime state, or environment. Otherwise run the narrowest check that proves the claim, artifact, or behavior; broaden only when risk or policy requires it. Final reports must separate reused proof, new commands, and checks not run.
 
 Remove fully rolled out flag `flag_key` or `$ARGUMENTS`. Keep enabled behavior. Delete disabled behavior.
 
@@ -19,7 +15,7 @@ Search first for full key, enum/constant/generated names, aliases, and string va
 
 Inline enabled branches. Delete disabled-only tests. Remove unused imports, helpers, types, and config.
 
-Repeat searches until no relevant references remain. Verify retained behavior through a targeted real path; add one if important behavior has no check. Reuse fresh prior proof when valid; run broader tests only when the validation policy justifies them.
+Repeat searches until no relevant references remain. Verify retained behavior through a targeted real path; add one if important behavior has no check. Reuse proof when valid; run broader tests only when the proof policy justifies them.
 
 Final:
 - Removed: `<flag>`

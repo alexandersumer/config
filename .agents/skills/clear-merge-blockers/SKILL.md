@@ -3,13 +3,9 @@ name: clear-merge-blockers
 description: "Clear PR merge blockers by driving one concrete blocker at a time: failed CI, actionable review comments/tasks, conflicts, branch update requirements, or exact human/policy/tooling blockers."
 ---
 
-## Validation reuse and check scope
+## Proof policy
 
-Before running a slow, broad, external, stateful, or CI-equivalent command, check whether this conversation or current-SHA CI/artifacts already contain usable proof. Reuse prior passing evidence instead of rerunning only when it is visible, ran after the last relevant edit, covers the same command/scenario and behavior, edge case, or public boundary, and no touched file, config, dependency, fixture, generated output, runtime state, or environment assumption it depends on changed afterward. If uncertain, run the narrowest freshness check that resolves the uncertainty before escalating.
-
-Default to the narrowest honest proof. Run broader suites, full builds, CI reruns, or live/E2E flows only when required by blast radius, merge/release policy, changed shared API/schema/build/test infrastructure/dependencies/auth/security/persistence/concurrency, merge/conflict integration risk, missing targeted seams, or because the broad command is the only proof that covers the behavior.
-
-Final reports must distinguish reused proof, newly run commands, and checks intentionally not run.
+Reuse proof only when it is visible, same-scope, after the last relevant edit, and not invalidated by touched files, config, dependencies, fixtures, generated output, runtime state, or environment. Otherwise run the narrowest check that proves the claim, artifact, or behavior; broaden only when risk or policy requires it. Final reports must separate reused proof, new commands, and checks not run.
 
 Clear merge blockers for `target`, `$ARGUMENTS`, or the current branch's review. Optimize for the next local-fixable blocker, not for a full PR audit.
 
@@ -58,7 +54,7 @@ Use this path when the branch is conflicted, behind the target branch, blocked b
 3. Fetch the exact remote target branch needed for the update. Determine the repo or PR-preferred update strategy from repository docs, branch policy, PR settings, or sibling practice when available.
 4. If policy requires rebase, linear history, force-push, destructive reset, or another history-rewriting update, stop unless the user explicitly authorized that operation. Otherwise, merge the remote target branch into the current source branch without rewriting branch history.
 5. If conflicts occur, resolve them inline while preserving current branch intent and incorporating incoming target-branch changes. Do not choose one side wholesale just to remove markers. Read conflict context and enough history from both sides; accept incoming removals of feature flags, dead code, deprecated APIs, or temporary constructs this branch did not introduce, then adapt branch code to the removal.
-6. Search for `<<<<<<<`, `=======`, and `>>>>>>>`. Run or reuse fresh proof for the most relevant available check for the merge result under the validation policy. If checks expose merge-caused failures, fix them before completing/publishing or report the exact blocker.
+6. Search for `<<<<<<<`, `=======`, and `>>>>>>>`. Run or reuse fresh proof for the most relevant available check for the merge result under the proof policy. If checks expose merge-caused failures, fix them before completing/publishing or report the exact blocker.
 7. Stage only resolved/intended files and complete the merge or update commit only after conflict markers are gone and known merge-caused failures are handled.
 
 ### Failed required check or CI gate

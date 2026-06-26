@@ -3,13 +3,9 @@ name: fix-failures
 description: Fix real check failures from arguments, pasted errors, local checks, or CI. Use when tests, builds, linters, CI, pipelines, checks, validation, or error output fail and the user wants the root cause fixed with proof.
 ---
 
-## Validation reuse and check scope
+## Proof policy
 
-Before running a slow, broad, external, stateful, or CI-equivalent command, check whether this conversation or current-SHA CI/artifacts already contain usable proof. Reuse prior passing evidence instead of rerunning only when it is visible, ran after the last relevant edit, covers the same command/scenario and behavior, edge case, or public boundary, and no touched file, config, dependency, fixture, generated output, runtime state, or environment assumption it depends on changed afterward. If uncertain, run the narrowest freshness check that resolves the uncertainty before escalating.
-
-Default to the narrowest honest proof. Run broader suites, full builds, CI reruns, or live/E2E flows only when required by blast radius, merge/release policy, changed shared API/schema/build/test infrastructure/dependencies/auth/security/persistence/concurrency, merge/conflict integration risk, missing targeted seams, or because the broad command is the only proof that covers the behavior.
-
-Final reports must distinguish reused proof, newly run commands, and checks intentionally not run.
+Reuse proof only when it is visible, same-scope, after the last relevant edit, and not invalidated by touched files, config, dependencies, fixtures, generated output, runtime state, or environment. Otherwise run the narrowest check that proves the claim, artifact, or behavior; broaden only when risk or policy requires it. Final reports must separate reused proof, new commands, and checks not run.
 
 Fix a real failing check from `error_output`, `$ARGUMENTS`, current-branch CI, or documented local checks. With no arguments, discover the current branch's failing CI/check signal yourself before asking the user for logs.
 
@@ -43,7 +39,7 @@ Do not blindly rerun the same command or CI job. Each run must follow a fix, nar
 
 1. Rerun or reuse fresh proof for the targeted failing check, test, job-equivalent command, or CI job when available. Do not rerun a broad success proof merely to reconfirm it if the same command/gate already passed after the fix and no relevant files changed afterward; use the prior pass or run the narrowest command that covers any new edit.
 2. Compare the original failing signal with the new or reused passing signal or changed diagnostic.
-3. Run or reuse the broader relevant suite, build, lint, or CI gate only when the validation policy justifies it; otherwise name the exact broad-proof blocker or narrower proof used.
+3. Run or reuse the broader relevant suite, build, lint, or CI gate only when the proof policy justifies it; otherwise name the exact broad-proof blocker or narrower proof used.
 4. If adding or changing an automated check, prove when feasible that it fails for the original bug, then restore the fix and rerun green; reuse prior fail/pass proof only when it is same-diff and same-scope.
 5. When publish is authorized by this invocation, publish only a coherent fix, inspect resulting CI, and repeat this evidence-backed loop for new branch-relevant failures until CI is green or a concrete blocker remains.
 

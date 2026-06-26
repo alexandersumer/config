@@ -5,7 +5,8 @@ use crate::install::{
     check_claude_skills_command, check_codex_skills_command, check_install_command, install_command,
 };
 use crate::managed_config::validate_managed_configs;
-use crate::registry::validate_registry;
+use crate::registry::{required_custom_skill_names, validate_registry};
+use std::collections::BTreeSet;
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs as unix_fs;
@@ -32,11 +33,20 @@ pub(crate) fn run_regression_tests() -> Result<()> {
         ("front matter only skill", mutate_front_matter_only_skill),
         ("thin skill body", mutate_thin_skill_body),
         ("placeholder skill body", mutate_placeholder_skill_body),
+        (
+            "verbose proof policy guidance",
+            mutate_verbose_proof_policy_guidance,
+        ),
+        (
+            "narrow proof policy guidance",
+            mutate_narrow_proof_policy_guidance,
+        ),
     ];
     for (name, mutate) in mutations {
         assert_mutation_fails(name, *mutate)?;
     }
     test_new_skill_validate_flow()?;
+    test_required_custom_skill_inventory_matches_current_skills()?;
     test_one_clear_sentence_skill_rewrites_recent_context()?;
     test_real_e2e_automated_tests_skill_requires_edge_case_proof()?;
     test_real_e2e_live_check_skill_rejects_test_lane_proof()?;
@@ -130,6 +140,46 @@ fn test_new_skill_validate_flow() -> Result<()> {
         "--config-root".to_string(),
         fixture.path().display().to_string(),
     ])?;
+    Ok(())
+}
+
+fn test_required_custom_skill_inventory_matches_current_skills() -> Result<()> {
+    let config_root = config_root_from_exe()?;
+    let skills_root = config_root.join(".agents/skills");
+    let mut actual = BTreeSet::new();
+    for entry in fs::read_dir(&skills_root)
+        .map_err(|err| format!("{}: cannot read skills: {err}", skills_root.display()))?
+    {
+        let entry = entry.map_err(|err| format!("cannot inspect skill entry: {err}"))?;
+        let path = entry.path();
+        if !entry
+            .file_type()
+            .map_err(|err| format!("{}: cannot inspect skill type: {err}", path.display()))?
+            .is_dir()
+            || entry.file_name().to_string_lossy().starts_with('.')
+            || !path.join("SKILL.md").is_file()
+        {
+            continue;
+        }
+        actual.insert(entry.file_name().to_string_lossy().to_string());
+    }
+
+    let expected: BTreeSet<String> = required_custom_skill_names()
+        .iter()
+        .map(|name| (*name).to_string())
+        .collect();
+
+    if actual != expected {
+        let missing_from_required: Vec<&str> =
+            actual.difference(&expected).map(String::as_str).collect();
+        let missing_from_tree: Vec<&str> =
+            expected.difference(&actual).map(String::as_str).collect();
+        return Err(format!(
+            "required custom skill inventory drifted; missing from REQUIRED_CUSTOM_SKILL_NAMES: {:?}; missing from .agents/skills: {:?}",
+            missing_from_required, missing_from_tree
+        ));
+    }
+
     Ok(())
 }
 
@@ -1624,4 +1674,52 @@ fn mutate_placeholder_skill_body(config_root: &Path) -> Result<&'static str> {
         )
     })?;
     Ok("not a placeholder")
+}
+
+fn mutate_verbose_proof_policy_guidance(config_root: &Path) -> Result<&'static str> {
+    replace_first_skill_body(
+        config_root,
+        "## Validation reuse and check scope\n\nBefore running a slow, broad, external, stateful, or CI-equivalent command, check whether this conversation already contains usable proof.\n\nRead the relevant files before editing. Make the smallest correct change that matches existing naming, layering, error handling, tests, and comment density. If the request remains ambiguous after reading context, ask one focused question and stop instead of guessing.\n",
+    )?;
+    Ok("stale or too narrow")
+}
+
+fn mutate_narrow_proof_policy_guidance(config_root: &Path) -> Result<&'static str> {
+    replace_first_skill_body(
+        config_root,
+        "## Proof policy\n\nReuse proof only when it is visible, same-scope, after the last relevant edit, and not invalidated by touched files, config, dependencies, fixtures, generated output, runtime state, or environment. Otherwise run the narrowest check that proves the claim or behavior; broaden only for blast radius or policy. Final reports must separate reused proof, new commands, and checks not run.\n\nRead the relevant files before editing. Make the smallest correct change that matches existing naming, layering, error handling, tests, and comment density. If the request remains ambiguous after reading context, ask one focused question and stop instead of guessing.\n",
+    )?;
+    Ok("stale or too narrow")
+}
+
+fn replace_first_skill_body(config_root: &Path, body: &str) -> Result<()> {
+    let name = first_skill_name(config_root)?;
+    let skill_path = config_root
+        .join(".agents/skills")
+        .join(&name)
+        .join("SKILL.md");
+    let text = fs::read_to_string(&skill_path)
+        .map_err(|err| format!("{}: cannot read fixture skill: {err}", skill_path.display()))?;
+    let closing = text
+        .lines()
+        .enumerate()
+        .skip(1)
+        .find_map(|(index, line)| (line == "---").then_some(index))
+        .ok_or_else(|| {
+            format!(
+                "{}: fixture skill missing front matter",
+                skill_path.display()
+            )
+        })?;
+    let front_matter = text
+        .lines()
+        .take(closing + 1)
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(&skill_path, format!("{front_matter}\n\n{body}")).map_err(|err| {
+        format!(
+            "{}: cannot write fixture skill: {err}",
+            skill_path.display()
+        )
+    })
 }

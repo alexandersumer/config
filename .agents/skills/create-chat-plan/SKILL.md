@@ -1,6 +1,6 @@
 ---
 name: create-chat-plan
-description: Create a lightweight implementation-ready plan directly in chat. Use when planning should be robust, interrogated, and verified upfront without writing plan files.
+description: Create a lightweight implementation-ready plan directly in chat. Use when planning should be grounded, interrogated, and verified upfront without writing plan files.
 ---
 
 Use `topic`, else `$ARGUMENTS`, else infer the planning target from the conversation, active design, current branch, or referenced files. Produce the plan in chat only. Do not create markdown files, do not edit code, and do not invoke subagents unless the user explicitly asks for deeper research.
@@ -11,7 +11,7 @@ If the target, success criteria, or constraints are unclear after context readin
 
 Define acceptance before implementation to avoid biased verification. Acceptance criteria must describe externally observable behavior, compatibility boundaries, and important edge cases before any implementation steps. The verification plan must name the narrowest checks that prove those criteria, the regression signal that would fail without the change when applicable, and any broader checks justified by blast radius. If no good automated seam exists, name the gap and the manual proof required.
 
-When planning verification, include fresh prior proof as an acceptable signal only when it is visible, ran after the last relevant edit, covers the same behavior/edge/public boundary, and no files/config/dependencies/runtime assumptions it depends on changed afterward. Default to the narrowest honest check; justify broad suites, full builds, CI reruns, or live/E2E only by blast radius, policy, shared contracts, build/test infrastructure, dependencies, auth/security/persistence/concurrency risk, merge integration risk, missing targeted seams, or lack of narrower proof.
+When planning verification, allow reused proof only when it is visible, same-scope, after the last relevant edit, and not invalidated by files, config, dependencies, fixtures, generated output, runtime state, or environment. Otherwise name the narrowest check that proves the claim, artifact, or behavior. Justify broad suites, full builds, CI, or live/E2E only when risk or policy requires it: shared contracts, infrastructure changes, auth/security/persistence/concurrency risk, merge risk, or missing targeted seams.
 
 Interrogate the plan before presenting it. Run a brief pre-mortem against missing data/API/schema compatibility, migration and rollback needs, concurrency or idempotency risks, permissions/security concerns, user-visible behavior, observability, test seams, ownership boundaries, and hidden coupling. Include only risks that are concrete for the scoped work, each paired with the design response.
 

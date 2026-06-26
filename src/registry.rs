@@ -16,6 +16,21 @@ const SKILL_FRONT_MATTER_KEYS: &[&str] = &[
 ];
 const MIN_SKILL_BODY_WORDS: usize = 40;
 const MIN_SKILL_BODY_LINES: usize = 3;
+const PROOF_POLICY_HEADING: &str = "## Proof policy";
+const MAX_PROOF_POLICY_WORDS: usize = 75;
+const STALE_PROOF_POLICY_PATTERNS: &[&str] = &[
+    "## Validation reuse and check scope",
+    "Before running a slow, broad, external, stateful, or CI-equivalent command",
+    "the narrowest check that proves the claim or behavior",
+    "the narrowest check that proves the behavior",
+    "broaden only for blast radius or policy",
+    "only by blast radius, policy",
+];
+const REQUIRED_PROOF_POLICY_PHRASES: &[&str] = &[
+    "claim, artifact, or behavior",
+    "risk or policy requires it",
+    "Final reports must separate reused proof, new commands, and checks not run",
+];
 const REQUIRED_CUSTOM_SKILL_NAMES: &[&str] = &[
     "address-comments",
     "architecture-review-deep",
@@ -30,6 +45,7 @@ const REQUIRED_CUSTOM_SKILL_NAMES: &[&str] = &[
     "design-review-solo",
     "diagnose",
     "execute-plan",
+    "external-peer-review",
     "fix-failures",
     "git-publish",
     "git-publish-to-origin",
@@ -50,6 +66,7 @@ const REQUIRED_CUSTOM_SKILL_NAMES: &[&str] = &[
     "surgical-edit",
     "sync-main",
     "understand-system",
+    "update-agi-essay",
     "write-up",
 ];
 
@@ -149,11 +166,57 @@ fn validate_skill_body(path: &Path, metadata: &Mapping, body: &str) -> Result<()
         ));
     }
 
+    validate_skill_proof_policy(path, trimmed)?;
+
     Ok(())
 }
 
 fn normalize_for_body_comparison(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn validate_skill_proof_policy(path: &Path, body: &str) -> Result<()> {
+    for forbidden in STALE_PROOF_POLICY_PATTERNS {
+        if body.contains(forbidden) {
+            return Err(format!(
+                "{}: skill proof guidance is stale or too narrow; found {forbidden:?}",
+                path.display()
+            ));
+        }
+    }
+
+    let Some(policy) = first_paragraph_after_heading(body, PROOF_POLICY_HEADING) else {
+        return Ok(());
+    };
+
+    let word_count = policy.split_whitespace().count();
+    if word_count > MAX_PROOF_POLICY_WORDS {
+        return Err(format!(
+            "{}: Proof policy is {word_count} words; keep it under {MAX_PROOF_POLICY_WORDS}",
+            path.display()
+        ));
+    }
+
+    for required in REQUIRED_PROOF_POLICY_PHRASES {
+        if !policy.contains(required) {
+            return Err(format!(
+                "{}: Proof policy is missing required scope phrase {required:?}",
+                path.display()
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn first_paragraph_after_heading<'a>(text: &'a str, heading: &str) -> Option<&'a str> {
+    let start = text.find(heading)?;
+    let body_start = start + heading.len();
+    let after_heading = &text[body_start..];
+    after_heading
+        .split("\n\n")
+        .map(str::trim)
+        .find(|paragraph| !paragraph.is_empty())
 }
 
 fn validate_skill_name(value: Option<&Value>, context: &str) -> Result<String> {
@@ -315,6 +378,10 @@ fn require_required_custom_skills(skills_root: &Path, seen_names: &HashSet<Strin
     }
 }
 
+pub(crate) fn required_custom_skill_names() -> &'static [&'static str] {
+    REQUIRED_CUSTOM_SKILL_NAMES
+}
+
 pub(crate) fn validate_registry(config_root: &Path) -> Vec<String> {
     match collect_skill_names(config_root) {
         Ok(_) => Vec::new(),
@@ -396,5 +463,65 @@ If the request remains ambiguous after reading context, ask one focused question
 "#;
 
         validate_skill_body(path, metadata, body).expect("real instructions are valid");
+    }
+
+    #[test]
+    fn validate_skill_body_accepts_concise_proof_policy() {
+        let value = yaml_value(
+            r#"
+name: surgical-edit
+description: Apply a narrow requested code change.
+"#,
+        );
+        let metadata = value.as_mapping().expect("front matter mapping");
+        let path = Path::new(".agents/skills/surgical-edit/SKILL.md");
+        let body = r#"
+## Proof policy
+
+Reuse proof only when it is visible, same-scope, after the last relevant edit, and not invalidated by touched files, config, dependencies, fixtures, generated output, runtime state, or environment. Otherwise run the narrowest check that proves the claim, artifact, or behavior; broaden only when risk or policy requires it. Final reports must separate reused proof, new commands, and checks not run.
+
+Read the relevant files before editing, then make the smallest correct change that matches the existing naming, layering, error handling, and tests.
+If the request remains ambiguous after reading context, ask one focused question and stop instead of guessing.
+"#;
+
+        validate_skill_body(path, metadata, body).expect("concise proof policy is valid");
+    }
+
+    #[test]
+    fn validate_skill_body_rejects_stale_or_narrow_proof_policy() {
+        let value = yaml_value(
+            r#"
+name: surgical-edit
+description: Apply a narrow requested code change.
+"#,
+        );
+        let metadata = value.as_mapping().expect("front matter mapping");
+        let path = Path::new(".agents/skills/surgical-edit/SKILL.md");
+        let tail = "Read the relevant files before editing. Make the smallest correct change that matches existing naming, layering, error handling, tests, and comment density. If the request remains ambiguous after reading context, ask one focused question and stop instead of guessing.";
+
+        for (body, expected) in [
+            (
+                format!(
+                    "## Validation reuse and check scope\n\nBefore running a slow, broad, external, stateful, or CI-equivalent command, check whether this conversation already contains usable proof.\n\n{tail}"
+                ),
+                "stale or too narrow",
+            ),
+            (
+                format!(
+                    "## Proof policy\n\nReuse proof only when it is visible, same-scope, after the last relevant edit, and not invalidated by touched files, config, dependencies, fixtures, generated output, runtime state, or environment. Otherwise run the narrowest check that proves the claim or behavior; broaden only for blast radius or policy. Final reports must separate reused proof, new commands, and checks not run.\n\n{tail}"
+                ),
+                "stale or too narrow",
+            ),
+            (
+                format!(
+                    "## Proof policy\n\nReuse proof only when it is visible and current. Final reports must separate reused proof, new commands, and checks not run.\n\n{tail}"
+                ),
+                "missing required scope phrase",
+            ),
+        ] {
+            let error = validate_skill_body(path, metadata, &body)
+                .expect_err("stale or narrow proof policy should fail validation");
+            assert!(error.contains(expected), "{error}");
+        }
     }
 }

@@ -3,13 +3,9 @@ name: address-comments
 description: Address actionable PR comments and publish coherent fixes
 ---
 
-## Validation reuse and check scope
+## Proof policy
 
-Before running a slow, broad, external, stateful, or CI-equivalent command, check whether this conversation or current-SHA CI/artifacts already contain usable proof. Reuse prior passing evidence instead of rerunning only when it is visible, ran after the last relevant edit, covers the same command/scenario and behavior, edge case, or public boundary, and no touched file, config, dependency, fixture, generated output, runtime state, or environment assumption it depends on changed afterward. If uncertain, run the narrowest freshness check that resolves the uncertainty before escalating.
-
-Default to the narrowest honest proof. Run broader suites, full builds, CI reruns, or live/E2E flows only when required by blast radius, merge/release policy, changed shared API/schema/build/test infrastructure/dependencies/auth/security/persistence/concurrency, merge/conflict integration risk, missing targeted seams, or because the broad command is the only proof that covers the behavior.
-
-Final reports must distinguish reused proof, newly run commands, and checks intentionally not run.
+Reuse proof only when it is visible, same-scope, after the last relevant edit, and not invalidated by touched files, config, dependencies, fixtures, generated output, runtime state, or environment. Otherwise run the narrowest check that proves the claim, artifact, or behavior; broaden only when risk or policy requires it. Final reports must separate reused proof, new commands, and checks not run.
 
 Address actionable comments on `pr_target`, or the current branch PR. With no arguments, discover the current branch PR and its open review comments yourself before asking the user to paste comments.
 
@@ -51,7 +47,7 @@ Do not blindly refetch or repush. Each loop must follow a fix, narrow classifica
 ## Verify and publish
 
 1. Run or reuse fresh proof for the narrowest targeted checks that prove the addressed comments: unit test, typecheck, lint, schema validation, build step, or manual proof when no automated seam exists.
-2. Run broader checks only when the validation policy justifies them. If no check applies or a broader check cannot run, name the exact reason or narrower proof used.
+2. Run broader checks only when the proof policy justifies them. If no check applies or a broader check cannot run, name the exact reason or narrower proof used.
 3. If a new or changed automated check is part of the fix, prove when feasible that it fails for the original issue, then restore the fix and rerun green; reuse prior fail/pass proof only when it is same-diff and same-scope.
 4. Stage only intended comment-fix changes. If pre-existing unpushed commits or local changes are unrelated to the comment fixes, stop and ask how to split or scope the publish.
 5. Commit with a grounded Conventional Commit subject and push the current branch to `origin`, setting upstream if needed.

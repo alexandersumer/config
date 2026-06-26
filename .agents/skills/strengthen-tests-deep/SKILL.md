@@ -5,13 +5,9 @@ description: Heavyweight test review and edit workflow using fresh-context Revie
 
 # Strengthen Tests Deep
 
-## Validation reuse and check scope
+## Proof policy
 
-Before running a slow, broad, external, stateful, or CI-equivalent command, check whether this conversation or current-SHA CI/artifacts already contain usable proof. Reuse prior passing evidence instead of rerunning only when it is visible, ran after the last relevant edit, covers the same command/scenario and behavior, edge case, or public boundary, and no touched file, config, dependency, fixture, generated output, runtime state, or environment assumption it depends on changed afterward. If uncertain, run the narrowest freshness check that resolves the uncertainty before escalating.
-
-Default to the narrowest honest proof. Run broader suites, full builds, CI reruns, or live/E2E flows only when required by blast radius, merge/release policy, changed shared API/schema/build/test infrastructure/dependencies/auth/security/persistence/concurrency, merge/conflict integration risk, missing targeted seams, or because the broad command is the only proof that covers the behavior.
-
-Final reports must distinguish reused proof, newly run commands, and checks intentionally not run.
+Reuse proof only when it is visible, same-scope, after the last relevant edit, and not invalidated by touched files, config, dependencies, fixtures, generated output, runtime state, or environment. Otherwise run the narrowest check that proves the claim, artifact, or behavior; broaden only when risk or policy requires it. Final reports must separate reused proof, new commands, and checks not run.
 
 This is the heavyweight test-strengthening path. You do not strengthen tests by guessing from the patch or by only polishing tests that already exist. This is not review-only: after validation, make the justified test-code improvements in the workspace instead of merely recommending them. Fresh-context Reviewers identify candidate realistic regressions, missing coverage, and weak assertions. Use the current harness's configured direct reviewer-agent mechanism. If the current harness does not expose a direct reviewer-agent mechanism, stop with `Review inconclusive` and name the missing capability. Do not simulate Reviewers by shelling out to arbitrary agent CLIs or unmanaged wrappers. Reviewer output is candidate evidence, not authority. This agent owns validation, editing, checks, and final judgment.
 
@@ -47,7 +43,7 @@ This is the heavyweight test-strengthening path. You do not strengthen tests by 
 
 6. **Implement only directly validated improvements.** Validated improvements are mandatory edits, not suggestions: modify existing tests or add new test code at the narrowest useful seam. Prefer public behavior over private fields or mock call order. When tests exist, strengthen or extend them at the narrowest useful level. When no suitable test exists, create the smallest idiomatic test file in the discovered harness that exercises the changed public path end-to-end enough to fail for the named regression. Replace weak assertions with exact observable outcomes. Assert error messages or log records only when they are part of the public/operator contract or catch a realistic regression; avoid brittle wording checks and log-volume assertions. Add edge/failure cases only when tied to real changed paths. Reject tests that only prove mocks, test-only production APIs, or implementation details. If a mock becomes more complex than the behavior, prefer a public seam or integration path. Skip trivial getters, generated code, framework boilerplate, style conventions, and broad coverage goals.
 
-7. **Run checks.** Validate through the reuse/scope policy: reuse fresh prior proof when valid, otherwise run the targeted tests that prove each improvement, then the broader relevant check only when justified. If no check applies, say why.
+7. **Run checks.** Validate through the proof policy: reuse proof when valid, otherwise run the targeted tests that prove each improvement, then the broader relevant check only when justified. If no check applies, say why.
 
 8. **Report.** If any Reviewer returned invalid output after retry or you cannot obtain required validation evidence, output `Review inconclusive` and the failed role or evidence gap. For each touched test, output:
 
