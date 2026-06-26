@@ -3,6 +3,14 @@ name: real-e2e-automated-tests
 description: "Create or harden automated real end-to-end tests. Use when the user wants durable E2E regression coverage, smoke or acceptance tests, CI/test-lane proof, or an automated test that boots the real system and hits public boundaries. The skill writes the test, wires it into the right lane, runs it, and proves it catches real regressions unless blocked by unavailable infrastructure."
 ---
 
+## Validation reuse and check scope
+
+Before running a slow, broad, external, stateful, or CI-equivalent command, check whether this conversation or current-SHA CI/artifacts already contain usable proof. Reuse prior passing evidence instead of rerunning only when it is visible, ran after the last relevant edit, covers the same command/scenario and behavior, edge case, or public boundary, and no touched file, config, dependency, fixture, generated output, runtime state, or environment assumption it depends on changed afterward. If uncertain, run the narrowest freshness check that resolves the uncertainty before escalating.
+
+Default to the narrowest honest proof. Run broader suites, full builds, CI reruns, or live/E2E flows only when required by blast radius, merge/release policy, changed shared API/schema/build/test infrastructure/dependencies/auth/security/persistence/concurrency, merge/conflict integration risk, missing targeted seams, or because the broad command is the only proof that covers the behavior.
+
+Final reports must distinguish reused proof, newly run commands, and checks intentionally not run.
+
 Create an automated **real** end-to-end test for `scope`, `$ARGUMENTS`, recent changes, or the conversation target, and keep going until the test exists, is wired into the appropriate lane, and has been validated or is blocked by a concrete infrastructure limitation. Real means the production engine is running and the test drives the same public boundary a user, service, CLI, worker, or protocol client depends on.
 
 This skill is for durable automated coverage. It is not the right skill for one-off live QA that operates a real system without writing tests or running CI/test lanes; use `real-e2e-live-check` for that.
@@ -71,8 +79,8 @@ Implementation loop:
 2. Add the smallest high-signal automated test that drives the real boundary from outside the engine and observes the business outcome. The automated E2E must include at least one meaningful edge/negative assertion through the same real public boundary unless blocked by concrete infrastructure or safety limits; choose the highest-risk edge from the matrix rather than broad exhaustive coverage.
 3. Wire the test into the existing E2E/smoke command and CI/test lane, or add the smallest adjacent lane needed for the same purpose.
 4. Add or update a policy/guardrail test when needed to prevent future drift back to fakes, internal imports, or untracked CI wiring.
-5. Run the exact automated E2E command and the nearest broader check. Fix failures caused by the new test or wiring. If infrastructure is unavailable locally, perform blocker burn-down, run the non-network policy/compile checks that still apply, and state the missing command as blocked only when no safe source-backed next action remains.
-6. Prove the automated E2E would catch a realistic regression when safe: make one temporary reversible break in production code, config, or fixture; confirm the E2E fails for the expected reason; restore; rerun green. If unsafe, explain the exact reason.
+5. Run or reuse fresh proof for the exact automated E2E command and the nearest broader check required by the validation policy. Reuse is valid only when the same lane/scenario, current effective diff, real boundary, runtime/backends, edge or negative case, and CI/test-lane wiring were proven after the last relevant edit. If stale, rerun the narrowest E2E lane first. Fix failures caused by the new test or wiring. If infrastructure is unavailable locally, perform blocker burn-down, run the non-network policy/compile checks that still apply, and state the missing command as blocked only when no safe source-backed next action remains.
+6. Prove or reuse fail/pass proof that the automated E2E would catch a realistic regression when safe: make one temporary reversible break in production code, config, or fixture; confirm the E2E fails for the expected reason; restore; rerun green. Do not repeat this if the same realistic regression was already observed failing and restored passing for the current effective diff. If unsafe, explain the exact reason.
 
 Completion gate before final: reread the automated E2E contract and answer each gate yes/no. If any gate is no, keep going or report blocked only after blocker burn-down; never produce a complete confidence line.
 - Source-backed route map completed, with no unresolved realness-critical unknown.
@@ -82,7 +90,7 @@ Completion gate before final: reread the automated E2E contract and answer each 
 - Test is wired into the discoverable local E2E/smoke command and CI/test lane, or missing lane ownership is named as the blocker.
 - Main assertion observes durable product outcome through the real boundary.
 - Highest-risk edge or negative assertion passed through the same boundary, or omission has a concrete reason.
-- Realistic regression proof failed for the expected reason, then reran green after restore, unless unsafe and explicitly justified.
+- Realistic regression proof failed for the expected reason and then reran green after restore, or equivalent fresh prior fail/pass proof was reused, unless unsafe and explicitly justified.
 - Any failure caused by the current diff was fixed and rerun, or is named as the blocker.
 
 Final only after implementation: contract, edge-case matrix, boundary hit, stack/backends booted, CI/test lane, automated E2E result, automated edge/negative case covered, regression caught, commands/results, changed files, fixes made from discovered caused issues, edge cases intentionally omitted with reasons, and any remaining blocker.

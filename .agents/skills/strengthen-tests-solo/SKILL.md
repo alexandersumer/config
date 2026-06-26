@@ -5,6 +5,14 @@ description: Direct test review and edit workflow without subagents. Use for ord
 
 # Strengthen Tests Solo
 
+## Validation reuse and check scope
+
+Before running a slow, broad, external, stateful, or CI-equivalent command, check whether this conversation or current-SHA CI/artifacts already contain usable proof. Reuse prior passing evidence instead of rerunning only when it is visible, ran after the last relevant edit, covers the same command/scenario and behavior, edge case, or public boundary, and no touched file, config, dependency, fixture, generated output, runtime state, or environment assumption it depends on changed afterward. If uncertain, run the narrowest freshness check that resolves the uncertainty before escalating.
+
+Default to the narrowest honest proof. Run broader suites, full builds, CI reruns, or live/E2E flows only when required by blast radius, merge/release policy, changed shared API/schema/build/test infrastructure/dependencies/auth/security/persistence/concurrency, merge/conflict integration risk, missing targeted seams, or because the broad command is the only proof that covers the behavior.
+
+Final reports must distinguish reused proof, newly run commands, and checks intentionally not run.
+
 Review and strengthen tests directly in this session. This is not review-only: after validation, make the justified test-code improvements in the workspace instead of merely recommending them. Do not invoke subagents. Preserve the same quality bar as `strengthen-tests-deep` by identifying changed behavior first, finding the real test seam, and implementing only test improvements that catch named realistic regressions.
 
 1. **Get the effective diff and behavior surface automatically.** Do not require a PR, explicit scope, or committed branch changes. Resolve the remote default branch from `origin/HEAD`, falling back to `origin/main` or `origin/master` only if needed; if no remote default exists, omit only the committed-branch part. Build one effective diff from the union of: committed branch changes with `git diff $(git merge-base <remote-default> HEAD)..HEAD`, staged changes with `git diff --cached`, unstaged changes with `git diff`, and untracked files from `git ls-files --others --exclude-standard` rendered as new-file diffs. Always include staged, unstaged, and untracked changes even when the committed branch diff exists. If `focus_area` or `$ARGUMENTS` is provided, use it only to narrow this discovered diff. If the effective diff is empty, generated-only, formatter-only, version-bump-only, or has no behavior/test relevance, stop with `no test changes justified` and one short reason.
@@ -21,7 +29,7 @@ Review and strengthen tests directly in this session. This is not review-only: a
 
 5. **Implement only validated improvements.** Validated improvements are mandatory edits, not suggestions: modify existing tests or add new test code at the narrowest useful seam. Prefer public behavior over private fields or mock call order. When tests exist, strengthen or extend them at the narrowest useful level. When no suitable test exists, create the smallest idiomatic test file in the discovered harness that exercises the changed public path end-to-end enough to fail for the named regression. Replace weak assertions with exact observable outcomes. Assert error messages or log records only when they are part of the public/operator contract or catch a realistic regression; avoid brittle wording checks and log-volume assertions. Add edge/failure cases only when tied to real changed paths. Skip trivial getters, generated code, framework boilerplate, style conventions, and broad coverage goals.
 
-6. **Run checks.** Run the targeted tests that prove each improvement, then the broader relevant check when available. If no check applies, say why.
+6. **Run checks.** Validate through the reuse/scope policy: reuse fresh prior proof when valid, otherwise run the targeted tests that prove each improvement, then the broader relevant check only when justified. If no check applies, say why.
 
 7. **Report.** For each touched test, output:
 

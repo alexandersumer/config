@@ -3,6 +3,14 @@ name: real-e2e-live-check
 description: "Operate a real running system end to end without writing automated tests or running CI/test lanes. Use when the user wants live E2E QA of the current effective diff through local real services, agent protocol clients, CLI, browser, HTTP APIs, staging/dev shards, or deployed resources. The skill discovers the most appropriate real-enough environment, drives the public boundary, covers relevant edge cases, captures evidence, cleans up, and reports blockers honestly."
 ---
 
+## Validation reuse and check scope
+
+Before running a slow, broad, external, stateful, or CI-equivalent command, check whether this conversation or current-SHA CI/artifacts already contain usable proof. Reuse prior passing evidence instead of rerunning only when it is visible, ran after the last relevant edit, covers the same command/scenario and behavior, edge case, or public boundary, and no touched file, config, dependency, fixture, generated output, runtime state, or environment assumption it depends on changed afterward. If uncertain, run the narrowest freshness check that resolves the uncertainty before escalating.
+
+Default to the narrowest honest proof. Run broader suites, full builds, CI reruns, or live/E2E flows only when required by blast radius, merge/release policy, changed shared API/schema/build/test infrastructure/dependencies/auth/security/persistence/concurrency, merge/conflict integration risk, missing targeted seams, or because the broad command is the only proof that covers the behavior.
+
+Final reports must distinguish reused proof, newly run commands, and checks intentionally not run.
+
 Operate the current effective diff through a **real running system** and prove the behavior works end to end without creating automated tests and without running CI/test lanes. Real means a user, operator, service, CLI, browser, protocol client, or API caller drives the same public boundary the product depends on while the relevant runtime, service, worker, container, persistence, queue, cache, object store, browser app, or deployed resource is live.
 
 This skill is for live/runtime QA evidence. It is not the right skill when the user wants durable automated E2E regression coverage, CI proof, or a new smoke/acceptance test; use `real-e2e-automated-tests` for that.
@@ -77,22 +85,22 @@ Implementation loop:
 1. Build the source-backed route map. Inspect the effective diff, relevant docs/skills/scripts, and available client surfaces until the real-enough approach is clear. If the safe environment or public boundary remains unclear, ask one focused question.
 2. Write the live-check contract and safety classification in chat before starting servers, creating resources, or hitting deployed systems.
 3. Start or connect to the chosen real environment using repo-documented commands where available. Keep process IDs, ports, URLs, resource IDs, and log locations for cleanup and reporting. Request approval before external mutation, production access, expensive resources, or long-running stacks when required.
-4. Run preflight and readiness checks. If the environment is unavailable, missing auth, or unsafe, perform blocker burn-down before stopping with a concrete blocker; never substitute a fake path.
-5. Drive the main scenario through the public boundary and capture the durable result.
-6. Drive the selected edge probes through the same public boundary when safe. Check post-operation health or invariants when the flow can leave state behind.
-7. Clean up resources/processes you created. Capture cleanup success or the exact remaining resource/process and why.
-8. If the live check exposes a product issue in the current diff and fixing it is in scope, fix it, then rerun the affected scenario and edge probe. Do not hide caused failures.
+4. Run or reuse preflight/readiness evidence under the validation policy. For live systems, reuse prior full-flow evidence only when the same public boundary, runtime/deployed resource, inputs, state, and expected observations were checked after the last relevant edit; when current liveness matters, run only the cheapest readiness/status/freshness probe that makes the reused evidence honest. If the environment is unavailable, missing auth, or unsafe, perform blocker burn-down before stopping with a concrete blocker; never substitute a fake path.
+5. Drive or reuse fresh full-flow evidence for the main scenario through the public boundary and capture the durable result. Reuse is valid only when the same public boundary, environment/resource, inputs, durable observations, and current effective diff are covered.
+6. Drive or reuse fresh full-flow evidence for the selected edge probes through the same public boundary when safe. Check or reuse fresh proof for post-operation health or invariants when the flow can leave state behind.
+7. Clean up resources/processes you created. For reused evidence, confirm prior cleanup evidence or name remaining state and why.
+8. If the live check exposes a product issue in the current diff and fixing it is in scope, fix it, then rerun or reuse current-SHA proof for the affected scenario and edge probe. Do not hide caused failures.
 
 Completion gate before final: reread the live-check contract and answer each gate yes/no. If any gate is no, keep going or report blocked only after blocker burn-down; never produce a complete confidence line.
 - Source-backed route map completed, with no unresolved realness-critical unknown.
-- Real public boundary operated, and no fake, mock, internal helper, bypass flag, or test lane replaced the changed path.
-- Real environment reached or booted, and readiness was proven by a source-backed probe.
-- Main scenario passed through the real boundary with durable evidence.
-- Highest-risk edge or negative probe passed through the same boundary, or omission has a concrete reason.
-- Post-operation health, durable state, or invariants were checked when the flow can leave state behind.
-- Created resources and processes were cleaned up, or remaining state is named with reason.
-- Any failure caused by the current diff was fixed and rerun, or is named as the blocker.
+- Real public boundary operated, or fresh same-scope full-flow evidence was reused, and no fake, mock, internal helper, bypass flag, or test lane replaced the changed path.
+- Real environment was reached or booted, or fresh same-scope environment evidence was reused, and readiness was proven by a source-backed probe.
+- Main scenario passed through the real boundary with durable evidence, newly captured or validly reused.
+- Highest-risk edge or negative probe passed through the same boundary, or fresh same-scope evidence was reused, or omission has a concrete reason.
+- Post-operation health, durable state, or invariants were checked or validly reused when the flow can leave state behind.
+- Created resources and processes were cleaned up, prior cleanup evidence was reused, or remaining state is named with reason.
+- Any failure caused by the current diff was fixed and rerun, fixed with current-SHA proof reused, or is named as the blocker.
 
-Final only after live operation: contract, boundary used, environment chosen, safety class, preflight/readiness result, main scenario evidence, edge probes and outcomes, artifacts/logs/screenshots/transcripts, cleanup result, fixes made from caused issues, edge cases intentionally omitted with reasons, and remaining blockers.
+Final only after live operation or valid reused full-flow evidence: contract, boundary used, environment chosen, safety class, preflight/readiness result, main scenario evidence, edge probes and outcomes, artifacts/logs/screenshots/transcripts, cleanup result, fixes made from caused issues, edge cases intentionally omitted with reasons, and remaining blockers.
 
-Never call a live check complete if the real boundary was not operated. Say blocked when credentials, tools, approvals, or infrastructure prevent the required proof. The final confidence line must be either `Confidence: complete for the stated live-check contract` or `Confidence: not achieved because <blocker>`.
+Never call a live check complete if the real boundary was neither operated nor covered by valid same-scope full-flow evidence. Say blocked when credentials, tools, approvals, or infrastructure prevent the required proof. The final confidence line must be either `Confidence: complete for the stated live-check contract` or `Confidence: not achieved because <blocker>`.

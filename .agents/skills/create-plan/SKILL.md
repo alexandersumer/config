@@ -17,6 +17,8 @@ The primary artifact must answer the questions an implementer would otherwise ha
 
 The implementation plan must break the work into reviewable end-to-end chunks. Each chunk must ship observable behavior or a usable capability through a real path, with a checkable signal. No helper-only chunks, no "write tests" chunks, no vague cleanup phases unless they unblock named behavior.
 
+When planning verification, include fresh prior proof as an acceptable signal only when it is visible, ran after the last relevant edit, covers the same behavior/edge/public boundary, and no files/config/dependencies/runtime assumptions it depends on changed afterward. Default to the narrowest honest check; justify broad suites, full builds, CI reruns, or live/E2E only by blast radius, policy, shared contracts, build/test infrastructure, dependencies, auth/security/persistence/concurrency risk, merge integration risk, missing targeted seams, or lack of narrower proof.
+
 Use repo vocabulary. Do not invent owners, dates, milestones, external references, fake trade-offs, generic risks, or empty sections. If a section would say nothing useful, omit it.
 
 If scope is unclear after reading, ask one batched question and stop.

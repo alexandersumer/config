@@ -5,6 +5,14 @@ description: Resume and finish in-progress branch/worktree changes from the cumu
 
 # Resume Branch Work
 
+## Validation reuse and check scope
+
+Before running a slow, broad, external, stateful, or CI-equivalent command, check whether this conversation or current-SHA CI/artifacts already contain usable proof. Reuse prior passing evidence instead of rerunning only when it is visible, ran after the last relevant edit, covers the same command/scenario and behavior, edge case, or public boundary, and no touched file, config, dependency, fixture, generated output, runtime state, or environment assumption it depends on changed afterward. If uncertain, run the narrowest freshness check that resolves the uncertainty before escalating.
+
+Default to the narrowest honest proof. Run broader suites, full builds, CI reruns, or live/E2E flows only when required by blast radius, merge/release policy, changed shared API/schema/build/test infrastructure/dependencies/auth/security/persistence/concurrency, merge/conflict integration risk, missing targeted seams, or because the broad command is the only proof that covers the behavior.
+
+Final reports must distinguish reused proof, newly run commands, and checks intentionally not run.
+
 Act as a fresh agent inheriting an in-progress branch or dirty worktree. Do not rely on session memory. Use `context`, `plan`, `$ARGUMENTS`, or pasted notes only to clarify intent that is supported by the effective diff; the cumulative branch/worktree change set is the source of truth.
 
 ## 1. Resolve evidence before editing
@@ -49,10 +57,10 @@ Before claiming completion:
 1. Re-read the provided context or plan and the final effective diff. Account for every requirement as implemented, already satisfied, intentionally out of scope, or blocked.
 2. Confirm the changed behavior or artifact is reachable through the intended public entry point, command, UI, API, worker, config consumer, or documented path.
 3. Ensure tests or equivalent checks would fail for at least one realistic regression in the branch goal. Add or strengthen targeted checks when a suitable seam exists and behavior would otherwise be unproven.
-4. Run targeted checks first, then broader relevant checks when practical. Fix failures caused by this work. Identify unrelated failures without chasing them.
+4. Validate through the reuse/scope policy: reuse fresh prior proof when valid, otherwise run targeted checks first, then broader relevant checks only when justified. Fix failures caused by this work. Identify unrelated failures without chasing them.
 5. Inspect final status and diff for accidental files, secrets, debug output, generated noise, and unrelated edits.
 
-No `complete`, `done`, `fixed`, `ready`, or `passing` language without fresh evidence from this turn.
+No `complete`, `done`, `fixed`, `ready`, or `passing` language without fresh evidence from this conversation or current-SHA artifacts.
 
 ## Final response
 
@@ -63,7 +71,7 @@ Branch intent: <one sentence grounded in the effective diff>
 Completed:
 - <behavior/artifact>: <files> — <proof or check>
 Checks:
-- `<command>` -> <result>
+- `<command>` -> <result> | `reused — <prior proof and why still valid>` | `not run — <reason>`
 Deferred/blocked:
 - <item or None>: <reason>
 Final status: <clean or remaining modified/untracked files>

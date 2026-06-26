@@ -3,6 +3,14 @@ name: update-agi-essay
 description: Use when researching, planning, editing, fact-checking, refreshing, or style-auditing the essay "What to Do If You Take AGI Seriously" against current AGI sources while preserving its verification-cost thesis, length discipline, and no-AI-phrasing voice.
 ---
 
+## Validation reuse and check scope
+
+Before running a slow, broad, external, stateful, or CI-equivalent command, check whether this conversation or current-SHA CI/artifacts already contain usable proof. Reuse prior passing evidence instead of rerunning only when it is visible, ran after the last relevant edit, covers the same command/scenario and behavior, edge case, or public boundary, and no touched file, config, dependency, fixture, generated output, runtime state, or environment assumption it depends on changed afterward. If uncertain, run the narrowest freshness check that resolves the uncertainty before escalating.
+
+Default to the narrowest honest proof. Run broader suites, full builds, CI reruns, or live/E2E flows only when required by blast radius, merge/release policy, changed shared API/schema/build/test infrastructure/dependencies/auth/security/persistence/concurrency, merge/conflict integration risk, missing targeted seams, or because the broad command is the only proof that covers the behavior.
+
+Final reports must distinguish reused proof, newly run commands, and checks intentionally not run.
+
 Apply `scope`, else `$ARGUMENTS`, else infer the requested update mode from the conversation. Use this skill when the user asks to research, plan, update, refresh, edit, verify, or style-audit `src/content/blog/what-to-do-if-you-take-agi-seriously.md`.
 
 Keep this as one coherent editorial workflow. Do not split the job across separate research, planning, editing, or audit skills. Do not commit, push, deploy, or publish; use `$git-publish-to-origin` only after the user asks to publish.
