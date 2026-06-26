@@ -38,7 +38,7 @@ For multiple Correct comments, group them by root cause or file area. Address on
 
 Inspect the real seam before editing: commented lines, surrounding code, owning interface or state/model, representative callers, adjacent tests, and 2-3 sibling patterns when available.
 
-Make the smallest production, test, fixture, doc, or config change that truly addresses each Correct comment. Add or update a targeted test when the comment identifies a realistic regression and a test seam exists. Do not broaden scope to unrelated refactors, style churn, optional polish, or reviewer preferences.
+Make the smallest production, test, fixture, doc, or config change that truly addresses each Correct comment. Add or update a targeted test when the comment identifies a realistic regression, a test seam exists, and stronger existing coverage does not already catch it. Do not broaden scope to unrelated refactors, style churn, optional polish, or reviewer preferences.
 
 No suppressions, baselines, skipped/deleted/weakened tests, sleeps, broad catches, silent fallbacks, fake success exits, or code that dodges the reviewer concern. Dependency, build config, or test-infra changes are allowed only when the comment evidence proves they are the minimal root-cause fix.
 

@@ -13,7 +13,7 @@ This is the heavyweight code-review path. Fresh-context Reviewers generate candi
 
 3. **Invoke four fresh-context Reviewer passes directly.** Before invocation, confirm `{DIFF}` contains non-empty pasted diff text or focused excerpts, not a path, filename, or summary. Use the direct foreground reviewer-agent facility exposed by the current harness for each role. Run roles sequentially unless the harness provides direct parallel reviewer calls; never use scheduled/background/wrapper delegation or arbitrary external agent CLIs as a substitute. Each Reviewer pass gets this prompt verbatim, with `{ROLE}`, `{DIFF}`, and `{CONVENTIONS}` filled in. No session context — only what you paste:
 
-   > You are reviewing a code change as **{ROLE}**. Diff: {DIFF}. Conventions: {CONVENTIONS}. One issue = one root cause. Skip nitpicks, style, "consider also". If it is not a real defect or risk, drop it. Return exactly one of:
+   > You are reviewing a code change as **{ROLE}**. Diff: {DIFF}. Conventions: {CONVENTIONS}. One issue = one root cause. Skip nitpicks, style, "consider also". If it is not a real defect or risk, drop it. For changed tests, a low-value or redundant test is a valid issue only when it adds maintenance cost without a named realistic regression signal or duplicates stronger existing coverage. Return exactly one of:
    >
    > CANDIDATES:
    > - severity: <Critical | High | Medium | Low>

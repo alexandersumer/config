@@ -19,7 +19,7 @@ For performance regressions, measure first: baseline, profiler/timing/query plan
 
 Red flags: stop and return to the loop if you think "probably", "quick fix", "try this", "obvious", "test is wrong", or "clean it up later".
 
-Fix the proven root cause only. Add or preserve a regression check at the seam that exercises the real bug pattern. If no correct seam exists, say the architecture prevents a durable regression check and name the gap.
+Fix the proven root cause only. Add or preserve a regression check at the seam that exercises the real bug pattern, unless stronger existing coverage already catches it. If no correct seam exists, say the architecture prevents a durable regression check and name the gap.
 
 Before final: rerun or reuse fresh proof for the original loop and regression check under the proof policy, then remove all `[DEBUG-...]` instrumentation and throwaway harnesses.
 

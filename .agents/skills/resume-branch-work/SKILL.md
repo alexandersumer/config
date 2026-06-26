@@ -52,7 +52,7 @@ Fix root causes. Preserve existing user changes. Match local style. Do not add T
 Before claiming completion:
 1. Re-read the provided context or plan and the final effective diff. Account for every requirement as implemented, already satisfied, intentionally out of scope, or blocked.
 2. Confirm the changed behavior or artifact is reachable through the intended public entry point, command, UI, API, worker, config consumer, or documented path.
-3. Ensure tests or equivalent checks would fail for at least one realistic regression in the branch goal. Add or strengthen targeted checks when a suitable seam exists and behavior would otherwise be unproven.
+3. Ensure tests or equivalent checks would fail for at least one realistic regression in the branch goal. Add or strengthen targeted checks when a suitable seam exists and behavior would otherwise be unproven; avoid adding tests that only duplicate stronger existing coverage.
 4. Validate through the proof policy: reuse proof when valid, otherwise run targeted checks first, then broader relevant checks only when justified. Fix failures caused by this work. Identify unrelated failures without chasing them.
 5. Inspect final status and diff for accidental files, secrets, debug output, generated noise, and unrelated edits.
 

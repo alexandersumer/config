@@ -19,7 +19,7 @@ Before editing:
 
 Maintain an explicit todo or plan in chat or with the available planning tool. Every task must be an observable behavior or capability with a checkable signal.
 
-Build production code, wiring, tests, and required docs/config together. Tests must catch a named realistic regression. If no existing check can prove the behavior, add the missing targeted check instead of claiming green.
+Build production code, wiring, tests, and required docs/config together. Tests must catch a named realistic regression that is not already covered by a stronger existing test. If no existing check can prove the behavior, add the missing targeted check instead of claiming green.
 
 Test infra/build config changes are allowed only when the artifact asks for verification infrastructure. Otherwise no suppressions, baselines, dependency bumps, build config edits, skipped tests, or fake TODO placeholders.
 

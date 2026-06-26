@@ -15,7 +15,7 @@ Review the code directly in this session. Do not invoke subagents. Preserve the 
    - **Correctness** — logic errors, wrong returns, violated contracts, stale state, wrong ordering, broken data flow.
    - **Failure modes** — null/boundary inputs, races, swallowed errors, unclear or misleading error messages, missing diagnostic context, noisy or low-signal logging, leaks, retries, partial failures, regressions in adjacent touched code.
    - **Security** — injection, auth/permission gaps, secrets or sensitive data in logs/errors, unsafe deserialization, missing validation, trust-boundary mistakes.
-   - **Conventions** — rules scoped to changed files, local patterns, ownership boundaries; skip what a linter catches.
+   - **Conventions** — rules scoped to changed files, local patterns, ownership boundaries; skip what a linter catches. For changed tests, flag low-value or redundant tests only when they add maintenance cost without a named realistic regression signal or duplicate stronger existing coverage.
 
 4. **Validate every candidate yourself.** For each candidate, inspect the relevant file/function/caller/test path in enough detail to confirm or refute it. Prefer concrete execution paths, triggering input, violated rule, or a targeted command. Drop anything you cannot demonstrate concretely. Never keep a finding because it sounds plausible.
 
