@@ -15,8 +15,9 @@ show_tips = true
 agent_summaries = false
 
 [notifications]
-enabled = false
-volume = 0.5
+terminal_enabled = false
+sound_enabled = false
+volume = 0
 
 [logging]
 level = "info"
