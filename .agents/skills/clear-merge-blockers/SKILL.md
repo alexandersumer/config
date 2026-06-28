@@ -13,6 +13,44 @@ A request to study, review, explain, or plan this skill or a blocker surface doe
 
 Do not create branches, open reviews, merge PRs, force-push, reset, discard, stash, rebase a published branch, resolve comment threads, dismiss reviews, approve, post review replies, or merge/restart a merge queue unless explicitly requested. Stop before any write if the current branch is `main`, `master`, or the resolved remote default branch, unless the user explicitly named that branch as the write target.
 
+Never say or imply `done`, `complete`, `cleared`, `unblocked`, `merge-ready`, `CI is green`, `all green`, `passing`, or `no blockers` unless the terminal provider state gate below is satisfied with current hard evidence. Local checks prove only local behavior; they never prove hosted CI, required gates, mergeability, approvals, or policy state.
+
+## Terminal provider state gate
+
+Treat the workflow as a state machine. Each refresh must end in exactly one state:
+
+- `needs-local-fix`: a current conflict, update requirement, failed check, or correct required comment has a safe local action.
+- `waiting`: a required or user-relevant gate is queued, pending, in progress, missing, skipped, or canceled and one bounded wait/rerun has been used or is not allowed.
+- `human-blocked`: approval, draft, changes-requested, Jira, compliance, ownership, permission, or policy state requires a human/system action.
+- `tooling-blocked`: provider data, logs, required-gate list, current SHA, or auth cannot be obtained after the allowed retry/auth step.
+- `green`: every merge-relevant provider gate is explicitly current and terminal-success, with no red, pending, missing, skipped, canceled, stale, or unknown gate.
+
+Only `green` permits a final claim that CI is green or the PR has no blockers. Any other state must be reported as the remaining blocker, even when there are no local code edits left.
+
+Before claiming `green`, prove all of the following from provider data, not from inference:
+
+- The target review id, source branch, target branch, source/head SHA, and any merge queue or synthetic-merge SHA were identified.
+- The checked provider status belongs to the latest source/head SHA and, when applicable, the latest merge queue or synthetic-merge SHA.
+- Every visible current-sha CI check, status, pipeline, merge queue run, synthetic-merge run, and custom gate is terminal success, or is explicitly non-applicable/stale/superseded with evidence. If the user asked for all pipelines, include non-required visible pipelines too.
+- No required or merge-blocking provider gate is failed, errored, canceled, skipped, missing, queued, pending, running, stale, or unknown.
+- Mergeability/update/conflict state is satisfied.
+- Required comments/tasks, approvals, draft state, changes-requested state, Jira/compliance/custom policy gates, and permissions are satisfied or explicitly absent.
+
+If the complete required-gate set cannot be enumerated, the state is `tooling-blocked`, not `green`. If any gate is pending/running/missing/skipped/canceled, the state is `waiting`, not `green`. If any gate is red, the state is `needs-local-fix` when branch-caused evidence exists, otherwise `human-blocked`, `tooling-blocked`, or flaky/infrastructure as evidenced.
+
+### CI green helper
+
+For a final CI/provider claim, run the bundled helper with `python3 scripts/ci_green_gate.py` after collecting a complete provider snapshot.
+
+Normalize the snapshot to JSON with:
+
+- `head_sha`: the latest source/head SHA.
+- `provider_snapshot_complete: true`: set only after enumerating the provider gate set for that SHA.
+- `checks`, `pipelines`, `statuses`, or `gates`: entries include `name`, `state` or `conclusion`, `sha` or `commit` when available, and `required` when known.
+- `scoped_to_head: true`: set only when the provider query itself was scoped to the latest SHA and individual gates do not expose SHAs.
+
+The helper exits 0 only when the snapshot is complete and every included gate for the latest SHA is terminal green. A nonzero exit means the final state is not `green`; use the helper output as blocker evidence. If the helper cannot be used, manually apply the same state rules and say why.
+
 ## Operating model: one active blocker
 
 Every iteration must have exactly one active blocker before deep investigation or editing:
@@ -28,7 +66,7 @@ No blocker id, no work. No original evidence, no fix. No diff, completed target 
 ## Fast blocker snapshot
 
 1. If `target`, `$ARGUMENTS`, or `focus` names a PR/review, check, job, run, comment, task, file, conflict, branch-update warning, merge queue result, pasted failure output, or required gate, make that the active blocker and inspect only enough surrounding review state to act safely.
-2. With no supplied target, collect one bounded blocker snapshot: repository, current branch, upstream, remote default branch, working tree status, unpushed commits, PR/review id, source branch, target branch, latest source/head SHA, mergeability/conflict or update-required state, failing or unsatisfied required checks, unresolved required comments/tasks, draft/approval/changes-requested state, and Jira/compliance/custom gate messages when available.
+2. With no supplied target, collect one bounded blocker snapshot: repository, current branch, upstream, remote default branch, working tree status, unpushed commits, PR/review id, source branch, target branch, latest source/head SHA, mergeability/conflict or update-required state, all visible current-sha CI checks/pipelines/statuses/custom gates and which are required when known, unresolved required comments/tasks, draft/approval/changes-requested state, and Jira/compliance/custom gate messages when available.
 3. Do not read the full PR diff, all untracked files, all comments, or all check logs during the snapshot. Read code, diffs, and logs only for the selected active blocker.
 4. Prefer the latest signal for the latest source/head SHA and, when the provider uses one, the latest merge queue or synthetic-merge SHA. Ignore stale, resolved, outdated, superseded, or other-branch signals unless they still describe code or required state present in the selected blocker.
 5. If there is no target review, no accessible blocker data, no actionable local-fixable blocker, or no coherent way to separate blocker fixes from unrelated local changes, stop and report the exact blocker. Do not invent changes.
@@ -106,17 +144,18 @@ Do not broaden scope to unrelated refactors, style churn, optional polish, oppor
 2. Stage only intended blocker-fix or target-update changes. If pre-existing unpushed commits or local changes are unrelated to the blocker fixes, stop and ask how to split or scope the publish.
 3. Commit with a grounded Conventional Commit subject when a normal fix commit is needed; allow the default merge commit message for a target-branch merge commit when it accurately records the update.
 4. Push the current source branch to its configured upstream, or to `origin` with upstream set if none exists and `origin` is the appropriate branch remote.
-5. After a push, completed target update, targeted rerun, or bounded wait, refresh one bounded blocker snapshot for the latest relevant SHA. Continue only when the refreshed snapshot identifies a new local-fixable active blocker. Otherwise stop and report the remaining human/policy/tooling/pending/flaky blocker or that no local-fixable blockers remain.
+5. After a push, completed target update, targeted rerun, or bounded wait, refresh one bounded blocker snapshot for the latest relevant SHA. Continue only when the refreshed snapshot identifies a new local-fixable active blocker. Otherwise classify the terminal provider state as `waiting`, `human-blocked`, `tooling-blocked`, or `green`; stop and report that exact state. Do not collapse `waiting`, red non-required CI, or unknown provider data into "no local-fixable blockers" without naming the remaining provider state.
 
-Do not loop solely because the review UI still shows an old comment that the pushed diff already addresses. Do not claim fixed, complete, passing, unblocked, merge-ready, or cleared unless the latest checked source SHA and, when relevant, merge queue or synthetic-merge SHA support that claim.
+Do not loop solely because the review UI still shows an old comment that the pushed diff already addresses. Do not claim fixed, complete, passing, unblocked, merge-ready, green, or cleared unless the latest checked source SHA and, when relevant, merge queue or synthetic-merge SHA support that claim through the terminal provider state gate.
 
 ## Done gate
 
-Before claiming no local-fixable blockers remain, verify or report the blocker for each:
+Before claiming `green`, verify or report the blocker for each:
 
 - Target review, source branch, target branch, latest source SHA, and active blocker id were identified.
 - Conflicts or target-branch update requirements are gone, handled, or blocked for a stated reason.
 - Failed required checks are passing on the latest relevant SHA, superseded by green newer runs, or classified with evidence as stale, flaky/infrastructure, unrelated, or tooling-blocked.
+- Every visible current-sha CI pipeline/check/status/custom gate was enumerated; any red, pending, missing, skipped, canceled, stale, or unknown gate is reported as remaining and prevents a green/done claim.
 - Required comment/task blockers are addressed, absent for the latest checked SHA, unclear with a question, or classified with evidence as non-actionable.
 - Pending/missing/skipped/canceled gates have had at most one safe rerun or bounded wait and are reported if still merge-blocking.
 - Required approvals, changes-requested state, draft state, Jira/compliance/custom gates, and permissions are satisfied or reported as human/policy/tooling blockers.
@@ -128,9 +167,11 @@ Before claiming no local-fixable blockers remain, verify or report the blocker f
 
 - Target: `<review/branch or blocker>`
 - Latest checked SHA: `<source SHA and merge/synthetic SHA when relevant>`
+- Terminal provider state: `<green | needs-local-fix | waiting | human-blocked | tooling-blocked, with evidence>`
+- CI/provider gates: `<all current-sha gates green | exact red/pending/missing/unknown gates>`
 - Active blocker handled: `<type/id -> action/evidence>`
 - Changed: `<files or none>`
 - Proof: `<targeted checks/results, reused proof, or proof gap>`
 - Publish/refresh: `<commit/push/rerun/wait/refreshed status | not needed | blocker>`
-- Remaining: `<none local-fixable | exact blocker>`
+- Remaining: `<none only when terminal provider state is green | exact blocker/state>`
 - Human action required: `<none or exact reviewer/policy/permission action>`

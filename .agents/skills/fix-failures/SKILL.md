@@ -41,7 +41,7 @@ Do not blindly rerun the same command or CI job. Each run must follow a fix, nar
 2. Compare the original failing signal with the new or reused passing signal or changed diagnostic.
 3. Run or reuse the broader relevant suite, build, lint, or CI gate only when the proof policy justifies it; otherwise name the exact broad-proof blocker or narrower proof used.
 4. If adding or changing an automated check, prove when feasible that it fails for the original bug, then restore the fix and rerun green; reuse prior fail/pass proof only when it is same-diff and same-scope.
-5. When publish is authorized by this invocation, publish only a coherent fix, inspect resulting CI, and repeat this evidence-backed loop for new branch-relevant failures until CI is green or a concrete blocker remains.
+5. When publish is authorized by this invocation, publish only a coherent fix, inspect resulting CI, and repeat this evidence-backed loop for new branch-relevant failures until CI is green or a concrete blocker remains. Claim CI is green only when the refreshed provider data is for the latest branch-relevant source SHA and every visible required branch-relevant check is terminal success; otherwise report the exact pending, red, missing, stale, or inaccessible check state as the blocker.
 
 ## Final
 
