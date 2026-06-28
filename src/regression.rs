@@ -213,10 +213,10 @@ fn test_one_clear_sentence_skill_rewrites_recent_context() -> Result<()> {
 
 fn test_real_e2e_automated_tests_skill_requires_edge_case_proof() -> Result<()> {
     let config_root = config_root_from_exe()?;
-    let skill_path = config_root.join(".agents/skills/real-e2e-automated-tests/SKILL.md");
+    let skill_path = config_root.join(".agents/skills/e2e-automated-tests/SKILL.md");
     let text = fs::read_to_string(&skill_path).map_err(|err| {
         format!(
-            "{}: cannot read real-e2e-automated-tests skill: {err}",
+            "{}: cannot read e2e-automated-tests skill: {err}",
             skill_path.display()
         )
     })?;
@@ -249,7 +249,7 @@ fn test_real_e2e_automated_tests_skill_requires_edge_case_proof() -> Result<()> 
     ] {
         if !text.contains(expected) {
             return Err(format!(
-                "{}: real-e2e-automated-tests skill must require robust edge-case proof; missing {expected:?}",
+                "{}: e2e-automated-tests skill must require robust edge-case proof; missing {expected:?}",
                 skill_path.display()
             ));
         }
@@ -259,10 +259,10 @@ fn test_real_e2e_automated_tests_skill_requires_edge_case_proof() -> Result<()> 
 
 fn test_real_e2e_live_check_skill_rejects_test_lane_proof() -> Result<()> {
     let config_root = config_root_from_exe()?;
-    let skill_path = config_root.join(".agents/skills/real-e2e-live-check/SKILL.md");
+    let skill_path = config_root.join(".agents/skills/e2e-live-check/SKILL.md");
     let text = fs::read_to_string(&skill_path).map_err(|err| {
         format!(
-            "{}: cannot read real-e2e-live-check skill: {err}",
+            "{}: cannot read e2e-live-check skill: {err}",
             skill_path.display()
         )
     })?;
@@ -295,7 +295,7 @@ fn test_real_e2e_live_check_skill_rejects_test_lane_proof() -> Result<()> {
     ] {
         if !text.contains(expected) {
             return Err(format!(
-                "{}: real-e2e-live-check skill must reject test-lane proof and require safe live evidence; missing {expected:?}",
+                "{}: e2e-live-check skill must reject test-lane proof and require safe live evidence; missing {expected:?}",
                 skill_path.display()
             ));
         }
@@ -532,16 +532,16 @@ pub(crate) fn test_install_command() -> Result<()> {
         &fixture.path().join(".agents/skills/surgical-edit"),
     )?;
     assert_symlink_resolves_to(
-        &home.path().join(".codex/skills/describe-branch"),
-        &fixture.path().join(".agents/skills/describe-branch"),
+        &home.path().join(".codex/skills/branch-description"),
+        &fixture.path().join(".agents/skills/branch-description"),
     )?;
     assert_symlink_resolves_to(
         &home.path().join(".claude/skills/surgical-edit"),
         &fixture.path().join(".agents/skills/surgical-edit"),
     )?;
     assert_symlink_resolves_to(
-        &home.path().join(".claude/skills/describe-branch"),
-        &fixture.path().join(".agents/skills/describe-branch"),
+        &home.path().join(".claude/skills/branch-description"),
+        &fixture.path().join(".agents/skills/branch-description"),
     )?;
     assert_symlink_resolves_to(
         &home.path().join(".zshrc"),

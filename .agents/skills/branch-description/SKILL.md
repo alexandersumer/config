@@ -1,6 +1,6 @@
 ---
-name: describe-branch
-description: Write PR title and description. Use when the user wants a pull request title, PR body, branch summary, or Conventional Commit description.
+name: branch-description
+description: Write a PR or branch title and description. Use when the user wants a pull request title, PR body, branch summary, or Conventional Commit description.
 ---
 
 Write the canonical PR title and description for the current branch.

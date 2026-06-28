@@ -1,6 +1,6 @@
 ---
-name: describe-diff
-description: Summarize working changes. Use when the user wants a short diff summary, change phrase, or clean/dirty working-tree description.
+name: change-summary
+description: Summarize working changes. Use when the user wants a short change summary, diff phrase, or clean/dirty working-tree description.
 ---
 
 If the working tree is clean, output `clean`.

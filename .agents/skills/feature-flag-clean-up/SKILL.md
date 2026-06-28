@@ -1,6 +1,6 @@
 ---
-name: clean-up-feature-flag
-description: Remove a rolled-out flag
+name: feature-flag-clean-up
+description: Clean up a rolled-out feature flag while preserving enabled behavior
 ---
 
 ## Proof policy

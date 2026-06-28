@@ -1,5 +1,5 @@
 ---
-name: real-e2e-live-check
+name: e2e-live-check
 description: "Operate a real running system end to end without writing automated tests or running CI/test lanes. Use when the user wants live E2E QA of the current effective diff through local real services, agent protocol clients, CLI, browser, HTTP APIs, staging/dev shards, or deployed resources. The skill discovers the most appropriate real-enough environment, drives the public boundary, covers relevant edge cases, captures evidence, cleans up, and reports blockers honestly."
 ---
 
@@ -9,7 +9,7 @@ Reuse proof only when it is visible, same-scope, after the last relevant edit, a
 
 Operate the current effective diff through a **real running system** and prove the behavior works end to end without creating automated tests and without running CI/test lanes. Real means a user, operator, service, CLI, browser, protocol client, or API caller drives the same public boundary the product depends on while the relevant runtime, service, worker, container, persistence, queue, cache, object store, browser app, or deployed resource is live.
 
-This skill is for live/runtime QA evidence. It is not the right skill when the user wants durable automated E2E regression coverage, CI proof, or a new smoke/acceptance test; use `real-e2e-automated-tests` for that.
+This skill is for live/runtime QA evidence. It is not the right skill when the user wants durable automated E2E regression coverage, CI proof, or a new smoke/acceptance test; use `e2e-automated-tests` for that.
 
 Realness contract is binary: either the real public boundary was operated and every contract item has evidence, or the work is blocked. Do not downgrade quietly to mocks, fake endpoints, partial startup, internal helpers, unauthenticated shortcuts, unverified readiness, broad sleeps, or "likely works" claims. Confidence is achieved only for the exact checked contract; never claim 100% confidence for unobserved behavior, omitted edge cases, or unavailable infrastructure.
 

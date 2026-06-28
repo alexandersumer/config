@@ -1,6 +1,6 @@
 ---
-name: real-e2e-automated-tests
-description: "Create or harden automated real end-to-end tests. Use when the user wants durable E2E regression coverage, smoke or acceptance tests, CI/test-lane proof, or an automated test that boots the real system and hits public boundaries. The skill writes the test, wires it into the right lane, runs it, and proves it catches real regressions unless blocked by unavailable infrastructure."
+name: e2e-automated-tests
+description: "Create or harden real automated end-to-end tests. Use when the user wants durable E2E regression coverage, smoke or acceptance tests, CI/test-lane proof, or an automated test that boots the real system and hits public boundaries. The skill writes the test, wires it into the right lane, and proves it catches real regressions unless blocked by unavailable infrastructure."
 ---
 
 ## Proof policy
@@ -9,7 +9,7 @@ Reuse proof only when it is visible, same-scope, after the last relevant edit, a
 
 Create an automated **real** end-to-end test for `scope`, `$ARGUMENTS`, recent changes, or the conversation target, and keep going until the test exists, is wired into the appropriate lane, and has been validated or is blocked by a concrete infrastructure limitation. Real means the production engine is running and the test drives the same public boundary a user, service, CLI, worker, or protocol client depends on.
 
-This skill is for durable automated coverage. It is not the right skill for one-off live QA that operates a real system without writing tests or running CI/test lanes; use `real-e2e-live-check` for that.
+This skill is for durable automated coverage. It is not the right skill for one-off live QA that operates a real system without writing tests or running CI/test lanes; use `e2e-live-check` for that.
 
 This is not a planning skill. The plan/contract is only a short alignment checkpoint before implementation; it is not an acceptable final output. After writing the contract, immediately do the work: edit files, add or harden the E2E, wire scripts/CI when needed, run the relevant commands, fix failures caused by the new test, and prove the test would catch a real regression when safe.
 

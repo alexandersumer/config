@@ -36,12 +36,12 @@ const REQUIRED_CUSTOM_SKILL_NAMES: &[&str] = &[
     "auth-preflight",
     "architecture-review-deep",
     "architecture-review-solo",
-    "clean-up-feature-flag",
+    "feature-flag-clean-up",
     "clear-merge-blockers",
     "create-chat-plan",
     "create-plan",
-    "describe-branch",
-    "describe-diff",
+    "branch-description",
+    "change-summary",
     "design-review-deep",
     "design-review-solo",
     "diagnose",
@@ -53,8 +53,8 @@ const REQUIRED_CUSTOM_SKILL_NAMES: &[&str] = &[
     "grill-me",
     "one-clear-sentence",
     "prove-check",
-    "real-e2e-automated-tests",
-    "real-e2e-live-check",
+    "e2e-automated-tests",
+    "e2e-live-check",
     "reconcile-plan",
     "resolve-conflict",
     "resume-branch-work",
@@ -402,11 +402,11 @@ mod tests {
     fn validate_skill_name_accepts_kebab_case_and_rejects_other_shapes() {
         assert_eq!(
             validate_skill_name(
-                Some(&Value::String("clean-up-feature-flag".to_string())),
+                Some(&Value::String("feature-flag-clean-up".to_string())),
                 "skill"
             )
             .expect("valid skill name"),
-            "clean-up-feature-flag"
+            "feature-flag-clean-up"
         );
         assert!(validate_skill_name(Some(&Value::String("CleanUp".to_string())), "skill").is_err());
         assert!(validate_skill_name(Some(&Value::String("".to_string())), "skill").is_err());
