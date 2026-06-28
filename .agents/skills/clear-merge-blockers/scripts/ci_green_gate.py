@@ -15,9 +15,11 @@ Input JSON shape:
   "gates": [...]
 }
 
-Required fields: head_sha, provider_snapshot_complete, and at least one gate
+Required for green: head_sha, provider_snapshot_complete, and at least one gate
 list. Set provider_snapshot_complete only after enumerating the provider gate
 set. Set scoped_to_head only when the provider query was scoped to head_sha.
+An incomplete snapshot can still prove "not green" when it contains a
+current-sha red gate.
 
 The script exits 0 only when the snapshot explicitly says its provider gate list
 is complete and every included current-sha gate is terminal green. All other
@@ -40,6 +42,9 @@ GATE_LIST_KEYS = (
     "pipelines",
     "statuses",
     "gates",
+    "_checks",
+    "_pipelines",
+    "_statuses",
     "required_checks",
     "required_gates",
     "builds",
@@ -233,7 +238,20 @@ def gate_sha(gate: dict[str, Any]) -> str | None:
     value = first_present(gate, SHA_KEYS)
     if isinstance(value, dict):
         value = first_present(value, SHA_KEYS + ("hash",))
-    return short_sha(value)
+    direct = short_sha(value)
+    if direct:
+        return direct
+
+    target = gate.get("target")
+    if isinstance(target, dict):
+        commit = target.get("commit")
+        if isinstance(commit, dict):
+            value = first_present(commit, SHA_KEYS + ("hash",))
+            direct = short_sha(value)
+            if direct:
+                return direct
+
+    return None
 
 
 def extract_gates(snapshot: Any) -> list[dict[str, Any]]:
@@ -243,6 +261,13 @@ def extract_gates(snapshot: Any) -> list[dict[str, Any]]:
         return []
 
     gates: list[dict[str, Any]] = []
+    if (
+        isinstance(snapshot.get("state"), (str, dict))
+        and ("build_number" in snapshot or "uuid" in snapshot)
+        and isinstance(snapshot.get("target"), dict)
+    ):
+        gates.append(snapshot)
+
     for key in GATE_LIST_KEYS:
         value = snapshot.get(key)
         if isinstance(value, list):
@@ -264,6 +289,23 @@ def latest_sha(snapshot: dict[str, Any]) -> str | None:
         value = short_sha(snapshot.get(key))
         if value:
             return value
+
+    source = snapshot.get("source")
+    if isinstance(source, dict):
+        commit = source.get("commit")
+        if isinstance(commit, dict):
+            value = short_sha(first_present(commit, ("hash",) + SHA_KEYS))
+            if value:
+                return value
+
+    target = snapshot.get("target")
+    if isinstance(target, dict):
+        commit = target.get("commit")
+        if isinstance(commit, dict):
+            value = short_sha(first_present(commit, ("hash",) + SHA_KEYS))
+            if value:
+                return value
+
     return None
 
 
@@ -296,14 +338,7 @@ def validate(snapshot: Any) -> tuple[int, dict[str, Any]]:
             "reason": "snapshot missing head_sha/source_sha/latest_sha",
         }
 
-    if not snapshot_is_complete(snapshot):
-        return 2, {
-            "green": False,
-            "terminal_provider_state": "tooling-blocked",
-            "head_sha": head_sha,
-            "reason": "snapshot must set provider_snapshot_complete=true after enumerating provider gates",
-        }
-
+    snapshot_complete = snapshot_is_complete(snapshot)
     scoped_to_head = as_strict_bool(snapshot.get("scoped_to_head")) is True
     gates = extract_gates(snapshot)
     if not gates:
@@ -367,6 +402,44 @@ def validate(snapshot: Any) -> tuple[int, dict[str, Any]]:
             "state": "no current gates",
             "reason": "only stale gates were present",
         })
+
+    if not snapshot_complete:
+        red_blockers = [blocker for blocker in blockers if blocker["classification"] == "red"]
+        if red_blockers:
+            return 1, {
+                "green": False,
+                "terminal_provider_state": "needs-local-fix",
+                "head_sha": head_sha,
+                "accepted_shas": sorted(accepted),
+                "reason": (
+                    "snapshot missing provider_snapshot_complete=true, "
+                    "but current-sha red gates prove CI is not green"
+                ),
+                "counts": {
+                    "green": len(green_gates),
+                    "blockers": len(blockers),
+                    "stale": len(stale_gates),
+                },
+                "blockers": blockers,
+                "green_gates": green_gates,
+                "stale_gates": stale_gates,
+            }
+
+        return 2, {
+            "green": False,
+            "terminal_provider_state": "tooling-blocked",
+            "head_sha": head_sha,
+            "accepted_shas": sorted(accepted),
+            "reason": "snapshot must set provider_snapshot_complete=true after enumerating provider gates",
+            "counts": {
+                "green": len(green_gates),
+                "blockers": len(blockers),
+                "stale": len(stale_gates),
+            },
+            "blockers": blockers,
+            "green_gates": green_gates,
+            "stale_gates": stale_gates,
+        }
 
     if blockers:
         classifications = {blocker["classification"] for blocker in blockers}
