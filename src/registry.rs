@@ -41,7 +41,6 @@ const REQUIRED_CUSTOM_SKILL_NAMES: &[&str] = &[
     "create-chat-plan",
     "create-plan",
     "branch-description",
-    "change-summary",
     "design-review-deep",
     "design-review-solo",
     "diagnose",
