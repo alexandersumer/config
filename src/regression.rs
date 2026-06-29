@@ -223,13 +223,13 @@ fn test_branch_description_empty_diff_is_explicit() -> Result<()> {
     })?;
 
     for expected in [
-        "do not output bare `clean`",
-        "No branch description to write: current branch `<current-branch>`",
-        "remote default `<remote-default-ref>`",
-        "`origin/main`, `origin/master`, or another `origin/<branch>` from `origin/HEAD`",
-        "never assume `origin/main`",
+        "When the effective change set is empty, output exactly this diagnostic sentence",
+        "No branch description to write: current branch `<current-branch>` has no changes relative to remote default `<remote-default-ref>`",
+        "`origin/main`, `origin/master`, or `origin/<branch>` from `origin/HEAD`",
+        "Do not assume `main`",
+        "If no remote default or merge-base exists, use this variant instead",
         "has no resolved remote-default comparison base",
-        "The empty-diff diagnostic is the only exception",
+        "The empty-change diagnostic above is exempt",
     ] {
         if !text.contains(expected) {
             return Err(format!(
@@ -239,10 +239,15 @@ fn test_branch_description_empty_diff_is_explicit() -> Result<()> {
         }
     }
 
-    let forbidden = "If the effective change set is empty, output `clean` and stop.";
-    if text.contains(forbidden) {
+    let forbidden = [
+        "If the effective change set is empty, output `",
+        "clean",
+        "` and stop.",
+    ]
+    .concat();
+    if text.contains(&forbidden) {
         return Err(format!(
-            "{}: branch-description must not emit ambiguous bare clean output",
+            "{}: branch-description must use the explicit empty-change diagnostic",
             skill_path.display()
         ));
     }
