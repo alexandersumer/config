@@ -49,6 +49,7 @@ pub(crate) fn run_regression_tests() -> Result<()> {
     test_required_custom_skill_inventory_matches_current_skills()?;
     test_one_clear_sentence_skill_rewrites_recent_context()?;
     test_branch_description_empty_diff_is_explicit()?;
+    test_clear_merge_blockers_final_report_splits_ci_state()?;
     test_real_e2e_automated_tests_skill_requires_edge_case_proof()?;
     test_real_e2e_live_check_skill_rejects_test_lane_proof()?;
     test_git_publish_skills_keep_local_first_contract()?;
@@ -248,6 +249,49 @@ fn test_branch_description_empty_diff_is_explicit() -> Result<()> {
     if text.contains(&forbidden) {
         return Err(format!(
             "{}: branch-description must use the explicit empty-change diagnostic",
+            skill_path.display()
+        ));
+    }
+
+    Ok(())
+}
+
+fn test_clear_merge_blockers_final_report_splits_ci_state() -> Result<()> {
+    let config_root = config_root_from_exe()?;
+    let skill_path = config_root.join(".agents/skills/clear-merge-blockers/SKILL.md");
+    let text = fs::read_to_string(&skill_path).map_err(|err| {
+        format!(
+            "{}: cannot read clear-merge-blockers skill: {err}",
+            skill_path.display()
+        )
+    })?;
+
+    for expected in [
+        "Track CI state separately from merge-blocker state",
+        "A PR can have CI state `green` while merge-blocker state is `human-blocked`",
+        "Say `CI is green` only when current-sha CI/provider gates are proven terminal-success",
+        "CI is green, but the PR is still blocked by human/policy review.",
+        "Never lead with a standalone incomplete/complete label",
+        "CI state: `<green | red | waiting | unknown> for <SHA>, with helper/provider evidence>`",
+        "Merge-blocker state: `<green | needs-local-fix | waiting | human-blocked | tooling-blocked, with evidence>`",
+    ] {
+        if !text.contains(expected) {
+            return Err(format!(
+                "{}: clear-merge-blockers final report must split CI state from merge-blocker state; missing {expected:?}",
+                skill_path.display()
+            ));
+        }
+    }
+
+    let forbidden = [
+        "If the report is not `green`, explicitly say `",
+        "not complete",
+        "`.",
+    ]
+    .concat();
+    if text.contains(&forbidden) {
+        return Err(format!(
+            "{}: clear-merge-blockers must not collapse green CI plus human blockers into a generic incomplete label",
             skill_path.display()
         ));
     }

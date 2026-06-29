@@ -13,7 +13,7 @@ A request to study, review, explain, or plan this skill or a blocker surface doe
 
 Do not create branches, open reviews, merge PRs, force-push, reset, discard, stash, rebase a published branch, resolve comment threads, dismiss reviews, approve, post review replies, or merge/restart a merge queue unless explicitly requested. Stop before any write if the current branch is `main`, `master`, or the resolved remote default branch, unless the user explicitly named that branch as the write target.
 
-Never say or imply `done`, `complete`, `cleared`, `unblocked`, `merge-ready`, `CI is green`, `all green`, `passing`, or `no blockers` unless the terminal provider state gate below is satisfied with current hard evidence. Local checks prove only local behavior; they never prove hosted CI, required gates, mergeability, approvals, or policy state.
+Never say or imply `done`, `complete`, `cleared`, `unblocked`, `merge-ready`, `all green`, `passing`, or `no blockers` unless the terminal provider state gate below is satisfied with current hard evidence. Say `CI is green` only when current-sha CI/provider gates are proven terminal-success, and pair it with the merge-blocker state when non-CI blockers remain. Local checks prove only local behavior; they never prove hosted CI, required gates, mergeability, approvals, or policy state.
 
 ## Persistence contract
 
@@ -43,7 +43,9 @@ Treat the workflow as a persistent state machine. Each refresh must end in exact
 - `tooling-blocked`: provider data, logs, required-gate list, current SHA, or auth cannot be obtained after the allowed retry/auth step.
 - `green`: every merge-relevant provider gate is explicitly current and terminal-success, with no red, pending, missing, skipped, canceled, stale, or unknown gate.
 
-Only `green` permits a successful final claim that CI is green or the PR has no blockers. `needs-local-fix` and `waiting` are loop states while a safe next action exists. `human-blocked` and `tooling-blocked` are hard exit states only after the required evidence, retry, auth, or clarification step has been exhausted.
+Track CI state separately from merge-blocker state. CI state covers current-sha CI/provider gates only: `green`, `red`, `waiting`, or `unknown`. Merge-blocker state is the full terminal provider state above and includes review, policy, mergeability, and permissions. A PR can have CI state `green` while merge-blocker state is `human-blocked`.
+
+Only merge-blocker state `green` permits a successful final claim that the PR has no blockers. `needs-local-fix` and `waiting` are loop states while a safe next action exists. `human-blocked` and `tooling-blocked` are hard exit states only after the required evidence, retry, auth, or clarification step has been exhausted.
 
 Before claiming `green`, prove all of the following from provider data, not from inference:
 
@@ -195,15 +197,23 @@ Before claiming `green`, verify or report the blocker for each:
 
 Produce this final report only when the state is `green`, `human-blocked`, `tooling-blocked`, or `waiting` with an explicit user/harness limit that prevents another safe refresh. Do not produce it for `needs-local-fix`, or for `waiting` when another safe wait/refresh is available.
 
-If the report is not `green`, explicitly say `not complete`. Never use a final report to imply the merge-blocker goal is complete when any current-sha provider gate is red, pending, missing, skipped, canceled, stale, or unknown.
+Start with exactly one summary sentence that combines CI state and merge-blocker state:
+
+- `Complete: CI and merge blockers are green.`
+- `CI is green, but the PR is still blocked by human/policy review.`
+- `CI is not green: <exact red/pending/missing gate>.`
+- `Unable to prove CI state: <exact tooling blocker>.`
+
+Never lead with a standalone incomplete/complete label. Never use a final report to imply the merge-blocker goal is complete when review, policy, mergeability, permissions, or any current-sha provider gate remains red, pending, missing, skipped, canceled, stale, or unknown.
 
 - Target: `<review/branch or blocker>`
 - Latest checked SHA: `<source SHA and merge/synthetic SHA when relevant>`
-- Terminal provider state: `<green | needs-local-fix | waiting | human-blocked | tooling-blocked, with evidence>`
+- CI state: `<green | red | waiting | unknown> for <SHA>, with helper/provider evidence>`
+- Merge-blocker state: `<green | needs-local-fix | waiting | human-blocked | tooling-blocked, with evidence>`
 - CI/provider gates: `<all current-sha gates green | exact red/pending/missing/unknown gates>`
 - Active blocker handled: `<type/id -> action/evidence>`
 - Changed: `<files or none>`
 - Proof: `<targeted checks/results, reused proof, or proof gap>`
 - Publish/refresh: `<commit/push/rerun/wait/refreshed status | not needed | blocker>`
-- Remaining: `<none only when terminal provider state is green | exact blocker/state>`
+- Remaining: `<none only when merge-blocker state is green | exact blocker/state>`
 - Human action required: `<none or exact reviewer/policy/permission action>`
