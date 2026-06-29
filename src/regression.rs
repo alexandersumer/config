@@ -53,6 +53,7 @@ pub(crate) fn run_regression_tests() -> Result<()> {
     test_real_e2e_automated_tests_skill_requires_edge_case_proof()?;
     test_real_e2e_live_check_skill_rejects_test_lane_proof()?;
     test_git_publish_skills_keep_local_first_contract()?;
+    test_fresh_context_reviewer_subagent_parallel_contract()?;
     test_ghostty_config_rejects_tab_disappearance_regressions()?;
     test_install_command()?;
     test_link_safety()?;
@@ -468,6 +469,113 @@ fn test_git_publish_skills_keep_local_first_contract() -> Result<()> {
             return Err(format!(
                 "{}: git-publish must not describe expensive live default discovery as the usual resolver; found {forbidden:?}",
                 publish_path.display()
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn test_fresh_context_reviewer_subagent_parallel_contract() -> Result<()> {
+    let config_root = config_root_from_exe()?;
+    let skills_root = config_root.join(".agents/skills");
+    let mut covered = BTreeSet::new();
+
+    for entry in fs::read_dir(&skills_root)
+        .map_err(|err| format!("{}: cannot read skills: {err}", skills_root.display()))?
+    {
+        let entry = entry.map_err(|err| format!("cannot inspect skill entry: {err}"))?;
+        let path = entry.path();
+        if !entry
+            .file_type()
+            .map_err(|err| format!("{}: cannot inspect skill type: {err}", path.display()))?
+            .is_dir()
+            || entry.file_name().to_string_lossy().starts_with('.')
+        {
+            continue;
+        }
+
+        let skill_path = path.join("SKILL.md");
+        if !skill_path.is_file() {
+            continue;
+        }
+        let text = fs::read_to_string(&skill_path).map_err(|err| {
+            format!(
+                "{}: cannot read fresh-context reviewer-subagent skill: {err}",
+                skill_path.display()
+            )
+        })?;
+        if !uses_fresh_context_reviewer_subagents(&text) {
+            continue;
+        }
+
+        covered.insert(entry.file_name().to_string_lossy().to_string());
+        assert_safe_foreground_parallel_reviewer_contract(&skill_path, &text)?;
+    }
+
+    for required in [
+        "architecture-review-deep",
+        "design-review-deep",
+        "review-deep",
+        "strengthen-tests-deep",
+    ] {
+        if !covered.contains(required) {
+            return Err(format!(
+                "fresh-context reviewer-subagent coverage missed required skill {required:?}; covered {covered:?}"
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn uses_fresh_context_reviewer_subagents(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    lower.contains("fresh-context")
+        && lower.contains("reviewer")
+        && (lower.contains("reviewer-agent")
+            || lower.contains("invoke_agent")
+            || lower.contains("subagent"))
+}
+
+fn assert_safe_foreground_parallel_reviewer_contract(skill_path: &Path, text: &str) -> Result<()> {
+    for expected in [
+        "multi_tool_use.parallel",
+        "functions.invoke_agent",
+        "background=false",
+        "foreground parallel batch",
+        "direct foreground functions.invoke_agent calls",
+        "This is safe foreground batching, not forbidden wrapper delegation.",
+        "Run all initial roles together",
+        "Retry only invalid roles",
+        "second foreground parallel batch",
+        "Do not silently downgrade to sequential execution",
+        "stop with `Review inconclusive`",
+        "background=true",
+        "schedule_task",
+        "shelling out to external agent CLIs",
+        "unmanaged wrappers",
+        "recursive validation delegation",
+        "Reviewer output is candidate evidence, not authority",
+    ] {
+        if !text.contains(expected) {
+            return Err(format!(
+                "{}: fresh-context reviewer-subagent skills must state the safe foreground parallel reviewer contract; missing {expected:?}",
+                skill_path.display()
+            ));
+        }
+    }
+
+    for forbidden in [
+        "Run roles sequentially unless",
+        "scheduled/background/wrapper",
+        "background/wrapper",
+        "wrapper delegation or arbitrary external agent CLIs",
+    ] {
+        if text.contains(forbidden) {
+            return Err(format!(
+                "{}: fresh-context reviewer-subagent skill must not regress to ambiguous sequential or broad wrapper-ban wording; found {forbidden:?}",
+                skill_path.display()
             ));
         }
     }
