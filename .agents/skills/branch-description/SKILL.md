@@ -13,7 +13,12 @@ Resolve the comparison base from the remote default branch: use `origin/HEAD`, f
 
 Build one effective change set from every available source: `git log base..HEAD --oneline` and `git diff base..HEAD` when `base` exists, staged changes with `git diff --cached`, unstaged changes with `git diff`, and untracked files from `git ls-files --others --exclude-standard` rendered as new-file diffs. Always include staged, unstaged, and untracked changes even when the committed branch diff exists. If the committed branch diff is empty but the working tree has staged, unstaged, or untracked changes, describe those changes instead of treating the branch as empty. Ignore generated files, lockfiles, and formatting noise unless they are the change.
 
-If the effective change set is empty, output `clean` and stop.
+If the effective change set is empty, do not output bare `clean`. Output exactly one clear diagnostic sentence and stop, replacing placeholders:
+```text
+No branch description to write: current branch `<current-branch>` has no committed changes compared with remote default `<remote-default-ref>`, and there are no staged, unstaged, or untracked changes.
+```
+
+Use the exact current branch from `git branch --show-current`, or `HEAD` if detached. Use the exact resolved remote default ref from the base step, such as `origin/main`, `origin/master`, or another `origin/<branch>` from `origin/HEAD`; never assume `origin/main`. If no remote default or merge-base exists, replace the comparison clause with `has no resolved remote-default comparison base`, but still include that staged, unstaged, and untracked changes are absent.
 
 The cumulative effective diff is the source of truth. Use conversation context only to clarify intent that is supported by the diff; never let the most recent agent edit, latest local fix, or last commit dominate the title unless it is the primary branch-level change.
 
@@ -21,7 +26,7 @@ Before writing, identify the highest-level user-visible or system-behavior chang
 
 If the user asks for a "description", produce the Conventional Commit body/PR body in this format, still headed by the validated Conventional Commit subject. Do not answer with a branch activity summary.
 
-Output exactly:
+For non-empty effective changes, output exactly:
 ```text
 <type>[optional scope][!]: <description>
 
@@ -35,6 +40,6 @@ Subject regex:
 
 Rules: lowercase imperative description, no trailing period, no prefixes/emojis/issue keys unless footer-supported, `!` only with `BREAKING CHANGE:` footer.
 
-Do not output commit hashes, branch names, push results, PR URLs, test status, publish status, or labels like `Commit:`, `Subject:`, `Branch:`, or `Push/PR result:`.
+For non-empty effective changes, do not output commit hashes, branch names, push results, PR URLs, test status, publish status, or labels like `Commit:`, `Subject:`, `Branch:`, or `Push/PR result:`. The empty-diff diagnostic is the only exception that may name the current branch and remote default ref.
 
 Body: plain Conventional Commit paragraphs explaining what changed overall, why the branch exists, and how notable implementation details support the main change, grounded only in the cumulative diff/history/context. No headings, checklist, invented risk, or invented testing notes.

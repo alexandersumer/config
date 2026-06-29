@@ -48,6 +48,7 @@ pub(crate) fn run_regression_tests() -> Result<()> {
     test_new_skill_validate_flow()?;
     test_required_custom_skill_inventory_matches_current_skills()?;
     test_one_clear_sentence_skill_rewrites_recent_context()?;
+    test_branch_description_empty_diff_is_explicit()?;
     test_real_e2e_automated_tests_skill_requires_edge_case_proof()?;
     test_real_e2e_live_check_skill_rejects_test_lane_proof()?;
     test_git_publish_skills_keep_local_first_contract()?;
@@ -208,6 +209,44 @@ fn test_one_clear_sentence_skill_rewrites_recent_context() -> Result<()> {
             ));
         }
     }
+    Ok(())
+}
+
+fn test_branch_description_empty_diff_is_explicit() -> Result<()> {
+    let config_root = config_root_from_exe()?;
+    let skill_path = config_root.join(".agents/skills/branch-description/SKILL.md");
+    let text = fs::read_to_string(&skill_path).map_err(|err| {
+        format!(
+            "{}: cannot read branch-description skill: {err}",
+            skill_path.display()
+        )
+    })?;
+
+    for expected in [
+        "do not output bare `clean`",
+        "No branch description to write: current branch `<current-branch>`",
+        "remote default `<remote-default-ref>`",
+        "`origin/main`, `origin/master`, or another `origin/<branch>` from `origin/HEAD`",
+        "never assume `origin/main`",
+        "has no resolved remote-default comparison base",
+        "The empty-diff diagnostic is the only exception",
+    ] {
+        if !text.contains(expected) {
+            return Err(format!(
+                "{}: branch-description empty-diff output must be explicit and default-branch agnostic; missing {expected:?}",
+                skill_path.display()
+            ));
+        }
+    }
+
+    let forbidden = "If the effective change set is empty, output `clean` and stop.";
+    if text.contains(forbidden) {
+        return Err(format!(
+            "{}: branch-description must not emit ambiguous bare clean output",
+            skill_path.display()
+        ));
+    }
+
     Ok(())
 }
 
