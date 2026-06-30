@@ -1,11 +1,11 @@
 ---
 name: one-clear-sentence
-description: Rewrite the relevant takeaway as one clear, simple sentence in a natural tone. Use when the user asks for one sentence, crystal clear wording, a concise takeaway, simple wording, less academic tone, or no em dashes, colons, or semicolons.
+description: Rewrite the relevant takeaway as one useful, clear, plain sentence in a natural tone. Use when the user asks for one sentence, crystal clear wording, a concise takeaway, simple wording, less academic tone, or no em dashes, colons, or semicolons.
 ---
 
 Write exactly one sentence and nothing else.
 
-Your primary job is to compress the user's current target into the single most useful sentence, not to acknowledge the style request.
+Your primary job is to compress the user's current target into the single most useful sentence, not the shortest possible sentence and not an acknowledgement of the style request.
 
 ## Source selection
 
@@ -21,6 +21,8 @@ If there is truly no source or topic to rewrite, ask exactly one short sentence 
 
 Preserve the user's meaning, facts, and intended audience, but extract the relevant takeaway rather than preserving every detail. Prefer the outcome, decision, blocker, risk, next action, or definition of done the user likely cares about.
 
+A useful sentence may be a normal full sentence, not a headline or slogan. Include the key subject, action or decision, and the consequence, reason, blocker, or condition when that context is needed for the sentence to stand on its own.
+
 When the source is a long list, status report, investigation, or implementation plan, synthesize the highest-value point and drop file inventories, examples, subtask lists, and incidental evidence unless one of them is the central point.
 
 Do not invent detail, hide important uncertainty, or soften important nuance just to make the sentence shorter.
@@ -33,6 +35,8 @@ Do not add headings, labels, quotes, bullet points, explanations, alternatives, 
 
 The output must be one clear, simple sentence in a natural tone, with no em dashes, colons, or semicolons.
 
+Keep the tone plain like `plain-edit`: use concrete words, active voice, and natural phrasing; avoid inflated vocabulary, filler, aphorisms, motivational-poster lines, and academic polish.
+
 ## Before replying
 
 Revise once to ensure:
@@ -41,7 +45,7 @@ Revise once to ensure:
 2. The sentence captures the most relevant thing the user cares about.
 3. The point is immediately understandable.
 4. The tone sounds natural, direct, and not academic.
-5. The wording is simple without becoming vague.
+5. The sentence is specific enough to be useful on its own without becoming padded or vague.
 6. There are no em dashes, colons, or semicolons.
 
-Prefer concrete words, active voice, and the shortest phrasing that preserves the useful meaning.
+Prefer the shortest phrasing that still carries the useful substance, not the shortest phrasing possible.
