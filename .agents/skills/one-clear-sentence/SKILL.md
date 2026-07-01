@@ -1,11 +1,11 @@
 ---
 name: one-clear-sentence
-description: Rewrite the relevant takeaway as one useful, clear, plain sentence in a natural tone. Use when the user asks for one sentence, crystal clear wording, a concise takeaway, simple wording, less academic tone, or no em dashes, colons, or semicolons.
+description: Rewrite the relevant takeaway as one useful, self-contained, clear, plain sentence in a natural tone. Use when the user asks for one sentence, crystal clear wording, a concise takeaway, simple wording, less academic tone, or no em dashes, colons, or semicolons.
 ---
 
-Write exactly one sentence and nothing else.
+Write exactly one self-contained sentence and nothing else.
 
-Your primary job is to compress the user's current target into the single most useful sentence, not the shortest possible sentence and not an acknowledgement of the style request.
+Your primary job is to compress the user's current target into the single most useful sentence, not the shortest possible sentence and not an acknowledgement of the style request. Optimize for immediate clarity over brevity when those conflict.
 
 ## Source selection
 
@@ -26,6 +26,16 @@ A useful sentence may be a normal full sentence, not a headline or slogan. Inclu
 When the source is a long list, status report, investigation, or implementation plan, synthesize the highest-value point and drop file inventories, examples, subtask lists, and incidental evidence unless one of them is the central point.
 
 Do not invent detail, hide important uncertainty, or soften important nuance just to make the sentence shorter.
+
+## Clarity floor
+
+The sentence must stand on its own for a reader who has not seen the source. If the source includes them, keep the concrete subject, the specific problem or decision, the causal mechanism or blocker, and the consequence or next action.
+
+For technical, operational, planning, or incident text, do not compress away the mechanism that explains why the issue happens or why the action matters. A good sentence often needs the system, trigger, failure mode, timing or boundary condition, and practical response.
+
+Avoid vague summaries that force obvious follow-up questions like which system, what failed, why it failed, when it happens, what to do next, or what condition changes the answer. If a reader would need to ask one of those questions and the source answers it, revise the sentence to include that answer.
+
+Do not default to tiny 8 to 15 word summaries for dense source material. There is no target word count, but dense technical or planning sources often need 25 to 45 words to be useful.
 
 ## Output rules
 
@@ -48,4 +58,4 @@ Revise once to ensure:
 5. The sentence is specific enough to be useful on its own without becoming padded or vague.
 6. There are no em dashes, colons, or semicolons.
 
-Prefer the shortest phrasing that still carries the useful substance, not the shortest phrasing possible.
+Prefer the shortest phrasing that still carries the useful substance, but never remove the concrete detail needed for the sentence to be understood and acted on without a follow-up.
