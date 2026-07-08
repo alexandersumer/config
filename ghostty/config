@@ -2,8 +2,8 @@
 font-family = JetBrains Mono
 font-size = 14
 
-# Theme (follows macOS dark mode)
-theme = light:catppuccin-latte,dark:catppuccin-mocha
+# Theme
+theme = catppuccin-mocha
 
 # Window
 window-padding-x = 16
@@ -12,11 +12,13 @@ window-padding-balance = true
 window-new-tab-position = end
 
 # macOS
-# Avoid Ghostty/macOS 26 tabbar disappearance paths.
-macos-titlebar-style = transparent
+# Keep fullscreen tabs on the native macOS path. The transparent/titlebar-tabs
+# paths reproduce dark fullscreen tab chrome glitches on macOS 26; native tabs
+# avoid that custom path while dark chrome matches this Mac's appearance.
+macos-titlebar-style = native
 macos-non-native-fullscreen = false
+window-theme = dark
 window-save-state = never
-window-show-tab-bar = always
 
 # Treat the left Option key as Alt/Meta for shell shortcuts while keeping
 # right Option available for macOS text input and special characters.
