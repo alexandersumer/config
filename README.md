@@ -117,6 +117,7 @@ Expected symlink behavior:
 - `~/.zsh` links to this config checkout's `zsh` directory.
 - `~/.zshrc` links to this config checkout's `zsh/zshrc` file.
 - `~/.config/ghostty/config` links to this config checkout's `ghostty/config` file.
+- `~/Library/Application Support/com.mitchellh.ghostty/config` links to this config checkout's `ghostty/config` file.
 - `~/.config/relay/config.toml` links to this config checkout's `relay/config.toml` file.
 - `~/.local/bin/config-tools` is a runnable copy of the config helper.
 - `~/.local/bin/codex` is a managed launcher that repairs deprecated Codex config flags before delegating to `/opt/homebrew/bin/codex`.

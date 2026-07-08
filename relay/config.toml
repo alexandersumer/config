@@ -1,5 +1,5 @@
 [meta]
-config_version = 1
+config_version = 2
 
 [ui]
 theme = "catppuccin-mocha"
@@ -12,7 +12,8 @@ color_markdown_headings = false
 slash_panel_position = "bottom"
 vim_keybindings = false
 show_tips = true
-agent_summaries = false
+terminal_title_prompt_source = "smart"
+sticky_prompt_header_lines = 3
 
 [notifications]
 terminal_enabled = false
@@ -27,7 +28,7 @@ enabled = false
 allow_project_plugins = false
 paths = []
 trusted_workspaces = []
-disabled = ["bundled:j-gonzalez"]
+disabled = []
 
 [agents]
 default = "axiom"
@@ -37,9 +38,9 @@ default = "axiom"
 [agents.runners.alta]
 command = "/opt/atlassian/bin/atlas"
 args = ["alta", "agent", "run"]
-renderer = "alta"
+profile = "alta"
 
 [agents.runners.axiom]
 command = "/opt/atlassian/bin/atlas"
 args = ["alta", "agent", "run", "@atlassian/alta-agent-axiom-asumer"]
-renderer = "alta"
+profile = "alta"

@@ -79,6 +79,11 @@ fn test_ghostty_config_rejects_tab_disappearance_regressions() -> Result<()> {
 
     for (name, line, expected) in [
         (
+            "native titlebar",
+            "macos-titlebar-style = native",
+            "must set `macos-titlebar-style` to `transparent`",
+        ),
+        (
             "titlebar tabs",
             "macos-titlebar-style = tabs",
             "must not set `macos-titlebar-style` to `tabs`",
@@ -92,6 +97,16 @@ fn test_ghostty_config_rejects_tab_disappearance_regressions() -> Result<()> {
             "forced window restore",
             "window-save-state = always",
             "must not set `window-save-state` to `always`",
+        ),
+        (
+            "forced light window theme",
+            "window-theme = light",
+            "must not set `window-theme` to `light`",
+        ),
+        (
+            "unsupported macOS tabbar setting",
+            "window-show-tab-bar = always",
+            "must not set `window-show-tab-bar` to `always`",
         ),
     ] {
         let fixture = copy_fixture()?;
@@ -746,6 +761,12 @@ pub(crate) fn test_install_command() -> Result<()> {
     assert_symlink_resolves_to(&home.path().join(".zsh"), &fixture.path().join("zsh"))?;
     assert_symlink_resolves_to(
         &home.path().join(".config/ghostty/config"),
+        &fixture.path().join("ghostty/config"),
+    )?;
+    assert_symlink_resolves_to(
+        &home
+            .path()
+            .join("Library/Application Support/com.mitchellh.ghostty/config"),
         &fixture.path().join("ghostty/config"),
     )?;
     assert_symlink_resolves_to(

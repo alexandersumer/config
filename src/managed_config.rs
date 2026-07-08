@@ -109,7 +109,7 @@ const REQUIRED_GHOSTTY_SETTINGS: &[GhosttySetting] = &[
     GhosttySetting {
         key: "macos-titlebar-style",
         value: "transparent",
-        reason: "transparent keeps native macOS tab behavior instead of Ghostty's fragile custom titlebar tabs.",
+        reason: "transparent gives the most seamless dark fullscreen tab chrome on this Mac.",
     },
     GhosttySetting {
         key: "macos-non-native-fullscreen",
@@ -120,11 +120,6 @@ const REQUIRED_GHOSTTY_SETTINGS: &[GhosttySetting] = &[
         key: "window-save-state",
         value: "never",
         reason: "saved tab/window restoration is part of the known disappearing-tab failure path.",
-    },
-    GhosttySetting {
-        key: "window-show-tab-bar",
-        value: "always",
-        reason: "always showing the tab bar avoids auto show/hide transitions while debugging tab visibility.",
     },
 ];
 
@@ -143,5 +138,15 @@ const RISKY_GHOSTTY_SETTINGS: &[GhosttySetting] = &[
         key: "window-save-state",
         value: "always",
         reason: "forced window restoration is part of the upstream disappearing-tab reproduction.",
+    },
+    GhosttySetting {
+        key: "window-theme",
+        value: "light",
+        reason: "forced light chrome is the proven but visually mismatched workaround, not the final seamless config.",
+    },
+    GhosttySetting {
+        key: "window-show-tab-bar",
+        value: "always",
+        reason: "this setting is GTK-only in Ghostty and does not control macOS fullscreen tabs.",
     },
 ];

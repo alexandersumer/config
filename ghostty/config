@@ -12,12 +12,11 @@ window-padding-balance = true
 window-new-tab-position = end
 
 # macOS
-# Keep fullscreen tabs on the native macOS path. The transparent/titlebar-tabs
-# paths reproduce dark fullscreen tab chrome glitches on macOS 26; native tabs
-# avoid that custom path while dark chrome matches this Mac's appearance.
-macos-titlebar-style = native
+# Use transparent macOS chrome for the most seamless dark fullscreen tab look.
+# Keep native fullscreen and disable save-state restoration to avoid extra
+# tab/window transition paths.
+macos-titlebar-style = transparent
 macos-non-native-fullscreen = false
-window-theme = dark
 window-save-state = never
 
 # Treat the left Option key as Alt/Meta for shell shortcuts while keeping

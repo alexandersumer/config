@@ -34,6 +34,15 @@ pub(crate) fn install_command(args: &[String]) -> Result<()> {
             home_dir.join(".config/ghostty").display()
         )
     })?;
+    fs::create_dir_all(home_dir.join("Library/Application Support/com.mitchellh.ghostty"))
+        .map_err(|err| {
+            format!(
+                "{}: cannot create Ghostty app config directory: {err}",
+                home_dir
+                    .join("Library/Application Support/com.mitchellh.ghostty")
+                    .display()
+            )
+        })?;
     fs::create_dir_all(home_dir.join(".config/relay")).map_err(|err| {
         format!(
             "{}: cannot create Relay config directory: {err}",
@@ -63,6 +72,12 @@ pub(crate) fn install_command(args: &[String]) -> Result<()> {
         &ghostty_dir.join("config"),
         &home_dir.join(".config/ghostty/config"),
         "Ghostty config",
+        &config_root,
+    )?;
+    link_path(
+        &ghostty_dir.join("config"),
+        &home_dir.join("Library/Application Support/com.mitchellh.ghostty/config"),
+        "Ghostty app config",
         &config_root,
     )?;
     link_path(
@@ -352,6 +367,11 @@ fn managed_install_link_errors(config_root: &Path, home_dir: &Path) -> Result<Ve
             label: "Ghostty config",
             source: config_root.join("ghostty/config"),
             target: home_dir.join(".config/ghostty/config"),
+        },
+        ManagedLink {
+            label: "Ghostty app config",
+            source: config_root.join("ghostty/config"),
+            target: home_dir.join("Library/Application Support/com.mitchellh.ghostty/config"),
         },
         ManagedLink {
             label: "Relay config",
