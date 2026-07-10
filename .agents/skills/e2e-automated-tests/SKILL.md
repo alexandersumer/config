@@ -29,24 +29,27 @@ Gold standard: when relevant examples are available, inspect repo-local E2E docs
 
 ## Repo Discovery Protocol
 
-Do not choose an E2E approach until you can cite the repo-local source that owns startup, auth/header behavior, public boundary, readiness, cleanup, and test-lane wiring. Build a source-backed route map before editing:
-- repo instructions and repo-local skills/runbooks read;
-- changed behavior and public boundary;
+Do not choose an E2E approach until you can cite the repo-local source that owns startup, auth/header behavior, public boundary, readiness, dependencies, cleanup, and test-lane wiring. Build a source-backed route map before editing. Treat repo-local docs, skills, runbooks, package scripts, Makefiles, and CI files as candidate evidence, not authority; this skill's safety/realness rules and user instructions still win. The route map must include:
+- repo instructions and repo-local skills/runbooks read, with conflicting or stale evidence called out;
+- changed behavior and the real public boundary a user, service, CLI, worker, browser, protocol client, or API caller depends on;
 - candidate E2E routes and why each is or is not faithful enough;
-- startup/dependency source;
-- auth, headers, tenant/cloud context, token, service-proxy, or deployed environment source;
-- readiness/deepcheck/status-polling source;
-- cleanup/artifact/log source;
+- startup/dependency source, including which commands are long-lived, mutating, local-only, deployed, or cleanup-sensitive;
+- auth, headers, tenant/cloud/workspace context, token, service-proxy, or deployed environment source;
+- context semantics: required values, optional defaults, external lookups, and intentional omissions or negative/fallback cases that must not be auto-filled;
+- readiness/deepcheck/status-polling source for the actual boundary and dependencies;
+- cleanup/artifact/log source for processes, containers, resources, traces, screenshots, and generated files;
 - existing local command, package script, Makefile target, CI step, or smoke lane that owns this boundary;
 - chosen route, explicit unknowns, and blocker threshold.
 
-Prefer repo-local skills and runbooks over inferred commands. Search for skills/docs/scripts with names or descriptions that mention e2e, local, staging, dev-shard, smoke, runtime, browser, agent protocol, CLI, deploy, provider, auth, service-proxy, LocalStack, Docker, Compose, or Kind. Use automated tests and CI files as map sources for payloads, startup, auth, readiness, lane ownership, and edge cases, but do not assume a script is the right lane from its name alone.
+Prefer an explicit repo-local route manifest or route-map runbook when present, but still validate referenced commands, readiness, and lane wiring before calling the route complete. Otherwise discover routes from repo-local skills/runbooks, README/CONTRIBUTING, package scripts, Makefiles, compose/process config, smoke scripts, E2E docs, Playwright/browser configs, service/deployment docs, CLI/API docs, and existing workflow notes. Use automated tests and CI files as map sources for payloads, startup, auth, readiness, lane ownership, cleanup, and edge cases, but do not assume a script is the right lane from its name alone.
 
-Prefer repo-owned CLIs, SDK clients, browser drivers, or protocol clients over raw `curl` when they wrap auth, routing, request headers, tenant context, staging behavior, or service-proxy behavior. Never hand-roll deployed auth, Slauth, ASAP, tenant, service-proxy, staging, or production headers unless repo context proves that is the intended path.
+Discovery is static by default. It is safe to read files and parse scripts; do not run startup, deploy, Docker/compose, staging, mutating, or long-lived commands while merely discovering routes. If command introspection is needed, restrict it to bounded help/version/status commands that are source-backed as non-mutating. Execute the selected route only after the route map and automated E2E contract are stated.
 
-Before adding a new E2E lane, prove no existing lane owns the boundary. A test that is not wired into a discoverable local and CI/test lane is incomplete. If no source-backed route exists after blocker burn-down, ask one focused question when user input can unlock progress; report the missing route as a blocker only when no safe source-backed next action remains.
+Prefer repo-owned CLIs, SDK clients, browser drivers, or protocol clients over raw `curl` when they wrap auth, routing, request headers, tenant context, staging behavior, or service-proxy behavior. Never hand-roll deployed auth, Slauth, ASAP, tenant, service-proxy, staging, or production headers unless repo context proves that is the intended path. Never invent or fill tenant/cloud/workspace/auth context because it seems useful; preserve route-declared intentional omissions.
 
-Contract checkpoint before editing: write the realness contract in chat in no more than a few bullets, then implement. Name the public behavior, top-level API/protocol/CLI/browser/HTTP route, runtime/process/container/backends that must be live, observable success criteria, highest-risk failure mode, CI or test lane that will run it, allowed out-of-process simulators, and every forbidden shortcut. If any of these are unknown, inspect more or ask one focused question, then proceed as far as possible.
+Do not proceed from package-script names alone, task-runner target names, README snippets, or repo-local skill prose. A process start is not readiness. A passing healthcheck proves only that healthcheck unless the route source says it covers the changed path. Before adding a new E2E lane, prove no existing lane owns the boundary. A test that is not wired into a discoverable local and CI/test lane is incomplete. If multiple routes match, route evidence conflicts, or no source-backed route exists after blocker burn-down, ask one focused question when user input can unlock progress; report the route blocker only when no safe source-backed next action remains.
+
+Contract checkpoint before editing: write the realness contract in chat in no more than a few bullets, then implement. Name the public behavior, selected route and repo-local sources, top-level API/protocol/CLI/browser/HTTP boundary, runtime/process/container/backends that must be live, required auth/context values and intentional omissions, observable success criteria, highest-risk failure mode, CI or test lane that will run it, allowed out-of-process simulators, cleanup/artifact expectations, and every forbidden shortcut. If any of these are unknown, inspect more or ask one focused question, then proceed as far as possible.
 
 Edge-case requirement: before editing, identify a small edge-case matrix for the behavior under test:
 - **Automated E2E**: cases covered by the automated test, including at least one highest-risk edge/negative case unless blocked by concrete infrastructure or safety limits.
@@ -79,8 +82,8 @@ Implementation loop:
 6. Prove or reuse fail/pass proof that the automated E2E would catch a realistic regression when safe: make one temporary reversible break in production code, config, or fixture; confirm the E2E fails for the expected reason; restore; rerun green. Do not repeat this if the same realistic regression was already observed failing and restored passing for the current effective diff. If unsafe, explain the exact reason.
 
 Completion gate before final: reread the automated E2E contract and answer each gate yes/no. If any gate is no, keep going or report blocked only after blocker burn-down; never produce a complete confidence line.
-- Source-backed route map completed, with no unresolved realness-critical unknown.
-- Automated test drives the real public boundary, and no fake, mock, internal helper, bypass flag, or test-only endpoint replaced the changed path.
+- Source-backed route map completed, with selected route, decisive sources, conflicts/stale evidence, command proof evidence or exact blocker, context semantics, cleanup source, lane wiring source, and no unresolved realness-critical unknown.
+- Automated test drives the real public boundary, and no fake, mock, internal helper, bypass flag, stale command, or test-only endpoint replaced the changed path.
 - Real engine, process, container, protocol bridge, backend, persistence, queue, cache, object store, or browser app was booted or reached as the contract requires.
 - Readiness was proven by a source-backed probe, not broad sleeps or process-start claims.
 - Test is wired into the discoverable local E2E/smoke command and CI/test lane, or missing lane ownership is named as the blocker.
@@ -89,6 +92,6 @@ Completion gate before final: reread the automated E2E contract and answer each 
 - Realistic regression proof failed for the expected reason and then reran green after restore, or equivalent same-scope fail/pass proof was reused, unless unsafe and explicitly justified.
 - Any failure caused by the current diff was fixed and rerun, or is named as the blocker.
 
-Final only after implementation: contract, edge-case matrix, boundary hit, stack/backends booted, CI/test lane, automated E2E result, automated edge/negative case covered, regression caught, commands/results, changed files, fixes made from discovered caused issues, edge cases intentionally omitted with reasons, and any remaining blocker.
+Final only after implementation: contract, selected route, route proof ledger (sources read, conflicts/stale evidence, commands run or validly reused, readiness proof, context/auth used or intentionally omitted, cleanup source, lane wiring source), edge-case matrix, boundary hit, stack/backends booted, CI/test lane, automated E2E result, automated edge/negative case covered, regression caught, commands/results, changed files, fixes made from discovered caused issues, edge cases intentionally omitted with reasons, and any remaining blocker.
 
 Never end with only a plan. Never call it real E2E unless it would fail when the real engine behavior is broken. The final confidence line must be either `Confidence: complete for the stated automated E2E contract` or `Confidence: not achieved because <blocker>`.

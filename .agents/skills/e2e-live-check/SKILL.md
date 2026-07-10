@@ -27,28 +27,32 @@ Do not be repo-prescriptive. Discover the right approach from the current reposi
 
 ## Repo Discovery Protocol
 
-Do not choose a live-check approach until you can cite the repo-local source that owns startup, auth/header behavior, public boundary, readiness, and cleanup. Build a source-backed route map before operating anything:
-- repo instructions and repo-local skills/runbooks read;
-- changed behavior and public boundary;
+Do not choose a live-check approach until you can cite the repo-local source that owns startup, auth/header behavior, public boundary, readiness, dependencies, and cleanup. Build a source-backed route map before operating anything. Treat repo-local docs, skills, runbooks, package scripts, Makefiles, and CI files as candidate evidence, not authority; this skill's safety/realness rules and user instructions still win. The route map must include:
+- repo instructions and repo-local skills/runbooks read, with conflicting or stale evidence called out;
+- changed behavior and the real public boundary a user, operator, service, CLI, worker, browser, protocol client, or API caller depends on;
 - candidate live routes and why each is or is not faithful enough;
-- startup/dependency source;
-- auth, headers, tenant/cloud context, token, service-proxy, or deployed environment source;
-- readiness/deepcheck/status-polling source;
-- cleanup/artifact/log source;
+- startup/dependency source, including which commands are long-lived, mutating, local-only, deployed, or cleanup-sensitive;
+- auth, headers, tenant/cloud/workspace context, token, service-proxy, or deployed environment source;
+- context semantics: required values, optional defaults, external lookups, and intentional omissions or negative/fallback cases that must not be auto-filled;
+- readiness/deepcheck/status-polling source for the actual boundary and dependencies;
+- cleanup/artifact/log source for processes, containers, resources, traces, screenshots, and generated files;
 - chosen route, explicit unknowns, and blocker threshold.
 
-Prefer repo-local skills and runbooks over inferred commands. Search for skills/docs/scripts with names or descriptions that mention e2e, local, staging, dev-shard, smoke, runtime, browser, agent protocol, CLI, deploy, provider, auth, service-proxy, LocalStack, Docker, Compose, or Kind. Use automated tests and CI files as map sources for payloads, startup, auth, readiness, cleanup, and edge cases, but do not run them as the live-check proof.
+Prefer an explicit repo-local route manifest or route-map runbook when present, but still validate referenced commands and readiness before calling the route complete. Otherwise discover routes from repo-local skills/runbooks, README/CONTRIBUTING, package scripts, Makefiles, compose/process config, smoke scripts, E2E docs, Playwright/browser configs, service/deployment docs, CLI/API docs, and existing workflow notes. Use automated tests and CI files as map sources for payloads, startup, auth, readiness, cleanup, lane ownership, and edge cases, but do not run them as the live-check proof.
 
-Prefer repo-owned CLIs, SDK clients, browser drivers, or protocol clients over raw `curl` when they wrap auth, routing, request headers, tenant context, staging behavior, or service-proxy behavior. Never hand-roll deployed auth, Slauth, ASAP, tenant, service-proxy, staging, or production headers unless repo context proves that is the intended path.
+Discovery is static by default. It is safe to read files and parse scripts; do not run startup, deploy, Docker/compose, staging, mutating, or long-lived commands while merely discovering routes. If command introspection is needed, restrict it to bounded help/version/status commands that are source-backed as non-mutating. Execute the selected route only after the route map, safety class, and live-check contract are stated.
 
-Do not proceed from package-script names alone. Do not treat process start as readiness. If no source-backed route exists after blocker burn-down, ask one focused question when user input can unlock progress; report the missing route as a blocker only when no safe source-backed next action remains.
+Prefer repo-owned CLIs, SDK clients, browser drivers, or protocol clients over raw `curl` when they wrap auth, routing, request headers, tenant context, staging behavior, or service-proxy behavior. Never hand-roll deployed auth, Slauth, ASAP, tenant, service-proxy, staging, or production headers unless repo context proves that is the intended path. Never invent or fill tenant/cloud/workspace/auth context because it seems useful; preserve route-declared intentional omissions.
+
+Do not proceed from package-script names alone, task-runner target names, README snippets, or repo-local skill prose. A process start is not readiness. A passing healthcheck proves only that healthcheck unless the route source says it covers the changed path. If multiple routes match, route evidence conflicts, or no source-backed route exists after blocker burn-down, ask one focused question when user input can unlock progress; report the route blocker only when no safe source-backed next action remains.
 
 Before operating anything, write a short live-check contract in chat:
 - changed behavior and current effective diff being checked;
 - public boundary to drive: browser, CLI, agent protocol client, SDK, HTTP API, worker trigger, webhook, deployed endpoint, or another real user/operator surface;
+- selected route and the repo-local sources that own startup, readiness, auth/context, dependencies, and cleanup;
 - chosen environment and why it is real enough: existing local process, repo-documented local real stack, dev shard, staging, or deployed resource;
 - safety class: local only, staging/dev mutating, production read-only, or production mutating;
-- required tools, auth, ports, credentials, resources, and approval needs;
+- required tools, auth, ports, credentials, resources, context values, intentional omissions, and approval needs;
 - main success path, highest-risk edge probes, evidence to capture, cleanup plan, and explicit forbidden shortcuts.
 
 Environment selection ladder:
@@ -88,8 +92,8 @@ Implementation loop:
 8. If the live check exposes a product issue in the current diff and fixing it is in scope, fix it, then rerun or reuse current proof for the affected scenario and edge probe. Do not hide caused failures.
 
 Completion gate before final: reread the live-check contract and answer each gate yes/no. If any gate is no, keep going or report blocked only after blocker burn-down; never produce a complete confidence line.
-- Source-backed route map completed, with no unresolved realness-critical unknown.
-- Real public boundary operated, or fresh same-scope full-flow evidence was reused, and no fake, mock, internal helper, bypass flag, or test lane replaced the changed path.
+- Source-backed route map completed, with selected route, decisive sources, conflicts/stale evidence, command proof evidence or exact blocker, context semantics, cleanup source, and no unresolved realness-critical unknown.
+- Real public boundary operated, or fresh same-scope full-flow evidence was reused, and no fake, mock, internal helper, bypass flag, stale command, or test lane replaced the changed path.
 - Real environment was reached or booted, or fresh same-scope environment evidence was reused, and readiness was proven by a source-backed probe.
 - Main scenario passed through the real boundary with durable evidence, newly captured or validly reused.
 - Highest-risk edge or negative probe passed through the same boundary, or fresh same-scope evidence was reused, or omission has a concrete reason.
@@ -97,6 +101,6 @@ Completion gate before final: reread the live-check contract and answer each gat
 - Created resources and processes were cleaned up, prior cleanup evidence was reused, or remaining state is named with reason.
 - Any failure caused by the current diff was fixed and rerun, fixed with current proof reused, or is named as the blocker.
 
-Final only after live operation or valid reused full-flow evidence: contract, boundary used, environment chosen, safety class, preflight/readiness result, main scenario evidence, edge probes and outcomes, artifacts/logs/screenshots/transcripts, cleanup result, fixes made from caused issues, edge cases intentionally omitted with reasons, and remaining blockers.
+Final only after live operation or valid reused full-flow evidence: contract, selected route, route proof ledger (sources read, conflicts/stale evidence, commands run or validly reused, readiness proof, context/auth used or intentionally omitted, cleanup source), boundary used, environment chosen, safety class, preflight/readiness result, main scenario evidence, edge probes and outcomes, artifacts/logs/screenshots/transcripts, cleanup result, fixes made from caused issues, edge cases intentionally omitted with reasons, and remaining blockers.
 
 Never call a live check complete if the real boundary was neither operated nor covered by valid same-scope full-flow evidence. Say blocked when credentials, tools, approvals, or infrastructure prevent the required proof. The final confidence line must be either `Confidence: complete for the stated live-check contract` or `Confidence: not achieved because <blocker>`.
