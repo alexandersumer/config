@@ -148,6 +148,23 @@ def main() -> int:
             False,
         ),
         (
+            "stopped_pipeline_is_waiting",
+            {
+                **complete,
+                "pipelines": [
+                    {
+                        "name": "Pipeline - pullrequests: **",
+                        "state": {"name": "STOPPED"},
+                        "sha": HEAD_SHA,
+                        "required": True,
+                    }
+                ],
+            },
+            1,
+            "waiting",
+            False,
+        ),
+        (
             "nested_bitbucket_failed_pipeline_is_needs_local_fix",
             {
                 **complete,

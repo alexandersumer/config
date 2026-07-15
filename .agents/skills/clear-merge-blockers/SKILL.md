@@ -27,7 +27,7 @@ During waits, treat new user input as fresh blocker evidence when it claims CI i
 
 ## Provider reconciliation
 
-Current-sha red wins. If any merge-relevant provider surface for the latest source SHA reports `FAILED`, `ERROR`, `STOPPED`, rejected, timed out, or an equivalent red state, classify the workflow as `needs-local-fix` until that red signal is proven stale, superseded by a newer green run for the same gate, or unrelated with evidence. Do not let a queued/running/missing signal from another surface override a current red PR status, commit status, pipeline result, merge queue result, or check run.
+Current-sha red wins. If any merge-relevant provider surface for the latest source SHA reports `FAILED`, `ERROR`, rejected, timed out, or an equivalent red state, classify the workflow as `needs-local-fix` until that red signal is proven stale, superseded by a newer green run for the same gate, or unrelated with evidence. Do not let a queued/running/missing signal from another surface override a current red PR status, commit status, pipeline result, merge queue result, or check run.
 
 When provider surfaces disagree, query the exact gate by id/build number/status URL and reconcile by SHA, gate name/key, build number/UUID, and `updated_on`, `completed_on`, or equivalent timestamps. If exact logs are unavailable but a current red status summary exists, keep the red status as the active blocker and report the log-access proof gap; do not downgrade it to `waiting`.
 
@@ -56,7 +56,7 @@ Before claiming `green`, prove all of the following from provider data, not from
 - Mergeability/update/conflict state is satisfied.
 - Required comments/tasks, approvals, draft state, changes-requested state, Jira/compliance/custom policy gates, and permissions are satisfied or explicitly absent.
 
-If the complete required-gate set cannot be enumerated, the state is `tooling-blocked`, not `green`. If any gate is pending/running/missing/skipped/canceled, the state is `waiting`, not `green`. If any gate is red, the state is `needs-local-fix` when branch-caused evidence exists, otherwise `human-blocked`, `tooling-blocked`, or flaky/infrastructure as evidenced.
+If the complete required-gate set cannot be enumerated, the state is `tooling-blocked`, not `green`. If any gate is pending, running, missing, skipped, canceled, or stopped without a branch-caused diagnostic, the state is `waiting`, not `green`. If any gate is red, the state is `needs-local-fix` when branch-caused evidence exists, otherwise `human-blocked`, `tooling-blocked`, or flaky/infrastructure as evidenced.
 
 ### CI green helper
 

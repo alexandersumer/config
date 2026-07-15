@@ -13,7 +13,7 @@ Do not choose one side wholesale just to remove markers.
 
 Read conflict context and enough history from both sides. If incoming removed feature flags, dead code, deprecated APIs, or temporary constructs this branch did not introduce, accept the removal and adapt branch code.
 
-Search for `<<<<<<<`, `=======`, `>>>>>>>` after editing. Reuse proof when valid; otherwise run the build or most relevant available check if practical and justified by the proof policy. Do not mark files resolved while conflict markers remain or known merge-caused failures are unfixed.
+Resolve files reported as unmerged by Git; do not treat marker text in unrelated fixtures or documentation as a conflict. Search the unmerged files for `<<<<<<<`, `=======`, and `>>>>>>>` after editing. Reuse proof when valid; otherwise run the build or most relevant available check if practical and justified by the proof policy. Do not mark files resolved while conflict markers remain or known merge-caused failures are unfixed.
 
 Final:
 - Resolved: `<files>`

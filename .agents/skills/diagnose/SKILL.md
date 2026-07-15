@@ -9,9 +9,9 @@ Reuse proof only when it is visible, same-scope, after the last relevant edit, a
 
 Diagnose `symptom`, `$ARGUMENTS`, pasted error, or the conversation bug.
 
-Do not hypothesize without a feedback loop. First build the smallest deterministic agent-runnable signal that shows the user's failure: test, CLI command, HTTP script, browser script, trace replay, fixture harness, fuzz loop, differential run, or repeated stress loop for flakes. If no loop is possible, stop with what you tried and the artifact/access needed.
+Do not hypothesize without falsifiable evidence. Prefer the smallest deterministic agent-runnable signal that shows the user's failure: test, CLI command, HTTP script, browser script, trace replay, fixture harness, fuzz loop, differential run, or repeated stress loop for flakes. When reproduction is unsafe or impossible, continue only if static evidence, historical traces, or captured state can distinguish the ranked hypotheses; otherwise stop with what you tried and the artifact or access needed.
 
-Reproduce the real symptom, not a nearby failure. Capture the exact error, output, timing, or state that proves it.
+Confirm the real symptom through reproduction or captured evidence, not a nearby failure. Capture the exact error, output, timing, or state that proves it.
 
 Before changing code, write 3-5 ranked falsifiable hypotheses. Each must predict what observation or one-variable probe would confirm or refute it. Test the highest-signal probe first. Do not log everything; instrument only boundaries that distinguish hypotheses. Tag temporary logs with a unique `[DEBUG-...]` prefix.
 
@@ -21,10 +21,10 @@ Red flags: stop and return to the loop if you think "probably", "quick fix", "tr
 
 Fix the proven root cause only. Add or preserve a regression check at the seam that exercises the real bug pattern, unless stronger existing coverage already catches it. If no correct seam exists, say the architecture prevents a durable regression check and name the gap.
 
-Before final: rerun or reuse fresh proof for the original loop and regression check under the proof policy, then remove all `[DEBUG-...]` instrumentation and throwaway harnesses.
+Before final: rerun the original loop or revalidate the captured evidence, and rerun or reuse fresh proof for the regression check under the proof policy. Then remove all `[DEBUG-...]` instrumentation and throwaway harnesses.
 
 Final:
-- Reproduced: `<signal>`
+- Signal: `<reproduction or captured evidence>`
 - Cause: `<proven root cause>`
 - Fixed: `<files>`
 - Regression: `<check or no correct seam: gap>`
