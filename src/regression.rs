@@ -6,6 +6,7 @@ use crate::install::{
 };
 use crate::managed_config::validate_managed_configs;
 use crate::registry::{required_custom_skill_names, validate_registry};
+use regex::Regex;
 use std::collections::BTreeSet;
 use std::fs;
 #[cfg(unix)]
@@ -53,7 +54,10 @@ pub(crate) fn run_regression_tests() -> Result<()> {
     test_real_e2e_automated_tests_skill_requires_edge_case_proof()?;
     test_real_e2e_live_check_skill_rejects_test_lane_proof()?;
     test_git_publish_skills_keep_local_first_contract()?;
-    test_fresh_context_reviewer_subagent_parallel_contract()?;
+    test_deep_review_skills_require_portable_managed_reviewer_contract()?;
+    test_custom_skills_reject_accidental_environment_coupling()?;
+    test_study_skills_resolve_portable_collection_roots()?;
+    test_understand_system_is_workspace_first()?;
     test_ghostty_config_rejects_tab_disappearance_regressions()?;
     test_install_command()?;
     test_link_safety()?;
@@ -465,8 +469,10 @@ fn test_git_publish_skills_keep_local_first_contract() -> Result<()> {
         "Determine the PR provider from `git remote get-url --push origin`",
         "After the source branch has been pushed",
         "Do not add reviewers unless the user explicitly requested reviewers.",
-        "Save fresh PR metadata",
-        "Ensure the PR through `ensure_bitbucket_pr` with explicit source and destination branches and no reviewers unless reviewers were explicitly requested.",
+        "Provider-compatible managed PR path, when available",
+        "controlled PR facility compatible with the detected provider",
+        "Supply fresh PR metadata",
+        "Create or idempotently ensure the PR with explicit source and destination branches and no reviewers unless reviewers were explicitly requested.",
     ] {
         if !publish.contains(expected) {
             return Err(format!(
@@ -479,6 +485,9 @@ fn test_git_publish_skills_keep_local_first_contract() -> Result<()> {
         "usually from `git remote show origin`",
         "`git remote show origin`",
         "`git ls-remote --symref origin HEAD`",
+        "inspect_pr_context",
+        "save_pr_metadata",
+        "ensure_bitbucket_pr",
     ] {
         if publish.contains(forbidden) {
             return Err(format!(
@@ -491,10 +500,79 @@ fn test_git_publish_skills_keep_local_first_contract() -> Result<()> {
     Ok(())
 }
 
-fn test_fresh_context_reviewer_subagent_parallel_contract() -> Result<()> {
+fn test_deep_review_skills_require_portable_managed_reviewer_contract() -> Result<()> {
     let config_root = config_root_from_exe()?;
     let skills_root = config_root.join(".agents/skills");
-    let mut covered = BTreeSet::new();
+
+    for skill_name in [
+        "architecture-review-deep",
+        "design-review-deep",
+        "review-deep",
+        "strengthen-tests-deep",
+    ] {
+        let skill_path = skills_root.join(skill_name).join("SKILL.md");
+        let text = fs::read_to_string(&skill_path).map_err(|err| {
+            format!(
+                "{}: cannot read portable deep-review skill: {err}",
+                skill_path.display()
+            )
+        })?;
+
+        for expected in [
+            "native managed subagent mechanism",
+            "separate fresh contexts",
+            "collect a terminal result from each",
+            "one separately prompted context per role",
+            "explicitly constructed evidence packet",
+            "do not pass inherited session context, prior Reviewer output, or conclusions from this session",
+            "Run roles concurrently when the harness safely supports it.",
+            "Otherwise run them sequentially or in bounded waves as separate fresh contexts",
+            "limited concurrency changes latency, not the review contract",
+            "Collect every initial result before validating output or candidates.",
+            "detached or scheduled execution",
+            "recursive validation delegation",
+            "After collecting all initial results, retry only invalid roles once",
+            "smaller evidence packet and a new fresh context",
+            "Run multiple retries concurrently when safely supported; otherwise run them separately.",
+            "Do not rerun valid roles.",
+            "If any retried role is still invalid, stop with `Review inconclusive`.",
+            "Reviewer output is candidate evidence, not authority",
+        ] {
+            if !text.contains(expected) {
+                return Err(format!(
+                    "{}: deep-review skills must state the portable managed-reviewer contract; missing {expected:?}",
+                    skill_path.display()
+                ));
+            }
+        }
+
+        for forbidden in [
+            "multi_tool_use.parallel",
+            "functions.invoke_agent",
+            "background=false",
+            "`spawn_agent`",
+            "`schedule_task`",
+            "Axiom",
+        ] {
+            if text.contains(forbidden) {
+                return Err(format!(
+                    "{}: deep-review skills must not encode a harness-specific reviewer API; found {forbidden:?}",
+                    skill_path.display()
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn test_custom_skills_reject_accidental_environment_coupling() -> Result<()> {
+    let config_root = config_root_from_exe()?;
+    let skills_root = config_root.join(".agents/skills");
+    let mac_home = Regex::new(r"/Users/[A-Za-z0-9._-]+")
+        .map_err(|err| format!("invalid macOS home-path regression regex: {err}"))?;
+    let linux_home = Regex::new(r"/home/[A-Za-z0-9._-]+")
+        .map_err(|err| format!("invalid Linux home-path regression regex: {err}"))?;
 
     for entry in fs::read_dir(&skills_root)
         .map_err(|err| format!("{}: cannot read skills: {err}", skills_root.display()))?
@@ -514,29 +592,26 @@ fn test_fresh_context_reviewer_subagent_parallel_contract() -> Result<()> {
         if !skill_path.is_file() {
             continue;
         }
-        let text = fs::read_to_string(&skill_path).map_err(|err| {
-            format!(
-                "{}: cannot read fresh-context reviewer-subagent skill: {err}",
-                skill_path.display()
-            )
-        })?;
-        if !uses_fresh_context_reviewer_subagents(&text) {
-            continue;
+        let text = fs::read_to_string(&skill_path)
+            .map_err(|err| format!("{}: cannot read skill: {err}", skill_path.display()))?;
+
+        for forbidden in ["atlassian/alta-1", "~/oss", "~/atlassian"] {
+            if text.contains(forbidden) {
+                return Err(format!(
+                    "{}: custom skills must not depend on a fixed personal checkout or collection root; found {forbidden:?}",
+                    skill_path.display()
+                ));
+            }
         }
 
-        covered.insert(entry.file_name().to_string_lossy().to_string());
-        assert_safe_foreground_parallel_reviewer_contract(&skill_path, &text)?;
-    }
-
-    for required in [
-        "architecture-review-deep",
-        "design-review-deep",
-        "review-deep",
-        "strengthen-tests-deep",
-    ] {
-        if !covered.contains(required) {
+        for (line_index, line) in text.lines().enumerate() {
+            if !mac_home.is_match(line) && !linux_home.is_match(line) {
+                continue;
+            }
             return Err(format!(
-                "fresh-context reviewer-subagent coverage missed required skill {required:?}; covered {covered:?}"
+                "{}:{}: custom skills must resolve local resources instead of embedding a personal absolute home path; use a placeholder such as /Users/<username> in documentation",
+                skill_path.display(),
+                line_index + 1
             ));
         }
     }
@@ -544,52 +619,81 @@ fn test_fresh_context_reviewer_subagent_parallel_contract() -> Result<()> {
     Ok(())
 }
 
-fn uses_fresh_context_reviewer_subagents(text: &str) -> bool {
-    let lower = text.to_lowercase();
-    lower.contains("fresh-context")
-        && lower.contains("reviewer")
-        && (lower.contains("reviewer-agent")
-            || lower.contains("invoke_agent")
-            || lower.contains("subagent"))
-}
+fn test_study_skills_resolve_portable_collection_roots() -> Result<()> {
+    let config_root = config_root_from_exe()?;
+    for skill_name in ["study-code-oss", "study-code-atlassian"] {
+        let skill_path = config_root
+            .join(".agents/skills")
+            .join(skill_name)
+            .join("SKILL.md");
+        let text = fs::read_to_string(&skill_path)
+            .map_err(|err| format!("{}: cannot read study skill: {err}", skill_path.display()))?;
 
-fn assert_safe_foreground_parallel_reviewer_contract(skill_path: &Path, text: &str) -> Result<()> {
-    for expected in [
-        "multi_tool_use.parallel",
-        "functions.invoke_agent",
-        "background=false",
-        "foreground parallel batch",
-        "direct foreground functions.invoke_agent calls",
-        "This is safe foreground batching, not forbidden wrapper delegation.",
-        "Run all initial roles together",
-        "Retry only invalid roles",
-        "second foreground parallel batch",
-        "Do not silently downgrade to sequential execution",
-        "stop with `Review inconclusive`",
-        "background=true",
-        "schedule_task",
-        "shelling out to external agent CLIs",
-        "unmanaged wrappers",
-        "recursive validation delegation",
-        "Reviewer output is candidate evidence, not authority",
-    ] {
-        if !text.contains(expected) {
-            return Err(format!(
-                "{}: fresh-context reviewer-subagent skills must state the safe foreground parallel reviewer contract; missing {expected:?}",
-                skill_path.display()
-            ));
+        for expected in [
+            "Resolve candidate repositories in this order:",
+            "1. Explicit repository paths or names",
+            "2. The active workspace or current repository",
+            "3. Locally evidenced or configured bounded collection roots",
+            "4. Other bounded source collections explicitly exposed by the current environment.",
+            "Do not assume a named home-directory layout or recursively crawl the home directory.",
+            "If no bounded candidate location can be resolved, ask for",
+        ] {
+            if !text.contains(expected) {
+                return Err(format!(
+                    "{}: study skills must resolve repository collections portably; missing {expected:?}",
+                    skill_path.display()
+                ));
+            }
         }
     }
 
-    for forbidden in [
-        "Run roles sequentially unless",
-        "scheduled/background/wrapper",
-        "background/wrapper",
-        "wrapper delegation or arbitrary external agent CLIs",
-    ] {
-        if text.contains(forbidden) {
+    Ok(())
+}
+
+fn test_understand_system_is_workspace_first() -> Result<()> {
+    let skill_path = config_root_from_exe()?.join(".agents/skills/understand-system/SKILL.md");
+    let text = fs::read_to_string(&skill_path).map_err(|err| {
+        format!(
+            "{}: cannot read understand-system skill: {err}",
+            skill_path.display()
+        )
+    })?;
+
+    let ordered_steps = [
+        "1. Expand explicit paths and inspect existing paths directly.",
+        "2. Inspect the active workspace or current repository",
+        "3. Follow locally evidenced related paths",
+        "4. Search existing bounded collection roots",
+        "5. Match exact directory basenames before case-insensitive or common prefix/suffix variants.",
+    ];
+    let mut previous_position = None;
+    for expected in ordered_steps {
+        let position = text.find(expected).ok_or_else(|| {
+            format!(
+                "{}: understand-system must resolve the active workspace before optional collection roots; missing {expected:?}",
+                skill_path.display()
+            )
+        })?;
+        if previous_position.is_some_and(|previous| position <= previous) {
             return Err(format!(
-                "{}: fresh-context reviewer-subagent skill must not regress to ambiguous sequential or broad wrapper-ban wording; found {forbidden:?}",
+                "{}: understand-system resolution steps are out of order at {expected:?}",
+                skill_path.display()
+            ));
+        }
+        previous_position = Some(position);
+    }
+
+    for expected in [
+        "optional fallbacks, not an exhaustive or required layout",
+        "Resolve evidence-derived paths and symlink targets canonically before reading them.",
+        "Follow them automatically only when they remain inside an explicit target, the active workspace, or an established bounded collection root.",
+        "For any other outside path, report the resolved path and discovery evidence, inspect metadata only, and ask before reading contents.",
+        "Use fuzzy matches only to produce a short candidate list; do not guess silently.",
+        "Do not recursively search an entire home directory",
+    ] {
+        if !text.contains(expected) {
+            return Err(format!(
+                "{}: understand-system must keep collection-root discovery bounded; missing {expected:?}",
                 skill_path.display()
             ));
         }

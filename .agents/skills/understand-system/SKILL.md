@@ -1,6 +1,6 @@
 ---
 name: understand-system
-description: Understand one or more local codebases as a system. Searches ~/oss, ~/atlassian, and ~/src, then maps architecture, relationships, real flows, contracts, local runtime/debug context, validation seams, and evidence gaps.
+description: Understand one or more local codebases as a system. Resolves explicit targets and the active workspace first, then maps architecture, relationships, real flows, contracts, local runtime/debug context, validation seams, and evidence gaps.
 ---
 
 # Understand System
@@ -15,18 +15,17 @@ Use this for questions like: how does this work, how do these repos relate, wher
 
 If the target is unclear after reading the conversation, ask one concise narrowing question and stop.
 
-Search for named codebases under these roots unless explicit paths are provided:
-
-- `~/oss`
-- `~/atlassian`
-- `~/src`
-
 Resolution order:
 
 1. Expand explicit paths and inspect existing paths directly.
-2. Match exact directory basenames under the search roots.
-3. Match case-insensitive and common prefix/suffix variants.
-4. Use fuzzy matches only to produce a short candidate list; do not guess silently.
+2. Inspect the active workspace or current repository when it matches the target or no narrower path was named.
+3. Follow locally evidenced related paths from workspace manifests, repository instructions, referenced files, and configuration.
+4. Search existing bounded collection roots configured or conventional for the current environment. Treat source collections under a user workspace or home directory as optional fallbacks, not an exhaustive or required layout.
+5. Match exact directory basenames before case-insensitive or common prefix/suffix variants. Use fuzzy matches only to produce a short candidate list; do not guess silently.
+
+Resolve evidence-derived paths and symlink targets canonically before reading them. Follow them automatically only when they remain inside an explicit target, the active workspace, or an established bounded collection root. For any other outside path, report the resolved path and discovery evidence, inspect metadata only, and ask before reading contents.
+
+Do not recursively search an entire home directory when explicit, workspace, evidenced, and bounded-root discovery fails. Ask for the path instead.
 
 Detect repo roots by `.git`, README, package/workspace files, language/build config, or clear source layout. Prefer shallow repo-like directories before deep filesystem walks. Avoid generated, vendored, dependency, cache, and build-output directories unless evidence says they are part of the system contract.
 

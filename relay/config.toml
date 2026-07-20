@@ -1,5 +1,5 @@
 [meta]
-config_version = 2
+config_version = 3
 
 [ui]
 theme = "catppuccin-mocha"
@@ -10,6 +10,7 @@ succinct_tool_results = true
 color_tool_names = true
 color_markdown_headings = false
 slash_panel_position = "bottom"
+disabled_builtin_slash_commands = ["review"]
 vim_keybindings = false
 show_tips = true
 terminal_title_prompt_source = "smart"
@@ -43,4 +44,9 @@ profile = "alta"
 [agents.runners.axiom]
 command = "/opt/atlassian/bin/atlas"
 args = ["alta", "agent", "run", "@atlassian/alta-agent-axiom-asumer"]
+profile = "alta"
+
+[agents.runners.code-agent]
+command = "/opt/atlassian/bin/atlas"
+args = ["alta", "agent", "run", "code-agent"]
 profile = "alta"

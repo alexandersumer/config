@@ -64,9 +64,9 @@ Determine the PR provider from `git remote get-url --push origin` before choosin
 
 Never use Bitbucket MCP to create, list, inspect, or update pull requests during publish. Do not add reviewers unless the user explicitly requested reviewers.
 
-### Bitbucket canonical-tool preferred path, when available
+### Provider-compatible managed PR path, when available
 
-Use this path when the current harness exposes canonical PR metadata tools such as `inspect_pr_context`, `save_pr_metadata`, and `ensure_bitbucket_pr`.
+Use this path when the current harness exposes a controlled PR facility compatible with the detected provider. Use it only when it can inspect repository identity and existing branch PRs, carry fresh title/body metadata when required, and create or idempotently ensure a PR with explicit source and destination branches. Otherwise use the provider CLI fallback below.
 
 1. Determine the target repository root from shell git, not from assumptions:
 
@@ -74,12 +74,12 @@ Use this path when the current harness exposes canonical PR metadata tools such 
    git rev-parse --show-toplevel
    ```
 
-2. Inspect canonical PR context for that root after the source branch is pushed. Pass `workspaceRoot` when the tool supports it. The reported git root, source branch, and destination branch must match the repository being published.
-3. Save fresh PR metadata using:
+2. Inspect PR context for that root after the source branch is pushed. Pass the workspace root when the facility supports it. The reported git root, provider, source branch, and destination branch must match the repository being published.
+3. Supply fresh PR metadata using:
    - the same Conventional Commit subject as the PR title
    - a grounded body describing what changed and why
    - the exact diff fingerprint returned by the inspection step
-4. Ensure the PR through `ensure_bitbucket_pr` with explicit source and destination branches and no reviewers unless reviewers were explicitly requested.
+4. Create or idempotently ensure the PR with explicit source and destination branches and no reviewers unless reviewers were explicitly requested.
 5. If the tool reports an existing PR for the branch, report that PR and stop. Do not create a duplicate.
 6. If the tool reports stale/wrong-repo metadata, regenerate metadata for the shell-reported repository root and retry once. If it still fails, stop with the exact blocker.
 

@@ -1,17 +1,26 @@
 ---
 name: study-code-oss
-description: Study local OSS repositories in ~/oss with the current agent to extract excellent, evidence-backed implementation and architecture patterns for a requested or inferred aspect.
+description: Study locally available OSS repositories with the current agent to extract excellent, evidence-backed implementation and architecture patterns for a requested or inferred aspect.
 ---
 
 # Study Code: OSS
 
-Study `aspect`, else `$ARGUMENTS`, else infer the aspect from the conversation, active design, or current implementation need. Use only the current agent. Do not invoke subagents. Do not edit repositories under `~/oss`; this is a read-only research skill unless the user separately asks for changes.
+Study `aspect`, else `$ARGUMENTS`, else infer the aspect from the conversation, active design, or current implementation need. Use only the current agent. Do not invoke subagents. Do not edit inspected repositories; this is a read-only research skill unless the user separately asks for changes.
 
 ## Resolve the study target
 
 If the aspect is unclear after reading the conversation, ask one narrowing question and stop. Good aspects include error handling, CLI architecture, testing seams, fixture design, dependency injection, configuration loading, API boundaries, plugin systems, state machines, migrations, observability, package layout, and type-safe domain modeling.
 
-If the user names repos or paths, inspect those. Otherwise, search `~/oss` for candidates and choose a small set before deep reading. Prefer mature, active, well-tested, well-documented repos that are idiomatic for their language and relevant to the aspect. Avoid random, toy, abandoned, generated, vendored, or low-signal repositories. If many repos match, pick the 1-3 strongest and say why before deep inspection.
+Resolve candidate repositories in this order:
+
+1. Explicit repository paths or names from the user or conversation.
+2. The active workspace or current repository when it is an OSS project relevant to the aspect.
+3. Locally evidenced or configured bounded collection roots from workspace manifests, repository instructions, harness workspace metadata, or existing configuration.
+4. Other bounded source collections explicitly exposed by the current environment.
+
+Do not assume a named home-directory layout or recursively crawl the home directory. If no bounded candidate location can be resolved, ask for an OSS repository or collection path.
+
+Choose a small candidate set before deep reading. Prefer mature, active, well-tested, well-documented repos that are idiomatic for their language and relevant to the aspect. Avoid random, toy, abandoned, generated, vendored, or low-signal repositories. If many repos match, pick the 1-3 strongest and say why before deep inspection.
 
 ## Exploration workflow
 

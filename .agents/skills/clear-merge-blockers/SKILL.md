@@ -62,13 +62,13 @@ If the complete required-gate set cannot be enumerated, the state is `tooling-bl
 
 For any final CI/provider classification, run the bundled helper after collecting a complete provider snapshot unless provider access itself is the blocker.
 
-Use the helper from this skill bundle, not from the target repository. In this checkout, run:
+Use the helper from this skill bundle, not from the target repository. Resolve the skill directory from the loaded `clear-merge-blockers/SKILL.md`, then run:
 
 ```bash
-python3 /Users/asumer/src/config/.agents/skills/clear-merge-blockers/scripts/ci_green_gate.py <snapshot.json>
+python3 <skill-directory>/scripts/ci_green_gate.py <snapshot.json>
 ```
 
-If the skill is installed elsewhere, locate `ci_green_gate.py` beside the loaded `clear-merge-blockers/SKILL.md`. Do not run `<target-repo>/scripts/ci_green_gate.py` unless that file is explicitly the bundled helper. If helper execution fails because the path was resolved relative to the target repo, correct the path and rerun; do not report the helper as absent or finish from that failed invocation.
+Do not run `<target-repo>/scripts/ci_green_gate.py` unless that file is explicitly the bundled helper. If helper execution fails because the path was resolved relative to the target repo, correct the path and rerun; do not report the helper as absent or finish from that failed invocation.
 
 Normalize the snapshot to JSON with:
 

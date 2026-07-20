@@ -1,17 +1,26 @@
 ---
 name: study-code-atlassian
-description: Study local Atlassian repositories in ~/atlassian with the current agent to extract excellent, evidence-backed internal implementation and architecture patterns for a requested or inferred aspect.
+description: Study locally available Atlassian repositories with the current agent to extract excellent, evidence-backed internal implementation and architecture patterns for a requested or inferred aspect.
 ---
 
 # Study Code: Atlassian
 
-Study `aspect`, else `$ARGUMENTS`, else infer the aspect from the conversation, active design, current implementation need, or Atlassian product context. Use only the current agent. Do not invoke subagents. Do not edit repositories under `~/atlassian`; this is a read-only research skill unless the user separately asks for changes.
+Study `aspect`, else `$ARGUMENTS`, else infer the aspect from the conversation, active design, current implementation need, or Atlassian product context. Use only the current agent. Do not invoke subagents. Do not edit inspected repositories; this is a read-only research skill unless the user separately asks for changes.
 
 ## Resolve the study target
 
 If the aspect is unclear after reading the conversation, ask one narrowing question and stop. Good aspects include Effect service layering, typed boundaries, error handling, API clients, storage schemas, migrations, testing seams, fixture design, dependency injection, configuration loading, product integration boundaries, observability, rollout paths, package layout, and domain modeling.
 
-If the user names repos or paths, inspect those. Otherwise, search `~/atlassian` for candidates and choose a small set before deep reading. Prefer production-mature repositories with strong local instructions, tests, typed boundaries, clear ownership, documented conventions, and architecture that is relevant to the aspect. Avoid broad monorepo wandering, generated code, vendored code, stale experiments, and low-signal repositories. If many repos match, pick the 1-3 strongest and say why before deep inspection.
+Resolve candidate repositories in this order:
+
+1. Explicit repository paths or names from the user or conversation.
+2. The active workspace or current repository when it is an Atlassian codebase relevant to the aspect.
+3. Locally evidenced or configured bounded collection roots from workspace manifests, repository instructions, harness workspace metadata, or existing configuration.
+4. Other bounded source collections explicitly exposed by the current environment.
+
+Do not assume a named home-directory layout or recursively crawl the home directory. If no bounded candidate location can be resolved, ask for an Atlassian repository or collection path.
+
+Choose a small candidate set before deep reading. Prefer production-mature repositories with strong local instructions, tests, typed boundaries, clear ownership, documented conventions, and architecture that is relevant to the aspect. Avoid broad monorepo wandering, generated code, vendored code, stale experiments, and low-signal repositories. If many repos match, pick the 1-3 strongest and say why before deep inspection.
 
 ## Confidentiality posture
 

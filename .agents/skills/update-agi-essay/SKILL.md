@@ -21,7 +21,7 @@ The essay must read like the existing author, not like a source roundup. Avoid p
 
 ## Start state
 
-1. Resolve the site repo first. Default to `/Users/asumer/src/alexandersumer.com`; stop if `src/content/blog/what-to-do-if-you-take-agi-seriously.md` is missing.
+1. Resolve the site repo first from an explicit path, the active repository, or a locally discoverable `alexandersumer.com` checkout under existing configured workspace roots. Do not assume a personal absolute path or broadly crawl the home directory. Ask for the repo path if no bounded candidate contains `src/content/blog/what-to-do-if-you-take-agi-seriously.md`.
 2. Inspect repository context before edits:
    - `git status --short`
    - `wc -w src/content/blog/what-to-do-if-you-take-agi-seriously.md`
