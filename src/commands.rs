@@ -1,15 +1,13 @@
 use crate::cli::parse_config_args;
 use crate::error::Result;
 use crate::install::check_install_command;
-use crate::managed_config::validate_managed_configs;
 use crate::registry::validate_registry;
 use crate::regression::run_regression_tests;
 use std::path::Path;
 
 pub(crate) fn validate_command(args: &[String]) -> Result<()> {
     let (config_root, _) = parse_config_args(args, false)?;
-    let mut errors = validate_registry(&config_root);
-    errors.extend(validate_managed_configs(&config_root));
+    let errors = validate_registry(&config_root);
     if !errors.is_empty() {
         let mut output = String::from("Config validation failed:");
         for error in errors {

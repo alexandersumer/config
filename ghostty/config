@@ -12,15 +12,7 @@ window-padding-balance = true
 window-new-tab-position = end
 
 # macOS
-# Use transparent macOS chrome for the most seamless dark fullscreen tab look.
-# Keep native fullscreen and disable save-state restoration to avoid extra
-# tab/window transition paths.
 macos-titlebar-style = transparent
-macos-non-native-fullscreen = false
-window-save-state = never
-
-# Treat the left Option key as Alt/Meta for shell shortcuts while keeping
-# right Option available for macOS text input and special characters.
 macos-option-as-alt = left
 
 # Shell

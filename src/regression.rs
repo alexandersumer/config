@@ -4,7 +4,6 @@ use crate::error::Result;
 use crate::install::{
     check_claude_skills_command, check_codex_skills_command, check_install_command, install_command,
 };
-use crate::managed_config::validate_managed_configs;
 use crate::registry::{required_custom_skill_names, validate_registry};
 use regex::Regex;
 use std::collections::BTreeSet;
@@ -58,7 +57,6 @@ pub(crate) fn run_regression_tests() -> Result<()> {
     test_custom_skills_reject_accidental_environment_coupling()?;
     test_study_skills_resolve_portable_collection_roots()?;
     test_understand_system_is_workspace_first()?;
-    test_ghostty_config_rejects_tab_disappearance_regressions()?;
     test_install_command()?;
     test_link_safety()?;
     test_command_failures()?;
@@ -68,78 +66,6 @@ pub(crate) fn run_regression_tests() -> Result<()> {
     test_axiom_alias_zsh_wiring()?;
     test_pure_prompt_syncs_git_branch_after_cd()?;
     test_relay_axiom_config()?;
-    Ok(())
-}
-
-fn test_ghostty_config_rejects_tab_disappearance_regressions() -> Result<()> {
-    let fixture = copy_fixture()?;
-    let clean_errors = validate_managed_configs(fixture.path());
-    if !clean_errors.is_empty() {
-        return Err(format!(
-            "clean Ghostty config should pass managed-config validation:\n{}",
-            clean_errors.join("\n")
-        ));
-    }
-
-    for (name, line, expected) in [
-        (
-            "native titlebar",
-            "macos-titlebar-style = native",
-            "must set `macos-titlebar-style` to `transparent`",
-        ),
-        (
-            "titlebar tabs",
-            "macos-titlebar-style = tabs",
-            "must not set `macos-titlebar-style` to `tabs`",
-        ),
-        (
-            "non-native fullscreen",
-            "macos-non-native-fullscreen = true",
-            "must not set `macos-non-native-fullscreen` to `true`",
-        ),
-        (
-            "forced window restore",
-            "window-save-state = always",
-            "must not set `window-save-state` to `always`",
-        ),
-        (
-            "forced light window theme",
-            "window-theme = light",
-            "must not set `window-theme` to `light`",
-        ),
-        (
-            "unsupported macOS tabbar setting",
-            "window-show-tab-bar = always",
-            "must not set `window-show-tab-bar` to `always`",
-        ),
-    ] {
-        let fixture = copy_fixture()?;
-        let ghostty_config = fixture.path().join("ghostty/config");
-        let mut text = fs::read_to_string(&ghostty_config).map_err(|err| {
-            format!(
-                "{}: cannot read fixture Ghostty config: {err}",
-                ghostty_config.display()
-            )
-        })?;
-        text.push('\n');
-        text.push_str(line);
-        text.push('\n');
-        fs::write(&ghostty_config, text).map_err(|err| {
-            format!(
-                "{}: cannot write fixture Ghostty config: {err}",
-                ghostty_config.display()
-            )
-        })?;
-
-        let errors = validate_managed_configs(fixture.path());
-        let output = errors.join("\n");
-        if !output.contains(expected) {
-            return Err(format!(
-                "{name}: Ghostty managed-config guard missed {expected:?}\n{output}"
-            ));
-        }
-    }
-
     Ok(())
 }
 
@@ -728,18 +654,37 @@ pub(crate) fn test_install_command() -> Result<()> {
     create_codex_system_skills(home.path())?;
     fs::create_dir_all(home.path().join(".relay"))
         .map_err(|err| format!("cannot create legacy Relay config fixture dir: {err}"))?;
+    let ghostty_app_config_dir = home
+        .path()
+        .join("Library/Application Support/com.mitchellh.ghostty");
+    fs::create_dir_all(&ghostty_app_config_dir)
+        .map_err(|err| format!("cannot create duplicate Ghostty config fixture dir: {err}"))?;
     #[cfg(unix)]
-    unix_fs::symlink(
-        fixture.path().join("relay/config.toml"),
-        home.path().join(".relay/config.toml"),
-    )
-    .map_err(|err| format!("cannot create legacy Relay config fixture symlink: {err}"))?;
+    {
+        unix_fs::symlink(
+            fixture.path().join("relay/config.toml"),
+            home.path().join(".relay/config.toml"),
+        )
+        .map_err(|err| format!("cannot create legacy Relay config fixture symlink: {err}"))?;
+        unix_fs::symlink(
+            fixture.path().join("ghostty/config"),
+            ghostty_app_config_dir.join("config"),
+        )
+        .map_err(|err| format!("cannot create duplicate Ghostty config fixture symlink: {err}"))?;
+    }
     #[cfg(not(unix))]
-    fs::copy(
-        fixture.path().join("relay/config.toml"),
-        home.path().join(".relay/config.toml"),
-    )
-    .map_err(|err| format!("cannot create legacy Relay config fixture file: {err}"))?;
+    {
+        fs::copy(
+            fixture.path().join("relay/config.toml"),
+            home.path().join(".relay/config.toml"),
+        )
+        .map_err(|err| format!("cannot create legacy Relay config fixture file: {err}"))?;
+        fs::copy(
+            fixture.path().join("ghostty/config"),
+            ghostty_app_config_dir.join("config"),
+        )
+        .map_err(|err| format!("cannot create duplicate Ghostty config fixture file: {err}"))?;
+    }
     let codex_config = home.path().join(".codex/config.toml");
     fs::write(
         &codex_config,
@@ -779,6 +724,7 @@ pub(crate) fn test_install_command() -> Result<()> {
     for expected in [
         "Managed config installation drift detected",
         ".config/relay/config.toml",
+        "Ghostty loads it after ~/.config/ghostty/config",
         ".relay remains but Relay now reads ~/.config/relay",
         "deprecated [features].codex_hooks must be removed",
         "[features].apps must not be forced off",
@@ -867,12 +813,15 @@ pub(crate) fn test_install_command() -> Result<()> {
         &home.path().join(".config/ghostty/config"),
         &fixture.path().join("ghostty/config"),
     )?;
-    assert_symlink_resolves_to(
-        &home
-            .path()
-            .join("Library/Application Support/com.mitchellh.ghostty/config"),
-        &fixture.path().join("ghostty/config"),
-    )?;
+    let duplicate_ghostty_app_config = home
+        .path()
+        .join("Library/Application Support/com.mitchellh.ghostty/config");
+    if duplicate_ghostty_app_config.exists() || duplicate_ghostty_app_config.is_symlink() {
+        return Err(format!(
+            "install should remove duplicate Ghostty app config: {}",
+            duplicate_ghostty_app_config.display()
+        ));
+    }
     assert_symlink_resolves_to(
         &home.path().join(".config/relay/config.toml"),
         &fixture.path().join("relay/config.toml"),

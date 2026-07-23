@@ -34,15 +34,6 @@ pub(crate) fn install_command(args: &[String]) -> Result<()> {
             home_dir.join(".config/ghostty").display()
         )
     })?;
-    fs::create_dir_all(home_dir.join("Library/Application Support/com.mitchellh.ghostty"))
-        .map_err(|err| {
-            format!(
-                "{}: cannot create Ghostty app config directory: {err}",
-                home_dir
-                    .join("Library/Application Support/com.mitchellh.ghostty")
-                    .display()
-            )
-        })?;
     fs::create_dir_all(home_dir.join(".config/relay")).map_err(|err| {
         format!(
             "{}: cannot create Relay config directory: {err}",
@@ -74,12 +65,7 @@ pub(crate) fn install_command(args: &[String]) -> Result<()> {
         "Ghostty config",
         &config_root,
     )?;
-    link_path(
-        &ghostty_dir.join("config"),
-        &home_dir.join("Library/Application Support/com.mitchellh.ghostty/config"),
-        "Ghostty app config",
-        &config_root,
-    )?;
+    cleanup_duplicate_ghostty_app_config(&home_dir, &ghostty_dir.join("config"))?;
     link_path(
         &relay_dir.join("config.toml"),
         &home_dir.join(".config/relay/config.toml"),
@@ -117,11 +103,49 @@ pub(crate) fn install_command(args: &[String]) -> Result<()> {
     Ok(())
 }
 
+fn cleanup_duplicate_ghostty_app_config(
+    home_dir: &Path,
+    managed_ghostty_config: &Path,
+) -> Result<()> {
+    let app_config_dir = home_dir.join("Library/Application Support/com.mitchellh.ghostty");
+    let app_config = app_config_dir.join("config");
+
+    if config_matches_managed(&app_config, managed_ghostty_config)? {
+        fs::remove_file(&app_config).map_err(|err| {
+            format!(
+                "{}: cannot remove duplicate Ghostty app config: {err}",
+                app_config.display()
+            )
+        })?;
+        println!(
+            "Removed duplicate Ghostty app config: {}",
+            app_config.display()
+        );
+    }
+
+    match fs::remove_dir(&app_config_dir) {
+        Ok(()) => println!(
+            "Removed empty Ghostty app config directory: {}",
+            app_config_dir.display()
+        ),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) if err.kind() == std::io::ErrorKind::DirectoryNotEmpty => {}
+        Err(err) => {
+            return Err(format!(
+                "{}: cannot remove Ghostty app config directory: {err}",
+                app_config_dir.display()
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 fn cleanup_legacy_relay_config(home_dir: &Path, managed_relay_config: &Path) -> Result<()> {
     let legacy_dir = home_dir.join(".relay");
     let legacy_config = legacy_dir.join("config.toml");
 
-    if legacy_config_matches_managed(&legacy_config, managed_relay_config)? {
+    if config_matches_managed(&legacy_config, managed_relay_config)? {
         fs::remove_file(&legacy_config).map_err(|err| {
             format!(
                 "{}: cannot remove legacy Relay config: {err}",
@@ -149,48 +173,45 @@ fn cleanup_legacy_relay_config(home_dir: &Path, managed_relay_config: &Path) -> 
     Ok(())
 }
 
-fn legacy_config_matches_managed(
-    legacy_config: &Path,
-    managed_relay_config: &Path,
-) -> Result<bool> {
-    let metadata = match fs::symlink_metadata(legacy_config) {
+fn config_matches_managed(candidate: &Path, managed_config: &Path) -> Result<bool> {
+    let metadata = match fs::symlink_metadata(candidate) {
         Ok(metadata) => metadata,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
         Err(err) => {
             return Err(format!(
-                "{}: cannot inspect legacy Relay config: {err}",
-                legacy_config.display()
+                "{}: cannot inspect candidate managed config: {err}",
+                candidate.display()
             ));
         }
     };
 
     if metadata.file_type().is_symlink() {
-        let managed_resolved = managed_relay_config.canonicalize().map_err(|err| {
+        let managed_resolved = managed_config.canonicalize().map_err(|err| {
             format!(
-                "{}: cannot resolve managed Relay config: {err}",
-                managed_relay_config.display()
+                "{}: cannot resolve managed config: {err}",
+                managed_config.display()
             )
         })?;
-        return match legacy_config.canonicalize() {
-            Ok(legacy_resolved) => Ok(legacy_resolved == managed_resolved),
+        return match candidate.canonicalize() {
+            Ok(candidate_resolved) => Ok(candidate_resolved == managed_resolved),
             Err(_) => Ok(false),
         };
     }
 
     if metadata.is_file() {
-        let managed_bytes = fs::read(managed_relay_config).map_err(|err| {
+        let managed_bytes = fs::read(managed_config).map_err(|err| {
             format!(
-                "{}: cannot read managed Relay config: {err}",
-                managed_relay_config.display()
+                "{}: cannot read managed config: {err}",
+                managed_config.display()
             )
         })?;
-        let legacy_bytes = fs::read(legacy_config).map_err(|err| {
+        let candidate_bytes = fs::read(candidate).map_err(|err| {
             format!(
-                "{}: cannot read legacy Relay config: {err}",
-                legacy_config.display()
+                "{}: cannot read candidate managed config: {err}",
+                candidate.display()
             )
         })?;
-        return Ok(legacy_bytes == managed_bytes);
+        return Ok(candidate_bytes == managed_bytes);
     }
 
     Ok(false)
@@ -369,11 +390,6 @@ fn managed_install_link_errors(config_root: &Path, home_dir: &Path) -> Result<Ve
             target: home_dir.join(".config/ghostty/config"),
         },
         ManagedLink {
-            label: "Ghostty app config",
-            source: config_root.join("ghostty/config"),
-            target: home_dir.join("Library/Application Support/com.mitchellh.ghostty/config"),
-        },
-        ManagedLink {
             label: "Relay config",
             source: config_root.join("relay/config.toml"),
             target: home_dir.join(".config/relay/config.toml"),
@@ -386,6 +402,7 @@ fn managed_install_link_errors(config_root: &Path, home_dir: &Path) -> Result<Ve
             errors.push(error);
         }
     }
+    errors.extend(duplicate_ghostty_app_config_errors(home_dir)?);
     errors.extend(legacy_relay_config_errors(home_dir)?);
     errors.sort();
     Ok(errors)
@@ -453,6 +470,21 @@ fn managed_link_error(link: &ManagedLink) -> Result<Option<String>> {
             "{}: cannot inspect installed {}: {err}",
             link.target.display(),
             link.label
+        )),
+    }
+}
+
+fn duplicate_ghostty_app_config_errors(home_dir: &Path) -> Result<Vec<String>> {
+    let app_config = home_dir.join("Library/Application Support/com.mitchellh.ghostty/config");
+    match fs::symlink_metadata(&app_config) {
+        Ok(_) => Ok(vec![format!(
+            "{} remains; Ghostty loads it after ~/.config/ghostty/config, so remove it after backing up anything intentional",
+            app_config.display()
+        )]),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(err) => Err(format!(
+            "{}: cannot inspect duplicate Ghostty app config: {err}",
+            app_config.display()
         )),
     }
 }
