@@ -1,6 +1,6 @@
 ---
 name: execute-plan
-description: Implement a plan
+description: Implement an existing plan or spec through reachable behavior and verification. Use when the user asks to execute, carry out, or finish a planning artifact.
 ---
 
 ## Proof policy
@@ -21,7 +21,7 @@ Maintain an explicit todo or plan in chat or with the available planning tool. E
 
 Build production code, wiring, tests, and required docs/config together. Tests must catch a named realistic regression that is not already covered by a stronger existing test. If no existing check can prove the behavior, add the missing targeted check instead of claiming green.
 
-Test infra/build config changes are allowed only when the artifact asks for verification infrastructure. Otherwise no suppressions, baselines, dependency bumps, build config edits, skipped tests, or fake TODO placeholders.
+Test infrastructure and verification-only build changes are allowed only when the artifact asks for verification infrastructure. Production dependencies or build config may change only when required to make planned behavior reachable, and broad dependency bumps remain out of scope. Do not add suppressions, baselines, skipped tests, or fake TODO placeholders.
 
 Validate through the proof policy: reuse proof when valid, otherwise run targeted checks before broader checks. Re-read the artifact and account for every requirement as implemented or deferred. Evidence before claims: no fixed, complete, ready, or passing language without fresh or validly reused proof.
 

@@ -1,6 +1,6 @@
 ---
 name: one-clear-sentence
-description: Rewrite the relevant takeaway as one useful, self-contained, clear, plain sentence in a natural tone. Use when the user asks for one sentence, crystal clear wording, a concise takeaway, simple wording, less academic tone, or no em dashes, colons, or semicolons.
+description: Rewrite a source or relevant takeaway as exactly one useful, self-contained, plain sentence. Use when the user explicitly asks for one sentence, a single-sentence rewrite, or compression to one concise takeaway. Use plain-edit for multi-sentence simplification, de-academicizing, or punctuation cleanup.
 ---
 
 Write exactly one self-contained sentence and nothing else.

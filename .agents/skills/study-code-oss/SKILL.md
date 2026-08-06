@@ -29,7 +29,7 @@ Choose a small candidate set before deep reading. Prefer mature, active, well-te
 3. Search narrowly with terms from the aspect. For example: errors (`Result`, `Error`, `Diagnostic`, `catch`, `raise`), tests (`fixture`, `golden`, `snapshot`, `harness`, `integration`), config (`schema`, `parse`, `validate`, `env`), boundaries (`interface`, `port`, `adapter`, `service`, `client`).
 4. Follow one or two real flows end to end: public entry point → abstraction → implementation → caller → test. Prefer patterns proven by usage over isolated clever code.
 5. Filter hard. Drop findings that are merely stylistic, fashionable, unsupported by tests or real callers, too framework-specific to transfer, clever without a clear payoff, or too large to explain accurately.
-6. Stop when you have enough evidence for 3-7 high-quality patterns. Do not keep searching just because more repositories exist.
+6. Stop when you have enough evidence for up to seven high-quality patterns. One or two is correct when only one or two survive the filter; do not keep searching or lower the bar to fill a quota.
 
 ## Quality bar
 

@@ -1,6 +1,6 @@
 ---
 name: resolve-conflict
-description: Resolve merge conflicts
+description: Resolve Git merge conflicts while preserving both branch intents. Use when the repository has unmerged index entries or an in-progress merge with conflicts.
 ---
 
 ## Proof policy
@@ -13,10 +13,11 @@ Do not choose one side wholesale just to remove markers.
 
 Read conflict context and enough history from both sides. If incoming removed feature flags, dead code, deprecated APIs, or temporary constructs this branch did not introduce, accept the removal and adapt branch code.
 
-Resolve files reported as unmerged by Git; do not treat marker text in unrelated fixtures or documentation as a conflict. Search the unmerged files for `<<<<<<<`, `=======`, and `>>>>>>>` after editing. Reuse proof when valid; otherwise run the build or most relevant available check if practical and justified by the proof policy. Do not mark files resolved while conflict markers remain or known merge-caused failures are unfixed.
+Treat only files reported as unmerged by Git as textual conflicts; do not treat marker text in unrelated fixtures or documentation as a conflict. Resolve those files first. Edit a non-unmerged file only when targeted proof shows that a merge-caused semantic integration failure requires the adjacent change. After editing, search the unmerged files for `<<<<<<<`, `=======`, and `>>>>>>>`; marker search is an additional content check, not proof that Git's index is resolved. Stage each intentional resolution or proven integration fix, then require `git diff --name-only --diff-filter=U` or `git ls-files -u` to be empty. Reuse proof when valid; otherwise run the build or most relevant available check if practical and justified by the proof policy. Do not report resolution while conflict markers, unmerged index entries, or known merge-caused failures remain.
 
 Final:
 - Resolved: `<files>`
 - Preserved: `<branch intent>`
 - Incorporated: `<incoming change>`
+- Index: `<no unmerged entries | exact remaining paths>`
 - Checks: `<command>` -> `<result>`, `reused — <prior proof and why still valid>`, or `not run — <reason>`

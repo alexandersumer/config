@@ -15,9 +15,10 @@ Invoking this skill is explicit authorization to perform the git writes required
 
 1. If `pr_target`, `$ARGUMENTS`, or `focus` names a PR, comment, thread, file, or reviewer, use that to narrow scope. `focus` narrows the review surface; it does not authorize unrelated cleanup.
 2. With no supplied target, inspect repository and SCM context: current branch, upstream, remote default branch, working tree diff, unpushed commits, and the current branch PR when available.
-3. Fetch open or unresolved review comments and comment threads for the target PR. Prefer current, unresolved comments over stale, resolved, outdated, or superseded comments; keep stale comments only when they still point to code present in the effective diff.
-4. Read the effective review surface before editing: PR/base diff, unpushed commit diff, `git diff --cached`, `git diff`, relevant untracked files rendered or summarized as new-file diffs, and nearby file context. If the PR diff is empty but staged, unstaged, or untracked changes exist, include those changes instead of treating the review surface as empty.
-5. If there is no target PR, no accessible comment data, no actionable comments, or no coherent way to separate comment fixes from unrelated local changes, stop and report the blocker. Do not invent changes or push unrelated work.
+3. Resolve the target PR's source repository, source branch, head SHA, and `origin` push URLs before any edit. Prove that `origin` has exactly one push URL identifying the PR source repository, the current branch is the PR source branch, and the PR head SHA equals `HEAD` or is an ancestor of `HEAD` with only coherent local commits ahead. Refresh the source ref if needed to make the ancestry check reliable. If the push target is missing or ambiguous, the checkout is behind or diverged, the branch or repository differs, or the relationship cannot be proven, stop; this skill does not authorize switching branches.
+4. Fetch open or unresolved review comments and comment threads for the target PR. Prefer current, unresolved comments over stale, resolved, outdated, or superseded comments; keep stale comments only when they still point to code present in the effective diff.
+5. Read the effective review surface before editing: PR/base diff, unpushed commit diff, `git diff --cached`, `git diff`, relevant untracked files rendered or summarized as new-file diffs, and nearby file context. If the PR diff is empty but staged, unstaged, or untracked changes exist, include those changes instead of treating the review surface as empty.
+6. If there is no target PR, no accessible comment data, no actionable comments, or no coherent way to separate comment fixes from unrelated local changes, stop and report the blocker. Do not invent changes or push unrelated work.
 
 ## Classify from evidence
 
@@ -50,7 +51,7 @@ Do not blindly refetch or repush. Each loop must follow a fix, narrow classifica
 2. Run broader checks only when the proof policy justifies them. If no check applies or a broader check cannot run, name the exact reason or narrower proof used.
 3. If a new or changed automated check is part of the fix, prove when feasible that it fails for the original issue, then restore the fix and rerun green; reuse prior fail/pass proof only when it is same-diff and same-scope.
 4. Stage only intended comment-fix changes. If pre-existing unpushed commits or local changes are unrelated to the comment fixes, stop and ask how to split or scope the publish.
-5. Commit with a grounded Conventional Commit subject and push the current branch to `origin`, setting upstream if needed.
+5. Commit with a grounded Conventional Commit subject and push explicitly to the proven source ref with `git push origin HEAD:<PR-source-branch>`, adding `-u` only when no upstream exists; do not rely on an implicit upstream refspec.
 6. After pushing, refresh PR comments and branch-relevant checks. Continue until there are no remaining actionable comments and no CI failures caused by the comment fixes, or until a concrete blocker remains. Claim CI is green only when the refreshed provider data is for the latest branch-relevant source SHA and every visible required branch-relevant check is terminal success; otherwise report the exact pending, red, missing, stale, or inaccessible check state as the blocker. Do not loop solely because the PR UI still shows an old comment that the pushed diff already addresses.
 
 ## Final

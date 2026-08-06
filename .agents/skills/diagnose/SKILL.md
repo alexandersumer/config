@@ -1,6 +1,6 @@
 ---
 name: diagnose
-description: Diagnose hard bugs and performance regressions. Use when the failure is unclear, flaky, not yet reproduced, or needs a disciplined debug loop before fixing.
+description: Diagnose hard bugs and performance regressions with falsifiable evidence. Use when the failure is unclear, flaky, not yet reproduced, or needs root-cause analysis before any separately requested fix.
 ---
 
 ## Proof policy
@@ -19,14 +19,14 @@ For performance regressions, measure first: baseline, profiler/timing/query plan
 
 Red flags: stop and return to the loop if you think "probably", "quick fix", "try this", "obvious", "test is wrong", or "clean it up later".
 
-Fix the proven root cause only. Add or preserve a regression check at the seam that exercises the real bug pattern, unless stronger existing coverage already catches it. If no correct seam exists, say the architecture prevents a durable regression check and name the gap.
+If the user asked for a fix, fix only the proven root cause and add or preserve a regression check at the seam that exercises the real bug pattern, unless stronger existing coverage already catches it. If no correct seam exists, say the architecture prevents a durable regression check and name the gap. Otherwise leave product code and tests unchanged after removing diagnostic instrumentation, and report the smallest evidence-backed fix and regression seam.
 
-Before final: rerun the original loop or revalidate the captured evidence, and rerun or reuse fresh proof for the regression check under the proof policy. Then remove all `[DEBUG-...]` instrumentation and throwaway harnesses.
+Before final: rerun the original loop or revalidate the captured evidence. When a fix was authorized, rerun or reuse fresh proof for the regression check under the proof policy. Then remove all `[DEBUG-...]` instrumentation and throwaway harnesses.
 
 Final:
 - Signal: `<reproduction or captured evidence>`
 - Cause: `<proven root cause>`
-- Fixed: `<files>`
-- Regression: `<check or no correct seam: gap>`
+- Fixed: `<files or not requested>`
+- Regression: `<check, recommended seam, or no correct seam: gap>`
 - Checks: `<commands>`
 - Remaining: `<none or blocker>`

@@ -7,7 +7,7 @@ Use `topic`, `$ARGUMENTS`, or the conversation context as the seed. Write the sm
 
 Do not write a planning-shaped document. Write down the decisions that matter. The artifacts must let an implementer start without rediscovering scope, behavior, decisions, files, tests, or acceptance.
 
-First read repo conventions: planning dirs, nearby docs, README/CONTRIBUTING, and up to four relevant existing artifacts. Follow the local artifact style unless it produces filler.
+First read repo conventions: planning dirs, nearby docs, README/CONTRIBUTING, and up to four relevant existing artifacts. Then inspect the scoped entry points and interfaces, representative callers and tests, and the current diff when relevant. Follow the local artifact style unless it produces filler.
 
 Resolve paths before writing:
 - primary: `out_path`, matching convention, or `.plan/<slug>.md`
@@ -21,6 +21,6 @@ When planning verification, allow reused proof only when it is visible, same-sco
 
 Use repo vocabulary. Do not invent owners, dates, milestones, external references, fake trade-offs, generic risks, or empty sections. If a section would say nothing useful, omit it.
 
-If scope is unclear after reading, ask one batched question and stop.
+If scope, required behavior, acceptance, or a material design decision remains unclear after reading, ask one batched question and stop.
 
 Final: say only what was written and where.

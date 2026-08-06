@@ -9,17 +9,17 @@ description: Resume and finish in-progress branch/worktree changes from the cumu
 
 Reuse proof only when it is visible, same-scope, after the last relevant edit, and not invalidated by touched files, config, dependencies, fixtures, generated output, runtime state, or environment. Otherwise run the narrowest check that proves the claim, artifact, or behavior; broaden only when risk or policy requires it. Final reports must separate reused proof, new commands, and checks not run.
 
-Act as a fresh agent inheriting an in-progress branch or dirty worktree. Do not rely on session memory. Use `context`, `plan`, `$ARGUMENTS`, or pasted notes only to clarify intent that is supported by the effective diff; the cumulative branch/worktree change set is the source of truth.
+Act as a fresh agent inheriting an in-progress branch or dirty worktree. Do not rely on session memory. Use explicit user context, `plan`, `$ARGUMENTS`, or pasted notes as the source of intended scope; use the cumulative branch/worktree change set as the source of truth for current implementation state. Infer intent from the diff only when no stronger intent artifact exists.
 
 ## 1. Resolve evidence before editing
 
 Inspect and record the basics:
 - repo root, current branch, `git status --short`, and upstream/ahead state when available
 - local instructions governing changed or untracked paths, including relevant `AGENTS.md`, `CLAUDE.md`, README, CONTRIBUTING, and nearby docs
-- comparison ref for committed branch changes: resolve the remote default branch from `origin/HEAD`; fall back to `origin/main` or `origin/master` only if `origin/HEAD` cannot be resolved. When a ref is available, set `base` with `git merge-base <comparison-ref> HEAD`.
+- comparison ref for committed branch changes: resolve the remote default branch from `origin/HEAD`; fall back to `origin/main` or `origin/master` only if `origin/HEAD` cannot be resolved. When a ref is available, set `<base>` with `git merge-base <comparison-ref> HEAD`.
 
 Build one effective change set from every available source:
-- committed branch changes: `git log base..HEAD --oneline` and `git diff base..HEAD` when `base` exists
+- committed branch changes: `git log <base>..HEAD --oneline` and `git diff <base>..HEAD` when `<base>` exists
 - staged changes: `git diff --cached`
 - unstaged changes: `git diff`
 - untracked files: `git ls-files --others --exclude-standard`, rendered as new-file diffs or concise summaries for large/binary/generated files
@@ -29,7 +29,7 @@ Always include staged, unstaged, and untracked changes, even when committed bran
 ## 2. Reconstruct the work
 
 Before changing code, briefly state:
-- `Branch intent:` the highest-level behavior, artifact, or system change the effective diff is trying to deliver
+- `Branch intent:` the highest-level intended behavior, artifact, or system change, grounded in the explicit intent artifact when provided and reconciled with the effective diff
 - `Already done:` what the diff proves is implemented, wired, documented, or tested
 - `Remaining work:` the smallest incomplete, risky, or unverified pieces needed for done-done
 - `Acceptance signal:` the command, test, observable behavior, or artifact check that will prove completion
@@ -63,7 +63,7 @@ No `complete`, `done`, `fixed`, `ready`, or `passing` language without fresh or 
 Keep the final under 30 lines:
 
 ```text
-Branch intent: <one sentence grounded in the effective diff>
+Branch intent: <one sentence grounded in the intended scope and final effective diff>
 Completed:
 - <behavior/artifact>: <files> — <proof or check>
 Checks:

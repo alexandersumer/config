@@ -50,6 +50,8 @@ pub(crate) fn run_regression_tests() -> Result<()> {
     test_one_clear_sentence_skill_rewrites_recent_context()?;
     test_branch_description_empty_diff_is_explicit()?;
     test_clear_merge_blockers_final_report_splits_ci_state()?;
+    test_clear_merge_blockers_ci_green_gate_helper()?;
+    test_mutating_skill_write_boundaries()?;
     test_real_e2e_automated_tests_skill_requires_edge_case_proof()?;
     test_real_e2e_live_check_skill_rejects_test_lane_proof()?;
     test_git_publish_skills_keep_local_first_contract()?;
@@ -146,6 +148,8 @@ fn test_one_clear_sentence_skill_rewrites_recent_context() -> Result<()> {
         "extract the relevant takeaway rather than preserving every detail",
         "drop file inventories, examples, subtask lists, and incidental evidence",
         "Do not acknowledge, confirm, promise future behavior",
+        "Use when the user explicitly asks for one sentence",
+        "Use plain-edit for multi-sentence simplification",
         "Got it",
         "I will use that style",
     ] {
@@ -240,6 +244,105 @@ fn test_clear_merge_blockers_final_report_splits_ci_state() -> Result<()> {
             "{}: clear-merge-blockers must not collapse green CI plus human blockers into a generic incomplete label",
             skill_path.display()
         ));
+    }
+
+    Ok(())
+}
+
+fn test_clear_merge_blockers_ci_green_gate_helper() -> Result<()> {
+    let scripts_dir = config_root_from_exe()?.join(".agents/skills/clear-merge-blockers/scripts");
+    run_command(&scripts_dir, "python3", &["test_ci_green_gate.py"])
+}
+
+fn test_mutating_skill_write_boundaries() -> Result<()> {
+    let config_root = config_root_from_exe()?;
+    let contracts: &[(&str, &[&str])] = &[
+        (
+            "address-comments",
+            &[
+                "exactly one push URL identifying the PR source repository",
+                "does not authorize switching branches",
+            ],
+        ),
+        (
+            "clear-merge-blockers",
+            &[
+                "exactly one push URL identifying the review source repository",
+                "does not authorize switching branches",
+                "include every identified latest alternate SHA",
+                "relevant_shas_complete: true",
+            ],
+        ),
+        (
+            "diagnose",
+            &[
+                "If the user asked for a fix",
+                "Otherwise leave product code and tests unchanged",
+            ],
+        ),
+        (
+            "prove-check",
+            &[
+                "Restore the exact pre-proof state",
+                "only when the user also asked to fix or harden the check",
+            ],
+        ),
+        (
+            "resolve-conflict",
+            &[
+                "marker search is an additional content check",
+                "merge-caused semantic integration failure",
+                "git ls-files -u",
+            ],
+        ),
+        (
+            "sync-main",
+            &[
+                "git merge --no-commit",
+                "complete the merge commit only after",
+            ],
+        ),
+        (
+            "resume-branch-work",
+            &[
+                "source of intended scope",
+                "source of truth for current implementation state",
+                "intended scope and final effective diff",
+            ],
+        ),
+        (
+            "strengthen-tests-solo",
+            &[
+                "explicitly scoped existing behavior",
+                "safe fail-then-pass proof under `prove-check`",
+                "do not claim the test catches the bug",
+            ],
+        ),
+        (
+            "strengthen-tests-deep",
+            &[
+                "explicitly scoped existing behavior",
+                "safe fail-then-pass proof under `prove-check`",
+                "do not claim the test catches the bug",
+            ],
+        ),
+    ];
+
+    for (skill_name, expected_fragments) in contracts {
+        let skill_path = config_root
+            .join(".agents/skills")
+            .join(skill_name)
+            .join("SKILL.md");
+        let text = fs::read_to_string(&skill_path)
+            .map_err(|err| format!("{}: cannot read skill: {err}", skill_path.display()))?;
+        for expected in *expected_fragments {
+            if !text.contains(expected) {
+                return Err(format!(
+                    "{}: mutating skill lost a write-boundary contract; missing {expected:?}",
+                    skill_path.display()
+                ));
+            }
+        }
     }
 
     Ok(())
@@ -392,13 +495,27 @@ fn test_git_publish_skills_keep_local_first_contract() -> Result<()> {
         "Use `refs/remotes/origin/HEAD` only when it resolves to an existing local `refs/remotes/origin/<branch>` ref.",
         "Otherwise use a local `origin/main` or `origin/master` candidate only when exactly one exists.",
         "Run live remote discovery only when a PR destination is required and local refs are missing, stale, or conflicting.",
-        "Determine the PR provider from `git remote get-url --push origin`",
+        "git remote get-url --push --all origin",
+        "HEAD` is detached or missing",
+        "origin` has zero or multiple push URLs",
+        "Determine the PR provider from the sole push URL",
         "After the source branch has been pushed",
+        "write a non-empty, grounded PR body",
+        "Freeze this subject/body pair for every provider path below.",
+        "Do not create a new PR with a missing or empty body.",
         "Do not add reviewers unless the user explicitly requested reviewers.",
         "Provider-compatible managed PR path, when available",
         "controlled PR facility compatible with the detected provider",
         "Supply fresh PR metadata",
         "Create or idempotently ensure the PR with explicit source and destination branches and no reviewers unless reviewers were explicitly requested.",
+        "--description-file <description-file> -o json",
+        "Require the returned JSON `description` to be non-empty",
+        "twg bb prs update --pull-request <id> --description-file <description-file>",
+        "twg bb prs get <id> --full -o json",
+        "do not enter the create-failure retry path or report PR success",
+        "Keep the temporary file through any permitted retry",
+        "if found, report it and stop only after confirming its description is non-empty",
+        "if description confirmation or repair fails, stop with the exact PR metadata blocker rather than retrying create",
     ] {
         if !publish.contains(expected) {
             return Err(format!(
@@ -414,6 +531,8 @@ fn test_git_publish_skills_keep_local_first_contract() -> Result<()> {
         "inspect_pr_context",
         "save_pr_metadata",
         "ensure_bitbucket_pr",
+        "Add a description only when a grounded PR body is available.",
+        "If no body is available, use the subject as a minimal body",
     ] {
         if publish.contains(forbidden) {
             return Err(format!(
@@ -421,6 +540,25 @@ fn test_git_publish_skills_keep_local_first_contract() -> Result<()> {
                 publish_path.display()
             ));
         }
+    }
+
+    let mut saw_bitbucket_create = false;
+    for line in publish.lines().map(str::trim) {
+        if line.starts_with("twg bb prs create ") {
+            saw_bitbucket_create = true;
+            if !line.contains("--description-file <description-file>") {
+                return Err(format!(
+                    "{}: every Bitbucket PR create example must pass the grounded body explicitly; found {line:?}",
+                    publish_path.display()
+                ));
+            }
+        }
+    }
+    if !saw_bitbucket_create {
+        return Err(format!(
+            "{}: git-publish must retain an explicit Bitbucket PR create command",
+            publish_path.display()
+        ));
     }
 
     Ok(())
@@ -483,6 +621,38 @@ fn test_deep_review_skills_require_portable_managed_reviewer_contract() -> Resul
             if text.contains(forbidden) {
                 return Err(format!(
                     "{}: deep-review skills must not encode a harness-specific reviewer API; found {forbidden:?}",
+                    skill_path.display()
+                ));
+            }
+        }
+    }
+
+    let skill_specific_contracts: &[(&str, &[&str])] = &[
+        (
+            "review-deep",
+            &["surrounding unchanged code", "{CODE_CONTEXT}"],
+        ),
+        (
+            "design-review-deep",
+            &["No existing implementation; review as a standalone design"],
+        ),
+        (
+            "strengthen-tests-deep",
+            &["{DIFF_OR_SCOPE}", "a precise explicit behavior scope"],
+        ),
+    ];
+    for (skill_name, expected_fragments) in skill_specific_contracts {
+        let skill_path = skills_root.join(skill_name).join("SKILL.md");
+        let text = fs::read_to_string(&skill_path).map_err(|err| {
+            format!(
+                "{}: cannot read skill-specific deep-review contract: {err}",
+                skill_path.display()
+            )
+        })?;
+        for expected in *expected_fragments {
+            if !text.contains(expected) {
+                return Err(format!(
+                    "{}: deep-review skill lost scoped evidence support; missing {expected:?}",
                     skill_path.display()
                 ));
             }
@@ -563,6 +733,8 @@ fn test_study_skills_resolve_portable_collection_roots() -> Result<()> {
             "4. Other bounded source collections explicitly exposed by the current environment.",
             "Do not assume a named home-directory layout or recursively crawl the home directory.",
             "If no bounded candidate location can be resolved, ask for",
+            "up to seven high-quality patterns",
+            "One or two is correct when only one or two survive the filter",
         ] {
             if !text.contains(expected) {
                 return Err(format!(

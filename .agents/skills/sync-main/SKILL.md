@@ -18,16 +18,17 @@ Determine the remote default ref from `origin`, not from the local default branc
 
 Always fetch before merging. Fetch `origin` so the resolved remote default ref reflects the remote state.
 
-Run `git merge <remote-default-ref>` and inspect status.
+Run `git merge --no-commit <remote-default-ref>` and inspect status. A fast-forward may complete immediately because `--no-commit` cannot pause it; otherwise keep `MERGE_HEAD` active until integration checks and fixes are complete.
 
 If there are conflicts, resolve them inline using the same standard as `resolve-conflict`:
 - Preserve current branch intent while incorporating incoming `<remote-default-ref>` changes.
 - Do not choose one side wholesale just to remove markers.
 - Read conflict context and enough history from both sides to understand the intended merge result.
 - Accept incoming removals of feature flags, dead code, deprecated APIs, or temporary constructs this branch did not introduce, then adapt branch code to the removal.
-- Search for `<<<<<<<`, `=======`, and `>>>>>>>` after editing.
+- Search the unmerged files for `<<<<<<<`, `=======`, and `>>>>>>>` after editing.
+- Stage each intentional resolution and require `git diff --name-only --diff-filter=U` or `git ls-files -u` to be empty.
 
-Reuse proof when valid; otherwise run the build or the most relevant available checks if practical and justified by the proof policy. If checks expose merge-caused failures, fix them before completing the merge or report the blocker. Stage resolved files and complete the merge commit only after conflict markers are gone and known merge-caused failures are handled.
+Reuse proof when valid; otherwise run the build or the most relevant available checks if practical and justified by the proof policy. If checks expose merge-caused failures, fix and stage the intentional integration changes before completing the merge or report the blocker. When `MERGE_HEAD` exists, complete the merge commit only after conflict markers and unmerged index entries are gone and known merge-caused failures are handled.
 
 Final:
 - Synced: `<branch>` with `<remote-default-ref>`

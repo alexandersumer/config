@@ -17,6 +17,17 @@ from typing import Any
 
 HELPER = Path(__file__).with_name("ci_green_gate.py")
 HEAD_SHA = "a3acf0c8de408fe954baf92b0be91f0eea3c9f33"
+MERGE_QUEUE_SHA = "b4bd50d6b26838874f8ee8d6cdde81f15e4bda3a"
+
+
+def gate(
+    state: Any,
+    *,
+    name: str = "CI Build",
+    sha: str = HEAD_SHA,
+    **fields: Any,
+) -> dict[str, Any]:
+    return {"name": name, "state": state, "sha": sha, **fields}
 
 
 def run_helper(snapshot: dict[str, Any]) -> tuple[int, dict[str, Any]]:
@@ -60,6 +71,7 @@ def main() -> int:
     complete = {
         "head_sha": HEAD_SHA,
         "provider_snapshot_complete": True,
+        "relevant_shas_complete": True,
         "scoped_to_head": False,
     }
 
@@ -128,6 +140,121 @@ def main() -> int:
             },
             1,
             "needs-local-fix",
+            False,
+        ),
+        (
+            "newer_green_status_supersedes_older_red_attempt",
+            {
+                **complete,
+                "statuses": [
+                    gate("FAILED", key="ci/build", updated_on="2026-07-15T00:00:00Z"),
+                    gate("SUCCESSFUL", key="ci/build", updated_on="2026-07-15T00:05:00Z"),
+                ],
+            },
+            0,
+            "green",
+            True,
+        ),
+        (
+            "newer_red_status_supersedes_older_green_attempt",
+            {
+                **complete,
+                "statuses": [
+                    gate("SUCCESSFUL", key="ci/build", updated_on="2026-07-15T00:00:00Z"),
+                    gate("FAILED", key="ci/build", updated_on="2026-07-15T00:05:00Z"),
+                ],
+            },
+            1,
+            "needs-local-fix",
+            False,
+        ),
+        (
+            "newer_build_number_supersedes_older_attempt",
+            {
+                **complete,
+                "pipelines": [
+                    gate("FAILED", name="Pull request pipeline", build_number=41),
+                    gate("SUCCESSFUL", name="Pull request pipeline", build_number=42),
+                ],
+            },
+            0,
+            "green",
+            True,
+        ),
+        (
+            "build_number_beats_conflicting_timestamps",
+            {
+                **complete,
+                "pipelines": [
+                    gate(
+                        "SUCCESSFUL",
+                        name="Pull request pipeline",
+                        build_number=41,
+                        updated_on="2026-07-15T00:10:00Z",
+                    ),
+                    gate(
+                        "FAILED",
+                        name="Pull request pipeline",
+                        build_number=42,
+                        updated_on="2026-07-15T00:05:00Z",
+                    ),
+                ],
+            },
+            1,
+            "needs-local-fix",
+            False,
+        ),
+        (
+            "ambiguous_attempt_order_keeps_red_evidence",
+            {
+                **complete,
+                "statuses": [
+                    gate("FAILED", key="ci/build"),
+                    gate("SUCCESSFUL", key="ci/build"),
+                ],
+            },
+            1,
+            "needs-local-fix",
+            False,
+        ),
+        (
+            "different_timestamp_fields_keep_red_evidence",
+            {
+                **complete,
+                "statuses": [
+                    gate("FAILED", key="ci/build", updated_on="2026-07-15T00:05:00Z"),
+                    gate("SUCCESSFUL", key="ci/build", created_on="2026-07-15T00:10:00Z"),
+                ],
+            },
+            1,
+            "needs-local-fix",
+            False,
+        ),
+        (
+            "newer_running_attempt_does_not_hide_older_red",
+            {
+                **complete,
+                "statuses": [
+                    gate("FAILED", key="ci/build", updated_on="2026-07-15T00:00:00Z"),
+                    gate("IN_PROGRESS", key="ci/build", updated_on="2026-07-15T00:05:00Z"),
+                ],
+            },
+            1,
+            "needs-local-fix",
+            False,
+        ),
+        (
+            "green_then_running_does_not_resurrect_older_red",
+            {
+                **complete,
+                "statuses": [
+                    gate("FAILED", key="ci/build", updated_on="2026-07-15T00:00:00Z"),
+                    gate("SUCCESSFUL", key="ci/build", updated_on="2026-07-15T00:05:00Z"),
+                    gate("IN_PROGRESS", key="ci/build", updated_on="2026-07-15T00:10:00Z"),
+                ],
+            },
+            1,
+            "waiting",
             False,
         ),
         (
@@ -219,6 +346,71 @@ def main() -> int:
                         "sha": HEAD_SHA,
                         "required": True,
                     }
+                ],
+            },
+            0,
+            "green",
+            True,
+        ),
+        (
+            "declared_merge_queue_sha_requires_gate_evidence",
+            {
+                **complete,
+                "merge_queue_sha": MERGE_QUEUE_SHA,
+                "statuses": [gate("SUCCESSFUL")],
+            },
+            1,
+            "waiting",
+            False,
+        ),
+        (
+            "undeclared_merge_queue_red_cannot_prove_green",
+            {
+                "head_sha": HEAD_SHA,
+                "provider_snapshot_complete": True,
+                "scoped_to_head": False,
+                "statuses": [
+                    gate("SUCCESSFUL", name="Source CI Build"),
+                    gate("FAILED", name="Merge Queue CI Build", sha=MERGE_QUEUE_SHA),
+                ],
+            },
+            2,
+            "tooling-blocked",
+            False,
+        ),
+        (
+            "declared_merge_queue_red_is_needs_local_fix",
+            {
+                **complete,
+                "merge_queue_sha": MERGE_QUEUE_SHA,
+                "statuses": [
+                    gate("SUCCESSFUL", name="Source CI Build"),
+                    gate("FAILED", name="Merge Queue CI Build", sha=MERGE_QUEUE_SHA),
+                ],
+            },
+            1,
+            "needs-local-fix",
+            False,
+        ),
+        (
+            "prefix_equivalent_declared_sha_is_not_missing",
+            {
+                **complete,
+                "merge_sha": HEAD_SHA[:12],
+                "statuses": [gate("SUCCESSFUL")],
+            },
+            0,
+            "green",
+            True,
+        ),
+        (
+            "head_and_merge_queue_gates_can_prove_green",
+            {
+                **complete,
+                "merge_queue_sha": MERGE_QUEUE_SHA,
+                "statuses": [
+                    gate("SUCCESSFUL", name="Source CI Build"),
+                    gate("SUCCESSFUL", name="Merge Queue CI Build", sha=MERGE_QUEUE_SHA),
                 ],
             },
             0,

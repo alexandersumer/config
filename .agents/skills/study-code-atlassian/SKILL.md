@@ -33,7 +33,7 @@ Treat internal code as confidential context. Do not paste large internal code ex
 3. Search narrowly with terms from the aspect. For example: Effect (`Context.Tag`, `Layer`, `Effect.fn`, `Schema.decodeUnknown`), errors (`TaggedError`, `catchTag`, `Result`), tests (`it.effect`, `fixture`, `harness`, `integration`), config (`Config`, `redacted`, `schema`, `validate`), boundaries (`service`, `client`, `adapter`, `spi`, `port`).
 4. Follow one or two real flows end to end: entry point → boundary/schema → service/interface → implementation → caller → test or operational check. Prefer patterns proven by production usage and tests over isolated clever code.
 5. Filter hard. Drop findings that are merely stylistic, fashionable, unsupported by tests or real callers, too infrastructure-specific to transfer, clever without a clear payoff, or too large to explain accurately.
-6. Stop when you have enough evidence for 3-7 high-quality patterns. Do not keep searching just because more repositories exist.
+6. Stop when you have enough evidence for up to seven high-quality patterns. One or two is correct when only one or two survive the filter; do not keep searching or lower the bar to fill a quota.
 
 ## Quality bar
 
