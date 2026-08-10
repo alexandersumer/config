@@ -11,6 +11,9 @@ window-padding-y = 16
 window-padding-balance = true
 window-new-tab-position = end
 
+# Recover a tab whose palette or terminal modes were corrupted by a subprocess.
+keybind = super+shift+escape=reset
+
 # macOS
 macos-titlebar-style = transparent
 macos-option-as-alt = left
