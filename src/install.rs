@@ -324,7 +324,7 @@ fn codex_skill_installation_check(
     errors.extend(codex_config_errors(home_dir)?);
     let checked_prompt_input = is_current_home(home_dir);
     if checked_prompt_input {
-        let custom_skill_names = codex_skill_plan.custom_skill_names()?;
+        let custom_skill_names = codex_skill_plan.implicitly_invocable_skill_names()?;
         errors.extend(codex_prompt_input_errors(
             config_root,
             "config checkout",
@@ -814,20 +814,51 @@ struct SkillLinkPlan {
 }
 
 impl SkillLinkPlan {
-    fn custom_skill_names(&self) -> Result<Vec<String>> {
-        self.links
-            .iter()
-            .map(|(source, _)| {
-                source
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .map(str::to_string)
-                    .ok_or_else(|| {
-                        format!("{}: skill directory has no valid name", source.display())
-                    })
-            })
-            .collect()
+    fn implicitly_invocable_skill_names(&self) -> Result<Vec<String>> {
+        let mut names = Vec::new();
+        for (source, _) in &self.links {
+            if !skill_allows_implicit_invocation(source)? {
+                continue;
+            }
+            let name = source
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_string)
+                .ok_or_else(|| {
+                    format!("{}: skill directory has no valid name", source.display())
+                })?;
+            names.push(name);
+        }
+        Ok(names)
     }
+}
+
+fn skill_allows_implicit_invocation(skill_dir: &Path) -> Result<bool> {
+    let metadata_path = skill_dir.join("agents/openai.yaml");
+    let text = match fs::read_to_string(&metadata_path) {
+        Ok(text) => text,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(true),
+        Err(err) => {
+            return Err(format!(
+                "{}: cannot read skill UI metadata: {err}",
+                metadata_path.display()
+            ))
+        }
+    };
+    let value: serde_yaml::Value = serde_yaml::from_str(&text)
+        .map_err(|err| format!("{}: invalid YAML: {err}", metadata_path.display()))?;
+    let Some(policy) = value.get("policy") else {
+        return Ok(true);
+    };
+    let Some(allow) = policy.get("allow_implicit_invocation") else {
+        return Ok(true);
+    };
+    allow.as_bool().ok_or_else(|| {
+        format!(
+            "{}: policy.allow_implicit_invocation must be a boolean",
+            metadata_path.display()
+        )
+    })
 }
 
 fn prepare_codex_skill_links(skills_dir: &Path, home_dir: &Path) -> Result<SkillLinkPlan> {
@@ -1193,7 +1224,9 @@ fn normalize_path(path: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::remove_disallowed_codex_feature_flags;
+    use super::{remove_disallowed_codex_feature_flags, skill_allows_implicit_invocation};
+    use std::fs;
+    use tempfile::tempdir;
 
     #[test]
     fn codex_config_repair_removes_deprecated_and_disabled_feature_flags() {
@@ -1202,6 +1235,22 @@ mod tests {
             "model = \"gpt-5.5\"\n\n[features]\n  hooks = true\n\n[plugins.foo]\nenabled = true\n";
 
         assert_eq!(remove_disallowed_codex_feature_flags(input), expected);
+    }
+
+    #[test]
+    fn codex_prompt_check_honors_explicit_only_skill_metadata() {
+        let skill = tempdir().expect("temporary skill directory");
+        assert!(skill_allows_implicit_invocation(skill.path()).expect("missing metadata defaults"));
+
+        let agents_dir = skill.path().join("agents");
+        fs::create_dir(&agents_dir).expect("agents directory");
+        fs::write(
+            agents_dir.join("openai.yaml"),
+            "policy:\n  allow_implicit_invocation: false\n",
+        )
+        .expect("skill metadata");
+
+        assert!(!skill_allows_implicit_invocation(skill.path()).expect("explicit-only metadata"));
     }
 }
 

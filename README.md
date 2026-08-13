@@ -60,6 +60,30 @@ Do not add `register_cmd` to skill front matter. Current Codex ignores that lega
 
 Claude Code discovers personal skills from `~/.claude/skills/<name>/SKILL.md`, which is the same `SKILL.md` format the registry already validates (`name`, `description`, `allowed-tools`). Install links every custom skill into `~/.claude/skills`, creating the directory if it does not exist. Discoverability is proven deterministically: `check-claude-skills` asserts each `~/.claude/skills/<name>` resolves to its registry-validated source, which is exactly the contract Claude Code's loader requires.
 
+## TWG CLI skills
+
+The tracked `twg*` skills are the workflow layer for the TWG CLI. They teach agents to use live CLI help instead of guessing command grammar, route Jira, Confluence, Bitbucket, and cross-product requests to focused workflows, prefer machine-readable output, and distinguish PATH, authentication, authorization, and command errors.
+
+TWG remains the source of the bundle. Refresh it intentionally, review the resulting skill diff, then reconcile the managed Codex and Claude Code links:
+
+```bash
+twg update --refresh-skills
+cargo run -- validate
+cargo run -- install
+```
+
+Use these read-only checks when diagnosing access or discovery:
+
+```bash
+twg doctor -o json
+twg help discover-skills "<intent>" -o json
+twg help describe "<command-or-skill>" -o json
+cargo run -- check-codex-skills
+cargo run -- check-claude-skills
+```
+
+Do not copy TWG's full command catalog into `AGENTS.md`: command details change with the CLI, while the installed skills use progressive disclosure and query live help. If a new Codex session does not show the skills, run `cargo run -- install`, verify with `check-codex-skills`, and restart Codex so it rebuilds its skill inventory.
+
 ## Git hooks
 
 This config checkout uses Git's native tracked-hooks convention: `.githooks/pre-commit` is tracked, and the local checkout is configured with:

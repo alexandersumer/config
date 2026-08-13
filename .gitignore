@@ -1,2 +1,3 @@
 .DS_Store
 target/
+.agents/skills/twg*/.twg-install.json
