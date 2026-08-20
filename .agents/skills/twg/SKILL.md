@@ -15,13 +15,12 @@ TWG routing: use typed commands for anchors. If uncertain, inspect `twg help <te
 
 Load the narrowest workflow skill:
 
-- `twg-status-rollups` for status, leadership, and decision-readiness; load it before
-  `twg-engineering-work` for PR-based team/org rollups.
-- `twg-context-discovery` for deep dives, dependencies, graphs, repos, and catch-ups.
+- `twg-status-rollups` for status and decision-readiness; load it before
+  `twg-engineering-work` for PR rollups.
+- `twg-context-discovery` for dependencies, graphs, repos, and catch-ups.
 - `twg-agentic-search` for fuzzy cross-product Rovo/company-knowledge research.
-- `twg-responsibility-routing` for owners, experts, approvers, authorities, and escalation.
-- `twg-engineering-work` for code search and navigation, PR status, reviews,
-  contributors, and hot areas.
+- `twg-responsibility-routing` for owners, experts, approvers, and escalation.
+- `twg-engineering-work` for code search, PRs, contributors, and hot areas.
 - `twg-jira-resolve-merged-work` for stale Jira work backed by merged PRs.
 - `twg-operational-health` for handoffs, incidents, Assets, staffing, meetings, and risk.
 - `twg-bench-lite` for read-only single-prompt A/B comparisons.
@@ -39,16 +38,39 @@ Do not add per-command env prefixes unless requested; hosts may set `TWG_AGENT_D
 Use `stdout_inline` first when present. Outside benchmark lanes, inspect `output_files.compact`
 only when inline evidence is incomplete; full stdout is the last resort.
 
-In TWG-only benchmark lanes, run only `twg` commands. Never use shell utilities or pipelines
-(`jq`, `rg`, `date`) to transform evidence or calculate windows. Use compact/inline TWG output,
-the prompt's timezone and window, and report gaps. Match the intent to the narrowest companion
-skill before selecting a command. Let that skill determine the typed route; use at most one help
-call when command shape or output remains ambiguous.
+In TWG-only benchmark lanes, run only `twg`. Never use shell utilities or pipelines
+(`jq`, `rg`, `date`). Use compact/inline output, the prompt's timezone and window, and report
+gaps. Match the intent to the narrowest companion skill. Let that skill determine the typed route.
 
 ## Auth/Setup Guard
 
-Do not run setup, login, install, update, upkeep, or credential commands unless
-explicitly requested for setup/auth/repair. Otherwise report remediation and wait for user direction.
+For a requested productive TWG task, OAuth maintenance is an in-scope prerequisite:
+
+1. Start with the intended read. If TWG says OAuth refresh is due, expired, or could not be
+   persisted, run `twg auth refresh` once, then retry the original read once.
+2. If the refresh is blocked from writing `~/.config/twg`, classify that as a sandbox/filesystem
+   restriction, not a Confluence/Jira ACL or OAuth denial. Request an approved out-of-sandbox retry
+   of the exact `twg auth refresh` command. When reusable command approval is supported, scope it
+   to `twg auth refresh`.
+3. After an approved refresh succeeds, retry the original TWG read once and continue the task.
+   Do not stop at the auth preflight.
+
+Do not redirect `TWG_CONFIG_DIR`, copy credentials into the workspace or `/tmp`, expose credential
+files, or ask the user to run the command manually while command approval is available. Give the
+manual command only when approval is unavailable or declined.
+
+This exception covers only non-interactive `twg auth refresh`. Do not run login, setup, install,
+update, upkeep, forced refresh, connector auth, or other credential commands unless explicitly
+requested for setup/auth/repair or required by a specific companion skill.
+
+## Sandboxed Pipeline Logs
+
+Pipeline logs can redirect to S3. If a sandboxed `twg bb pipeline get`, `wait`, `grep`, or
+`tail` log request has a network-blocked message, S3 hostname, or log-only HTTP 403 while
+metadata succeeds, treat it as a sandbox restriction, not an authentication failure.
+
+Request an approved unsandboxed retry of that command only. If unavailable, give the user the
+exact terminal command; never request credentials or tokens.
 
 ## Bounded Evidence Loop
 
@@ -61,11 +83,11 @@ Converge; prefer typed or product-native evidence.
 
 ## Command Discovery
 
-- Use typed commands for familiar families: `resolve`, `search`,
+- Use familiar command families: `resolve`, `rovo search`,
   `user`, `org-tree`, `work query`, `work search`, `pull-requests`, `jira`,
   `confluence`, `docs`, `context`, `responsibility`, `goals`, `projects`,
   `assets`, and `trello`.
-- Use `twg search "<topic>" [--limit <n>]` for top-K discovery; explicit `--app` preflights.
+- Use `twg rovo search "<topic>" [--limit <n>]` for top-K discovery; explicit `--app` preflights.
 - For fuzzy Trello discovery, use `twg trello search "<query>" --limit 20`; no workspace scope.
 - For Rovo connectors, use `twg rovo list-apps -o json` (`list-connectors` alias), then explicit `twg rovo search ... --app <connector>`; follow its auth action or `twg rovo auth <app>`.
 - Keep document relationship history and fuzzy discovery separate:
@@ -77,12 +99,18 @@ Converge; prefer typed or product-native evidence.
   - `twg work search "<topic>"` is tenant-wide; use `docs search` for documents. Prefer it directly when fuzzy text reaches `work query`.
 - Use live help—`twg help <terms>` then `twg help describe <path>`—before guessing grammar; namespace help is not executable.
 - Resolve URLs, keys, ARIs, names, and people, then hydrate stable IDs.
-- Jira: `jira workitem search <text...>` for Jira fuzzy text, `jira workitem query --jql <jql>` for structured JQL, and `search <text...> --app jira` for semantic discovery.
+- Jira: `jira workitem search <text...>` for Jira fuzzy text, `jira workitem query --jql <jql>` for structured JQL, and `rovo search <text...> --app jira` for semantic discovery.
 - Command shape guardrails:
   - Known Jira/Atlas keys are positional for `jira workitem get`, `goals get`, and `projects get`; `--key` is compatibility only.
   - `work query` is user activity (`--scope me|user`), never `--scope global`; use `work search` for topics and advertised filters such as `--types`.
-  - `assets search` is shallow: inspect schemas/types, shortlist owners, then batch `assets query`/`assets object query` with `--account-id`.
-- Keep projection and product-native commands separate; do not borrow unadvertised flags. Use `search-code` for indexed code. Unless the user explicitly scopes a code host, omit `--app` so all available indexed SCM surfaces are searched; repeated `--app` values are supported for an explicit multi-host scope. Apply `--workspace` only when a known tenant boundary is useful, and `--repo` only as a discovery anchor rather than proof that the full implementation lives there. De-duplicate mirrors, widen after generated-doc or incomplete hits, then fetch selected source files.
+  - For inferred teams (`ari:cloud:graph::jiraTeam/...` or `ari:cloud:graph-store::inferred-team/...`), see `references/inferred-teams.md` and use explicit `--include-inferred`.
+- Use `search-code`; omit `--app` so all available indexed SCM surfaces are searched; use `--repo` only as a discovery anchor; widen after generated-doc or incomplete hits.
+
+## Assets / CMDB graph
+
+Traversal (object↔owner/team, Jira↔object) → `assets graph`; see
+`references/ASSETS_GRAPH.md`. No hop → `assets search` / `assets query --aql` /
+`assets object get`.
 
 ## Load The Narrowest Companion
 

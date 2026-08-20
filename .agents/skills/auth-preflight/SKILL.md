@@ -46,6 +46,20 @@ Ask one concise question only when multiple plausible targets remain after using
    - permission, group, policy, or account denial after valid auth: report the access blocker;
    - malformed query, missing index, missing macro, bad request, rate limit, service outage, or tool bug: debug the query/tool/service issue, not auth.
 
+## Sandboxed credential stores
+
+A refresh that cannot write its normal credential store is a sandbox/filesystem failure, not proof
+that the token, account, or service permission is invalid.
+
+- For productive work or an explicit refresh request, use the environment's approval mechanism to
+  retry the exact refresh command outside the sandbox once. Ask for command-specific approval; do
+  not first hand the command back to the user.
+- After the approved refresh succeeds, retry the original safe call once and continue the requested
+  task. Do not treat successful auth maintenance as the final deliverable.
+- Do not change `HOME`, redirect a tool's config directory, copy credential stores into the
+  workspace or a temporary directory, or inspect credential contents to bypass the restriction.
+- Give a manual command only when the environment cannot request approval or approval is declined.
+
 ## Known Atlassian SLAuth defaults
 
 Follow tool-specific instructions when available; they override these defaults. For SLAuth-backed tools, use `check_slauth_token_status` when available, then `generate_slauth_token` only when the token is missing, expired, invalid, or MFA-required.
