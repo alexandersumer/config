@@ -691,7 +691,7 @@ fn test_custom_skills_reject_accidental_environment_coupling() -> Result<()> {
         let text = fs::read_to_string(&skill_path)
             .map_err(|err| format!("{}: cannot read skill: {err}", skill_path.display()))?;
 
-        for forbidden in ["atlassian/alta-1", "~/oss", "~/atlassian"] {
+        for forbidden in ["atlassian/alta", "~/oss", "~/atlassian"] {
             if text.contains(forbidden) {
                 return Err(format!(
                     "{}: custom skills must not depend on a fixed personal checkout or collection root; found {forbidden:?}",
@@ -1596,15 +1596,13 @@ fn test_axiom_alias_zsh_wiring() -> Result<()> {
     for dir in [
         ".oh-my-zsh",
         ".zsh",
+        "atlassian/alta",
         "atlassian/alta-1",
-        "atlassian/alta-2",
-        "atlassian/alta-6",
-        "atlassian/alta-7",
-        "atlassian/relay-3",
+        "atlassian/relay",
         "atlassian/relay-3-old",
-        "atlassian/alta-contrib-3",
+        "atlassian/alta-contrib",
         "atlassian/alta-contrib-3x",
-        "atlassian/convo-ai-3",
+        "atlassian/convo-ai",
         "atlassian/convo-ai-test",
         "atlassian/sandboxes",
         "src/alexandersumer.com",
@@ -1634,13 +1632,11 @@ expect_alias axiom "atlas relay --agent axiom"
 expect_alias atlassian "cd $HOME/atlassian"
 expect_alias blog "cd $HOME/src/alexandersumer.com"
 expect_alias atlassian-sandbox "cd $HOME/atlassian/sandboxes"
-expect_alias alta-1 "cd $HOME/atlassian/alta-1"
-expect_alias alta-2 "cd $HOME/atlassian/alta-2"
-expect_alias alta-6 "cd $HOME/atlassian/alta-6"
-expect_alias alta-7 "cd $HOME/atlassian/alta-7"
-expect_alias relay-3 "cd $HOME/atlassian/relay-3"
-expect_alias alta-contrib-3 "cd $HOME/atlassian/alta-contrib-3"
-expect_alias convo-ai-3 "cd $HOME/atlassian/convo-ai-3 && sdk use java 21.0.8-amzn"
+expect_alias alta "cd $HOME/atlassian/alta"
+expect_alias relay "cd $HOME/atlassian/relay"
+expect_alias alta-contrib "cd $HOME/atlassian/alta-contrib"
+expect_alias convo-ai "cd $HOME/atlassian/convo-ai && sdk use java 21.0.8-amzn"
+! alias alta-1 >/dev/null 2>&1
 ! alias relay-3-old >/dev/null 2>&1
 ! alias alta-contrib-3x >/dev/null 2>&1
 ! alias convo-ai-test >/dev/null 2>&1

@@ -126,7 +126,7 @@ __alias_atlassian_project() {
   [[ -d "$__project_dir" ]] || return 0
 
   case "$__project_name" in
-    convo-ai-*)
+    convo-ai)
       alias "$__project_name=cd ${(q)__project_dir} && sdk use java $JDK21"
       ;;
     *)
@@ -140,7 +140,7 @@ alias atlassian-sandbox="cd $HOME/atlassian/sandboxes"
 for __project_dir in "$HOME"/atlassian/*(N/); do
   __project_name="${__project_dir:t}"
   case "$__project_name" in
-    convo-ai-<->|alta-contrib-<->|alta-<->|relay-<->)
+    convo-ai|alta-contrib|alta|relay)
       __alias_atlassian_project "$__project_name"
       ;;
   esac
@@ -286,7 +286,7 @@ fi
 # bun completions
 [ -s "$HOME/.bun/_bun" ] && source "$HOME/.bun/_bun"
 
-# alta-3 Node 24.15.0 local runtime alignment
+# alta Node 24.15.0 local runtime alignment
 if [ -d /opt/homebrew/opt/node@24/bin ]; then
   export PATH="/opt/homebrew/opt/node@24/bin:$PATH"
 fi
