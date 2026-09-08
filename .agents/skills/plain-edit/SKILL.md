@@ -1,6 +1,6 @@
 ---
 name: plain-edit
-description: Edit existing writing into plain, natural, tight prose. Strip AI-slop vocabulary, "not X, it's Y" constructions, aphorisms, filler, and excess em dashes, colons, and semicolons, while keeping the author's meaning, structure, and voice. Use when the user wants text de-slopped, humanized, made plainer, less academic or fluffy, tightened, or freed of AI tells. Use write-up to draft or restructure and fact-check new writing. Use one-clear-sentence to compress a takeaway to a single sentence.
+description: Edit existing writing into plain, natural, tight prose. Strip AI-slop vocabulary, "not X, it's Y" constructions, aphorisms, filler, and excess em dashes, colons, and semicolons, while keeping the author's meaning, structure, and voice. Use when the user wants text de-slopped, humanized, made plainer, less academic or fluffy, tightened, or freed of AI tells. Use write-up to draft or restructure and fact-check new writing. Use one-clear-sentence or one-clear-paragraph to compress a takeaway to that length.
 ---
 
 Edit the target text so it reads as if a clear human wrote it. Return the edited text, not a critique of it.

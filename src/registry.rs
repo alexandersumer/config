@@ -50,6 +50,7 @@ const REQUIRED_CUSTOM_SKILL_NAMES: &[&str] = &[
     "git-publish",
     "git-publish-to-origin",
     "grill-me",
+    "one-clear-paragraph",
     "one-clear-sentence",
     "plain-edit",
     "prove-check",

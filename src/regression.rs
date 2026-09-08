@@ -149,7 +149,8 @@ fn test_one_clear_sentence_skill_rewrites_recent_context() -> Result<()> {
         "drop file inventories, examples, subtask lists, and incidental evidence",
         "Do not acknowledge, confirm, promise future behavior",
         "Use when the user explicitly asks for one sentence",
-        "Use plain-edit for multi-sentence simplification",
+        "Use one-clear-paragraph for a single-paragraph synthesis",
+        "plain-edit for style cleanup that preserves the source structure",
         "Got it",
         "I will use that style",
     ] {

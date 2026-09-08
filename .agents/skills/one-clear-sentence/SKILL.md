@@ -1,6 +1,6 @@
 ---
 name: one-clear-sentence
-description: Rewrite a source or relevant takeaway as exactly one useful, self-contained, plain sentence. Use when the user explicitly asks for one sentence, a single-sentence rewrite, or compression to one concise takeaway. Use plain-edit for multi-sentence simplification, de-academicizing, or punctuation cleanup.
+description: Rewrite a source or relevant takeaway as exactly one useful, self-contained, plain sentence. Use when the user explicitly asks for one sentence, a single-sentence rewrite, or compression to one concise takeaway. Use one-clear-paragraph for a single-paragraph synthesis and plain-edit for style cleanup that preserves the source structure.
 ---
 
 Write exactly one self-contained sentence and nothing else.
@@ -45,7 +45,17 @@ Do not add headings, labels, quotes, bullet points, explanations, alternatives, 
 
 The output must be one clear, simple sentence in a natural tone, with no em dashes, colons, or semicolons.
 
-Keep the tone plain like `plain-edit`: use concrete words, active voice, and natural phrasing; avoid inflated vocabulary, filler, aphorisms, motivational-poster lines, and academic polish.
+## Plain style
+
+Use concrete subjects, plain verbs, active voice, and natural phrasing. Match the author's register without adding fake casualness or flattening their personality.
+
+Cut filler openers, inflated vocabulary, slogans, praise, and decorative endings. Replace phrases such as "leverage our expertise" with the actual action. State the point directly instead of using "not X, but Y" framing unless the distinction carries essential meaning.
+
+Remove synonym lists added for rhythm, unsupported "from X to Y" sweeps, and clauses that merely restate the point. Keep the uncertainty the source supports while cutting stacked hedges.
+
+Keep precise domain terms such as "model drift" or "decision boundary" when a plainer substitute would change the meaning or make it vague. Judge words by their function rather than a blacklist.
+
+Use conjunctions to connect essential clauses within the single sentence. Do not cram a paragraph into a run-on sentence to retain incidental details.
 
 ## Before replying
 
