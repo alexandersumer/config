@@ -13,15 +13,15 @@ Do not hypothesize without falsifiable evidence. Prefer the smallest determinist
 
 Confirm the real symptom through reproduction or captured evidence, not a nearby failure. Capture the exact error, output, timing, or state that proves it.
 
-Before changing code, write 3-5 ranked falsifiable hypotheses. Each must predict what observation or one-variable probe would confirm or refute it. Test the highest-signal probe first. Do not log everything; instrument only boundaries that distinguish hypotheses. Tag temporary logs with a unique `[DEBUG-...]` prefix.
+Before changing code, identify the plausible causes supported by the evidence and rank them when more than one remains. Each hypothesis must predict an observation or one-variable probe that would confirm or refute it; do not invent alternatives to meet a quota. Test the highest-signal probe first. Do not log everything; instrument only boundaries that distinguish hypotheses. Tag temporary logs with a unique `[DEBUG-...]` prefix.
 
 For performance regressions, measure first: baseline, profiler/timing/query plan, then bisect or isolate. Do not guess from code shape.
 
-Red flags: stop and return to the loop if you think "probably", "quick fix", "try this", "obvious", "test is wrong", or "clean it up later".
+If a probe contradicts the leading hypothesis, revise it before editing. Treat an incorrect test as a possible cause only when requirements or observed intended behavior support that conclusion.
 
 If the user asked for a fix, fix only the proven root cause and add or preserve a regression check at the seam that exercises the real bug pattern, unless stronger existing coverage already catches it. If no correct seam exists, say the architecture prevents a durable regression check and name the gap. Otherwise leave product code and tests unchanged after removing diagnostic instrumentation, and report the smallest evidence-backed fix and regression seam.
 
-Before final: rerun the original loop or revalidate the captured evidence. When a fix was authorized, rerun or reuse fresh proof for the regression check under the proof policy. Then remove all `[DEBUG-...]` instrumentation and throwaway harnesses.
+Remove temporary instrumentation and throwaway harnesses before final verification. Rerun the original reproduction or revalidate captured evidence. When a fix was authorized, verify the regression check against the cleaned final code under the proof policy.
 
 Final:
 - Signal: `<reproduction or captured evidence>`

@@ -15,7 +15,7 @@ Fix a real failing check from `error_output`, `$ARGUMENTS`, current-branch CI, o
 2. With no supplied failure, inspect repository and SCM context: current branch, upstream or PR, working tree diff, recent commits, and branch/PR check status. Use the latest branch-relevant failing CI/check run as the source of truth.
 3. If CI is unavailable, inaccessible, green, inconclusive, or not relevant to this branch, fall back to documented local checks, package scripts, build files, and nearby test commands to find the smallest real failure.
 4. If no failing signal is found after CI and local discovery, stop and report that no actionable failure was found. Do not invent a change.
-5. Push/commit only when this invocation explicitly authorizes it, for example when the user asks to push, publish, commit, or iterate until CI is green. Otherwise finish with local proof and any remote-CI blocker.
+5. Push/commit only when authorized by the current request or earlier instructions for this task, for example when the user asks to push, publish, commit, or iterate until CI is green. Otherwise finish with local proof and any remote-CI blocker.
 
 ## Triage from evidence
 
@@ -41,7 +41,7 @@ Do not blindly rerun the same command or CI job. Each run must follow a fix, nar
 2. Compare the original failing signal with the new or reused passing signal or changed diagnostic.
 3. Run or reuse the broader relevant suite, build, lint, or CI gate only when the proof policy justifies it; otherwise name the exact broad-proof blocker or narrower proof used.
 4. If adding or changing an automated check, prove when feasible that it fails for the original bug, then restore the fix and rerun green; reuse prior fail/pass proof only when it is same-diff and same-scope.
-5. When publish is authorized by this invocation, publish only a coherent fix, inspect resulting CI, and repeat this evidence-backed loop for new branch-relevant failures until CI is green or a concrete blocker remains. Claim CI is green only when the refreshed provider data is for the latest branch-relevant source SHA and every visible required branch-relevant check is terminal success; otherwise report the exact pending, red, missing, stale, or inaccessible check state as the blocker.
+5. When publishing is authorized, publish only a coherent fix. If the requested outcome includes green CI, inspect resulting CI and repeat this evidence-backed loop for new branch-relevant failures until CI is green or a concrete blocker remains. A request to commit or push alone does not add a CI-monitoring task. Claim CI is green only when the refreshed provider data is for the latest branch-relevant source SHA and every visible required branch-relevant check is terminal success; otherwise report the exact pending, red, missing, stale, or inaccessible check state as the blocker.
 
 ## Final
 

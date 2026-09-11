@@ -13,15 +13,15 @@ Do not stop at scaffolding, types, TODOs, docs, or unrelated green tests. Delive
 
 Before editing:
 - read the artifact set end to end
-- read README/CONTRIBUTING, touched modules, nearest tests, and 2-3 sibling features
-- stop instead of improvising if the plan has a blocking contradiction, stale path, impossible check, or unsafe sequence
-- emit `Artifact: <path or inline>` and `Canonical patterns: <path> for <aspect>`
+- read applicable repo instructions, touched modules, and relevant tests; consult sibling features when they clarify an implementation choice
+- resolve stale paths and equivalent checks against current code when intent is clear; ask only about contradictions or changes that materially affect scope, behavior, or safety
+- identify the artifact and briefly note any material adaptation
 
-Maintain an explicit todo or plan in chat or with the available planning tool. Every task must be an observable behavior or capability with a checkable signal.
+For multi-step work, track remaining requirements in chat or the available planning tool. Reuse the existing plan rather than duplicating it. Each task should have a checkable outcome.
 
 Build production code, wiring, tests, and required docs/config together. Tests must catch a named realistic regression that is not already covered by a stronger existing test. If no existing check can prove the behavior, add the missing targeted check instead of claiming green.
 
-Test infrastructure and verification-only build changes are allowed only when the artifact asks for verification infrastructure. Production dependencies or build config may change only when required to make planned behavior reachable, and broad dependency bumps remain out of scope. Do not add suppressions, baselines, skipped tests, or fake TODO placeholders.
+Change test infrastructure or build config only when needed to implement or verify a planned requirement, using the smallest existing-compatible change. Add production dependencies only when required for planned behavior; broad dependency bumps remain out of scope. Do not add suppressions, baselines, skipped tests, or fake TODO placeholders.
 
 Validate through the proof policy: reuse proof when valid, otherwise run targeted checks before broader checks. Re-read the artifact and account for every requirement as implemented or deferred. Evidence before claims: no fixed, complete, ready, or passing language without fresh or validly reused proof.
 
@@ -33,5 +33,5 @@ Implemented:
 Checks: `<command>` -> <result>, `reused — <prior proof and why still valid>`, or `not run — <reason>`
 Deferred:
 - <item or None>: <reason>
-Next: review-solo or review-deep as appropriate, then git-publish.
+Remaining: <exact blocker or unfinished authorized action, otherwise none>
 ```

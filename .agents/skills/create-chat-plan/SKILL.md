@@ -3,7 +3,7 @@ name: create-chat-plan
 description: Create a lightweight implementation-ready plan directly in chat. Use when planning should be grounded, interrogated, and verified upfront without writing plan files.
 ---
 
-Use `topic`, else `$ARGUMENTS`, else infer the planning target from the conversation, active design, current branch, or referenced files. Produce the plan in chat only. Do not create markdown files, do not edit code, and do not invoke subagents unless the user explicitly asks for deeper research.
+Use `topic`, else `$ARGUMENTS`, else infer the planning target from the conversation, active design, current branch, or referenced files. Produce the plan in chat only. Planning itself does not authorize code edits, files, or subagents; follow any separately authorized implementation or deeper-research request after planning.
 
 First read enough context to avoid generic planning: relevant README/CONTRIBUTING/AGENTS instructions, nearby docs, entry points, interfaces, representative callers, tests, existing plans, and current diffs when they matter. Keep this bounded; the goal is a high-confidence lightweight plan, not a durable design artifact.
 
@@ -46,4 +46,4 @@ One or two sentences describing the outcome and user/system value.
 ## Out of scope
 - Explicit exclusions and tempting follow-ups not included in this plan.
 
-Final line: ask whether to implement the plan, revise it, or turn it into a durable `create-plan` artifact.
+For a plan-only request, finish with the plan. If the user already asked for implementation after planning, continue that authorized work without asking again.
