@@ -31,7 +31,7 @@ Current-sha red wins. If any merge-relevant provider surface for the latest sour
 
 When provider surfaces disagree, query the exact gate by id/build number/status URL and reconcile by SHA, gate name/key, build number/UUID, and `updated_on`, `completed_on`, or equivalent timestamps. If exact logs are unavailable but a current red status summary exists, keep the red status as the active blocker and report the log-access proof gap; do not downgrade it to `waiting`.
 
-For Bitbucket, collect both PR `_statuses` and matching `bb pipeline query` runs for the source branch/SHA. Pass the raw `twg -o json bb prs get <id> --statuses` output to the bundled helper when available; it understands `_statuses` and `source.commit.hash`. The helper also understands raw `twg -o json bb pipeline get --pipeline <number>` detail objects with `target.commit.hash`. A PR status such as `FAILED` with a pipeline URL/build number is sufficient red evidence to leave `waiting`; fetch the pipeline detail/logs next when accessible.
+For Bitbucket, collect both PR `_statuses` and matching `bb pipeline query` runs for the source branch/SHA. Save the payload with `twg bb prs get <id> --statuses -o json --output-file <pr.json>` and pass that JSON file to the bundled helper; terminal output may be a YAML summary rather than JSON. The helper understands `_statuses` and `source.commit.hash`, and pipeline detail JSON with `target.commit.hash`. A PR status such as `FAILED` with a pipeline URL/build number is sufficient red evidence to leave `waiting`; fetch the pipeline detail/logs next when accessible.
 
 ## Terminal provider state gate
 
@@ -60,7 +60,7 @@ If the complete required-gate set cannot be enumerated, the state is `tooling-bl
 
 ### CI green helper
 
-For any final CI/provider classification, run the bundled helper after collecting a complete provider snapshot unless provider access itself is the blocker.
+Run the bundled helper on the collected CI snapshot before a final classification. A partial snapshot can prove red; only a complete snapshot can prove green. The helper does not verify PR approvals, policy, or mergeability.
 
 Use the helper from this skill bundle, not from the target repository. Resolve the skill directory from the loaded `clear-merge-blockers/SKILL.md`, then run:
 
@@ -181,42 +181,10 @@ Do not broaden scope to unrelated refactors, style churn, optional polish, oppor
 
 Do not loop solely because the review UI still shows an old comment that the pushed diff already addresses. Do not claim fixed, complete, passing, unblocked, merge-ready, green, or cleared unless the latest checked source SHA and, when relevant, merge queue or synthetic-merge SHA support that claim through the terminal provider state gate.
 
-## Done gate
-
-Before claiming `green`, verify or report the blocker for each:
-
-- Target review, source branch, target branch, latest source SHA, and active blocker id were identified.
-- Conflicts or target-branch update requirements are gone, handled, or blocked for a stated reason.
-- Failed required checks are passing on the latest relevant SHA, superseded by green newer runs, or classified with evidence as stale, flaky/infrastructure, unrelated, or tooling-blocked.
-- Every visible current-sha CI pipeline/check/status/custom gate was enumerated; any red, pending, missing, skipped, canceled, stale, or unknown gate is reported as remaining and prevents a green/done claim.
-- Required comment/task blockers are addressed, absent for the latest checked SHA, unclear with a question, or classified with evidence as non-actionable.
-- Pending/missing/skipped/canceled gates have had at most one safe rerun per unchanged gate state, have been followed through bounded wait/refresh cycles while safe progress remained, and are reported only if still merge-blocking because of an explicit limit, human blocker, or tooling blocker.
-- Required approvals, changes-requested state, draft state, Jira/compliance/custom gates, and permissions are satisfied or reported as human/policy/tooling blockers.
-- Any published commit set is coherent and contains only intended blocker fixes and target-branch update commits.
-- Targeted proof was run or reused for each fixed batch, or the exact proof gap is named.
-- Final status and diff were inspected for accidental files, secrets, debug output, generated noise, and unrelated edits.
-
 ## Final
 
-Produce this final report only when the state is `green`, `human-blocked`, `tooling-blocked`, or `waiting` with an explicit user/harness limit that prevents another safe refresh. Do not produce it for `needs-local-fix`, or for `waiting` when another safe wait/refresh is available.
+Finish only when the merge-blocker state is `green`, `human-blocked`, `tooling-blocked`, or `waiting` with an explicit user/harness limit preventing another safe refresh. Continue while `needs-local-fix` or `waiting` has a safe next action.
 
-Start with exactly one summary sentence that combines CI state and merge-blocker state:
+Lead with CI state and merge-blocker state together. CI may be green while review or policy still blocks merge. Support both claims with the terminal provider state gate above; do not infer hosted status from local checks.
 
-- `Complete: CI and merge blockers are green.`
-- `CI is green, but the PR is still blocked by human/policy review.`
-- `CI is not green: <exact red/pending/missing gate>.`
-- `Unable to prove CI state: <exact tooling blocker>.`
-
-Never lead with a standalone incomplete/complete label. Never use a final report to imply the merge-blocker goal is complete when review, policy, mergeability, permissions, or any current-sha provider gate remains red, pending, missing, skipped, canceled, stale, or unknown.
-
-- Target: `<review/branch or blocker>`
-- Latest checked SHA: `<source SHA and merge/synthetic SHA when relevant>`
-- CI state: `<green | red | waiting | unknown> for <SHA>, with helper/provider evidence>`
-- Merge-blocker state: `<green | needs-local-fix | waiting | human-blocked | tooling-blocked, with evidence>`
-- CI/provider gates: `<all current-sha gates green | exact red/pending/missing/unknown gates>`
-- Active blocker handled: `<type/id -> action/evidence>`
-- Changed: `<files or none>`
-- Proof: `<targeted checks/results, reused proof, or proof gap>`
-- Publish/refresh: `<commit/push/rerun/wait/refreshed status | not needed | blocker>`
-- Remaining: `<none only when merge-blocker state is green | exact blocker/state>`
-- Human action required: `<none or exact reviewer/policy/permission action>`
+Report the target, latest checked source and alternate SHAs, exact remaining gates or human actions, helper/provider evidence, fixes and targeted proof, and commit/push/rerun results. Include unresolved evidence gaps. Inspect final status and diff for accidental or unrelated changes. Keep the report concise; say no blockers only when the full merge-blocker state is green.

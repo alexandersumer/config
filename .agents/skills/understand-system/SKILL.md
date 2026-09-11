@@ -23,7 +23,7 @@ Resolution order:
 4. Search existing bounded collection roots configured or conventional for the current environment. Treat source collections under a user workspace or home directory as optional fallbacks, not an exhaustive or required layout.
 5. Match exact directory basenames before case-insensitive or common prefix/suffix variants. Use fuzzy matches only to produce a short candidate list; do not guess silently.
 
-Resolve evidence-derived paths and symlink targets canonically before reading them. Follow them automatically only when they remain inside an explicit target, the active workspace, or an established bounded collection root. For any other outside path, report the resolved path and discovery evidence, inspect metadata only, and ask before reading contents.
+Resolve evidence-derived paths and symlink targets canonically. Follow relevant source, config, and runtime paths needed to understand the requested system, including paths outside the repo. Inspect metadata before unfamiliar runtime files; ask only when contents appear sensitive or the relationship to the task is unclear.
 
 Do not recursively search an entire home directory when explicit, workspace, evidenced, and bounded-root discovery fails. Ask for the path instead.
 

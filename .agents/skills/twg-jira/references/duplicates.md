@@ -7,7 +7,7 @@ description: Detect duplicate Jira issues across a bounded scope with semantic c
 Use this decision policy with existing TWG capabilities. It does not replace
 JQL querying, `jira workitem similar`, or native workitem reads.
 
-Load `references/querying.md` when the prompt needs a bounded Jira candidate
+Load `querying.md` when the prompt needs a bounded Jira candidate
 set. Use live `twg help` for exact command grammar.
 
 Detect whether a target Jira issue duplicates another issue in the requested

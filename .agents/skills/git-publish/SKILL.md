@@ -88,33 +88,31 @@ Use this path when the current harness exposes a controlled PR facility compatib
 
 ### Bitbucket CLI fallback path: no-reviewer PR
 
-Use this path only when canonical PR tools are unavailable or the repository/tooling is not compatible with the current harness's PR tools.
+Use the verified push workspace/repository explicitly on every call. Prefer `twg`; if it is unavailable, use `bb` after inspecting its installed help. Do not switch providers or rely on remote auto-detection.
 
-1. Check once for an existing open PR:
+With TWG:
 
-   ```bash
-   twg bb prs query --source <branch> --dest <destination-branch> -n 5
-   ```
+```bash
+twg bb prs query --workspace <workspace> --repo <repo> --source <branch> --dest <destination-branch> --state OPEN -n 5 -o json
+```
 
-   Treat empty output, `[]`, `No pull requests found.`, or output containing `Found 0 pull requests` as no existing PR.
+Read the inline/compact records or saved JSON array. A successful query with zero matching rows proves absence; empty stdout, errors, or inaccessible output do not. Report an existing matching PR instead of creating another.
 
-2. If no PR exists, write the frozen body with real newlines to a private temporary Markdown file, then create one with no reviewers:
+If absent, write the frozen body with real newlines to a private temporary file and create:
 
-   ```bash
-   twg bb prs create --title "<subject>" --source <branch> --dest <destination-branch> --description-file <description-file> -o json
-   ```
+```bash
+twg bb prs create --workspace <workspace> --repo <repo> --title "<subject>" --source <branch> --dest <destination-branch> --description-file <description-file> -o json
+```
 
-   The description file must be non-empty. Require the returned JSON `description` to be non-empty before reporting success. If the create response is otherwise successful but its description is blank or missing, update that newly created PR once with `twg bb prs update --pull-request <id> --description-file <description-file>`, then require `twg bb prs get <id> --full -o json` to return a non-empty `description`; never issue a second create to repair metadata. If description repair or verification fails, stop with the exact PR metadata blocker; do not enter the create-failure retry path or report PR success. Keep the temporary file through any permitted retry and remove it after the entire create/failure flow.
+Omit reviewer flags unless requested. Check the returned PR description and reviewers. If creation succeeded but the description is blank or missing, update that PR once with `twg bb prs update --workspace <workspace> --repo <repo> --pull-request <id> --description-file <description-file>`, then verify with `twg bb prs get <id> --workspace <workspace> --repo <repo> --full -o json`. Never issue another create to repair metadata. Report an unexpected reviewer or failed repair explicitly rather than claiming a no-reviewer success.
 
-3. Do not pass reviewer flags. Create PRs with no reviewers unless the user explicitly requested reviewers.
-4. If `twg` is unavailable, use `bb pr create` only through its interactive flow, supply the same frozen title/body, and select `Skip (no reviewers)`. Do not use fully specified non-interactive `bb pr create`, because it may apply default reviewers.
-5. If the create command fails without returning a created PR:
-   - check once for an existing branch PR with whichever CLI is available
-   - if found, report it and stop only after confirming its description is non-empty; after a failed `twg` create, repair a blank or missing description once with the same description file and verify it through `twg bb prs get` before reporting success
-   - if description confirmation or repair fails, stop with the exact PR metadata blocker rather than retrying create
-   - if no PR is found and the failed create path used `twg`, retry once with the no-reviewer `twg` Bitbucket create path
-   - if no PR is found, `twg` was unavailable, and the interactive `bb pr create` fallback failed, report the exact `bb` blocker
-   - if it still fails, stop and report the exact blocker
+If creation fails without returning a PR, query that same source/destination once. Report a recovered PR after checking its description. Retry create once only if the successful lookup proves absence; otherwise report the uncertain result or access blocker. Remove the temporary body file after recovery/repair completes.
+
+With the separate BB CLI:
+
+- Query `bb pr list --workspace <workspace> --repository <repo> --state open --limit 50 --json` and match source/destination branches in the returned records. Its list command has no branch filter. If the limit is reached with no match, absence is unproven; use another supported lookup or report the coverage blocker.
+- When absent, pass explicit `--workspace`, `--repository`, `--head`, `--base`, `--title`, `--body`, and `--no-default-reviewers` to `bb pr create`; omit `--reviewer`. Pass the body as one safely quoted argument. If installed help lacks `--no-default-reviewers`, use the interactive flow and select `Skip (no reviewers)`.
+- Verify the returned PR with `bb pr view <id> --workspace <workspace> --repository <repo> --json`. On an uncertain create result, repeat the bounded lookup once; do not retry creation without proof of absence.
 
 ### GitHub CLI fallback path
 
@@ -123,19 +121,19 @@ Use this path only when the push URL points to a GitHub repository and `gh` is a
 1. Check once for an existing open PR:
 
    ```bash
-   gh pr list --head <branch> --base <destination-branch> --state open --json url --limit 5
+   gh pr list --repo <owner/repo> --head <branch> --base <destination-branch> --state open --json url --limit 5
    ```
 
 2. If no PR exists, create one without reviewers:
 
    ```bash
-   gh pr create --title "<subject>" --body "<body>" --base <destination-branch> --head <branch>
+   gh pr create --repo <owner/repo> --title "<subject>" --body-file <description-file> --base <destination-branch> --head <branch>
    ```
 
-   Pass the same frozen, grounded body rather than provider defaults.
+   Resolve `<owner/repo>` from the verified push URL. Write the frozen body with real newlines to a temporary file and pass it with `--body-file`. Use the same explicit repository for any follow-up query.
 
 3. Do not pass reviewer flags unless the user explicitly requested reviewers.
-4. If `gh` is unavailable or PR creation fails, check once for an existing branch PR with `gh pr list`; if none is found, stop and report the exact blocker.
+4. If `gh` is unavailable, report that blocker. If creation fails, query the same repository and branch once for an existing PR; report it if found, otherwise report the original creation failure. Do not treat a failed lookup as an empty result.
 
 ## Final response
 

@@ -5,22 +5,22 @@ description: Write a PR or branch title and description. Use when the user wants
 
 Write the canonical PR title and description for the current branch.
 
-This skill is read-only. Never run `git add`, `git commit`, `git push`, `gh`, `bb`, `hub`, or provider commands that create, update, or publish a PR.
+This skill is read-only. Do not stage, commit, push, or create/update a PR. Use read-only provider commands when they establish the actual PR base or clarify the requested description.
 
 Do not use the branch name, issue title, provider default, conversation recency, your own last action, the latest commit, or a vague summary. First line must be a valid Conventional Commit subject usable verbatim as the PR title.
 
-Resolve the comparison base from the remote default branch: use `origin/HEAD`, falling back to `origin/main` or `origin/master` only if needed, then set `<base>` to `git merge-base <remote-default> HEAD`. If no remote default or merge-base exists, omit only the committed-branch part and still inspect the working tree.
+Use the requested base or target PR destination as `<comparison-ref>`. Otherwise use a valid `origin/HEAD`, or the sole existing `origin/main`/`origin/master` fallback. Set `<base>` with `git merge-base <comparison-ref> HEAD`. If no unambiguous ref or merge base exists, report that gap and inspect the working tree.
 
 Build one effective change set from every available source: `git log <base>..HEAD --oneline` and `git diff <base>..HEAD` when `<base>` exists, staged changes with `git diff --cached`, unstaged changes with `git diff`, and untracked files from `git ls-files --others --exclude-standard` rendered as new-file diffs. Always include staged, unstaged, and untracked changes even when the committed branch diff exists. If the committed branch diff is empty but the working tree has staged, unstaged, or untracked changes, describe those changes instead of treating the branch as empty. Ignore generated files, lockfiles, and formatting noise unless they are the change.
 
 When the effective change set is empty, output exactly this diagnostic sentence and stop, replacing placeholders:
 ```text
-No branch description to write: current branch `<current-branch>` has no changes relative to remote default `<remote-default-ref>`, and there are no staged, unstaged, or untracked changes.
+No branch description to write: current branch `<current-branch>` has no changes relative to comparison ref `<comparison-ref>`, and there are no staged, unstaged, or untracked changes.
 ```
 
-Use the current branch from `git branch --show-current`, or `HEAD` if detached. Use the resolved remote default ref from the base step: `origin/main`, `origin/master`, or `origin/<branch>` from `origin/HEAD`. Do not assume `main`. If no remote default or merge-base exists, use this variant instead:
+Use `git branch --show-current`, or `HEAD` if detached, and the actual comparison ref. If no ref or merge base exists, use this diagnostic:
 ```text
-No branch description to write: current branch `<current-branch>` has no resolved remote-default comparison base, and there are no staged, unstaged, or untracked changes.
+No branch description to write: current branch `<current-branch>` has no resolved comparison base, and there are no staged, unstaged, or untracked changes.
 ```
 
 The cumulative effective diff is the source of truth. Use conversation context only to clarify intent that is supported by the diff; never let the most recent agent edit, latest local fix, or last commit dominate the title unless it is the primary branch-level change.

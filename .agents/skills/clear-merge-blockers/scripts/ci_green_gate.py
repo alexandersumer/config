@@ -305,6 +305,25 @@ def extract_gates(snapshot: Any) -> list[tuple[str, dict[str, Any]]]:
     return gates
 
 
+def malformed_gate_surfaces(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    blockers = []
+    for key in GATE_LIST_KEYS + ("values",):
+        if key not in snapshot:
+            continue
+        value = snapshot[key]
+        rows = value.get("values") if isinstance(value, dict) else value
+        if isinstance(rows, list) and all(isinstance(row, dict) for row in rows):
+            continue
+        blockers.append({
+            "name": key,
+            "surface": key,
+            "classification": "unknown",
+            "state": "malformed gate collection",
+            "reason": "expected an array of gate objects or an object with a values array",
+        })
+    return blockers
+
+
 def gate_identity(gate: dict[str, Any]) -> str | None:
     key = short_sha(gate.get("key"))
     if key:
@@ -495,7 +514,7 @@ def validate(snapshot: Any) -> tuple[int, dict[str, Any]]:
         accepted,
         scoped_to_head,
     )
-    blockers: list[dict[str, Any]] = []
+    blockers = malformed_gate_surfaces(snapshot)
     green_gates: list[dict[str, Any]] = []
     stale_gates: list[dict[str, Any]] = []
     covered_shas: set[str] = set()

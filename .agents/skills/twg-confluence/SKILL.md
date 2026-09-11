@@ -12,13 +12,6 @@ Use with root `twg` when Confluence is the primary source or mutation target.
 This skill owns content-type, hierarchy, format, and concurrency semantics;
 live help owns exact command grammar.
 
-## CLI launcher fallback
-
-Run `twg <command>`. On shell `command not found`, use `$HOME/.local/bin/twg`
-(macOS/Linux) / `$env:LOCALAPPDATA\Programs\twg\bin\twg.exe` (PowerShell), then
-tell user to add that directory to PATH. Do not treat auth or command errors as
-PATH failures.
-
 ## Use When
 
 - Use for Confluence-anchored content or space reads and mutations, including

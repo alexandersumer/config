@@ -11,13 +11,6 @@ description: >
 Use the root `twg` skill. Use this workflow to answer “who should I involve,
 why them, and in what role?” Do not assume a broad topic is an exact product.
 
-## CLI launcher fallback
-
-Run `twg <command>`. On shell `command not found`, use `$HOME/.local/bin/twg`
-(macOS/Linux) / `$env:LOCALAPPDATA\Programs\twg\bin\twg.exe` (PowerShell), then
-tell user to add that directory to PATH. Do not treat auth or command errors as
-PATH failures.
-
 ## Classify The Role
 
 Keep these roles distinct:

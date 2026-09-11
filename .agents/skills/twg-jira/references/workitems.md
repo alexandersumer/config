@@ -33,7 +33,7 @@ Before a create or update:
 2. Read the current item for updates.
 3. Discover the applicable field metadata.
 4. Prepare the smallest mutation that satisfies the request.
-5. Run the mutation after approval.
+5. Execute when the current request or earlier task instructions authorize the mutation; ask only for missing authorization.
 6. Read back the item and report the stable key and URL.
 
 For links, resolve both endpoints and discover the supported link type before

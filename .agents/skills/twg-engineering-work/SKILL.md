@@ -12,13 +12,6 @@ Use together with the root `twg` skill. Use documented command shapes when they
 cover the request. Use focused live `twg help` only when the required command,
 argument, or output contract is absent or uncertain.
 
-## CLI launcher fallback
-
-Run `twg <command>`. On shell `command not found`, use `$HOME/.local/bin/twg`
-(macOS/Linux) / `$env:LOCALAPPDATA\Programs\twg\bin\twg.exe` (PowerShell), then
-tell user to add that directory to PATH. Do not treat auth or command errors as
-PATH failures.
-
 ## Use When
 
 - "Which PRs are waiting for my review?"

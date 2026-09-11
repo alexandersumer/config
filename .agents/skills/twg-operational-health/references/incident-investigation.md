@@ -195,7 +195,7 @@ failure and why the mitigation removes the causal mechanism.
 For an active incident:
 
 - Current read: severity, status, impact, affected customers/products, owner.
-- Probe coverage: which golden-signal families were checked, what each added,
+- Probe coverage: which investigation signal families were checked, what each added,
   and which remain missing or need user/tool context.
 - Four-signal evidence matrix with source, confidence, next check, and rerun
   trigger.

@@ -11,13 +11,6 @@ description: >
 Use together with the root `twg` skill. Exact command grammar comes from live
 `twg help` or `twg help describe <path>`.
 
-## CLI launcher fallback
-
-Run `twg <command>`. On shell `command not found`, use `$HOME/.local/bin/twg`
-(macOS/Linux) / `$env:LOCALAPPDATA\Programs\twg\bin\twg.exe` (PowerShell), then
-tell user to add that directory to PATH. Do not treat auth or command errors as
-PATH failures.
-
 ## Use When
 
 - "I'm taking over on-call"
@@ -30,9 +23,9 @@ PATH failures.
 
 Resolve scope, window, anchors, owner/escalation path, status, recency, and
 follow-ups. Find the operational anchor before joining relevant surfaces.
-Run without `--site`; TWG inherits the user's pinned Jira/JSM site. Only add a
-site override when the user explicitly requests another tenant. Never assume a
-vendor-internal incident site.
+Use an explicit incident URL/site or verified linked-record host when supplied;
+otherwise use TWG's configured Jira/JSM site. Ask only when evidence conflicts
+or no site can be resolved. Never assume a vendor-internal incident site.
 
 ## Evidence Policy
 
@@ -62,7 +55,7 @@ escalation map.
 Use when the incident is active, newly mitigated, or pre-PIR. Anchor on the
 incident record, then pull responders, symptoms, impact, recent
 deploys/flags/config, topology, alert/log/metric pointers, ownership, runbooks,
-and similar incidents. If ticket fields are sparse, probe the four golden-signal
+and similar incidents. If ticket fields are sparse, probe the four investigation signal
 families with bounded follow-ups. See `references/incident-investigation.md`.
 Output a four-signal matrix, hypotheses, confidence, next checks, and mitigation
 options; never call a mitigation the root cause without the causal mechanism.

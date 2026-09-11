@@ -436,6 +436,45 @@ def main() -> int:
         ),
     ]
 
+    for surface in (None, "unreadable", {"error": "permission denied"}, {"values": None}):
+        cases.append((
+            f"malformed_surface_{surface!r}_cannot_prove_green",
+            {**complete, "checks": [gate("SUCCESSFUL")], "statuses": surface},
+            1,
+            "tooling-blocked",
+            False,
+        ))
+    cases.extend([
+        (
+            "malformed_row_cannot_be_dropped_from_green_snapshot",
+            {**complete, "statuses": [gate("SUCCESSFUL"), None]},
+            1,
+            "tooling-blocked",
+            False,
+        ),
+        (
+            "malformed_nested_row_cannot_be_dropped",
+            {**complete, "statuses": {"values": [gate("SUCCESSFUL"), "unreadable"]}},
+            1,
+            "tooling-blocked",
+            False,
+        ),
+        (
+            "current_red_survives_malformed_surface",
+            {**complete, "checks": [gate("FAILED")], "statuses": None},
+            1,
+            "needs-local-fix",
+            False,
+        ),
+        (
+            "empty_valid_surface_does_not_invalidate_other_green_gates",
+            {**complete, "checks": [gate("SUCCESSFUL")], "statuses": {"values": []}},
+            0,
+            "green",
+            True,
+        ),
+    ])
+
     for name, snapshot, expected_code, expected_state, expected_green in cases:
         assert_case(name, snapshot, expected_code, expected_state, expected_green)
         print(f"ok {name}")

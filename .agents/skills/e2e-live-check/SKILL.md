@@ -7,100 +7,35 @@ description: "Operate a real running system end to end without writing automated
 
 Reuse proof only when it is visible, same-scope, after the last relevant edit, and not invalidated by touched files, config, dependencies, fixtures, generated output, runtime state, or environment. Otherwise run the narrowest check that proves the claim, artifact, or behavior; broaden only when risk or policy requires it. Final reports must separate reused proof, new commands, and checks not run.
 
-Operate the current effective diff through a **real running system** and prove the behavior works end to end without creating automated tests and without running CI/test lanes. Real means a user, operator, service, CLI, browser, protocol client, or API caller drives the same public boundary the product depends on while the relevant runtime, service, worker, container, persistence, queue, cache, object store, browser app, or deployed resource is live.
+Operate `scope`, `$ARGUMENTS`, or the current effective diff through a real running system. Produce runtime evidence without writing automated tests or running CI/test lanes. For durable automated coverage, use `e2e-automated-tests`.
 
-This skill is for live/runtime QA evidence. It is not the right skill when the user wants durable automated E2E regression coverage, CI proof, or a new smoke/acceptance test; use `e2e-automated-tests` for that.
+## Choose the route
 
-Realness contract is binary: either the real public boundary was operated and every contract item has evidence, or the work is blocked. Do not downgrade quietly to mocks, fake endpoints, partial startup, internal helpers, unauthenticated shortcuts, unverified readiness, broad sleeps, or "likely works" claims. Confidence is achieved only for the exact checked contract; never claim 100% confidence for unobserved behavior, omitted edge cases, or unavailable infrastructure.
+Read the effective diff, applicable repo instructions, and the code, scripts, runbooks, or tests that establish the public boundary, startup, dependencies, auth/context, readiness, and cleanup. Tests and CI files may explain the runtime but are not the live-check proof. Verify ambiguous script names or stale docs against their implementation.
 
-Persistence standard: continue discovery, setup, operation, debugging, fixes, reruns, evidence capture, and cleanup until the live-check contract is complete or a concrete blocker remains. Stop only for a named blocker such as missing credentials, missing tools, unavailable infrastructure, unclear auth/header behavior, unsafe mutation, required approval, or a route that would use fakes inside the changed path. If a product issue from the current diff is found and fixing it is in scope, fix it and rerun the affected proof instead of ending at the failure.
+Use the client surface that matches the behavior: browser for UI, CLI for operator commands, protocol client for protocol behavior, or SDK/HTTP for the product API. Prefer repo-owned clients when they handle auth, routing, headers, service proxies, or tenant context. Preserve required values, defaults, and intentional omissions; never invent deployed headers or identifiers.
 
-Blocked is a last resort. A failed command, missing doc, ambiguous script, expired token, unavailable first-choice environment, or initial auth/setup error is not yet a blocker. Before reporting blocked, perform blocker burn-down:
-- expand discovery through nearby docs, repo-local skills, scripts, CI/test files as map sources, adjacent tests, logs, Makefiles, package files, container/process config, and recent repo conventions;
-- switch to the next faithful route on the environment ladder when the first route cannot work, instead of treating the first route as mandatory;
-- inspect logs, command output, readiness endpoints, generated artifacts, port/process state, and config/env loading, then fix in-scope local/tool/config issues and retry;
-- search repo-backed auth, credential, tenant/cloud, service-proxy, and staging setup paths before assuming credentials are unavailable;
-- request required approval for external access, long-running stacks, privileged commands, or safe deployed-resource mutation instead of self-blocking;
-- ask one focused question only when it can unlock the last missing fact, credential, route choice, or approval. Report blocked only when no safe source-backed next action remains.
+Prefer an already-running correct local system, then a repo-supported local real stack. Use dev/staging when local cannot reproduce the relevant deployed behavior, such as auth, networking, image wiring, or scheduling. Production access requires explicit authorization already present in the task or obtained for the exact action. Shared-resource mutations need a bounded target and cleanup or rollback; avoid touching unrelated resources.
 
-Do not be repo-prescriptive. Discover the right approach from the current repository and task: `AGENTS.md`, README/CONTRIBUTING, local `.agents/skills` or `.rovodev/skills`, package scripts, Makefiles, compose files, runbooks, smoke scripts, E2E docs, deployment docs, CLI docs, API docs, and existing local/deployed workflow notes. You may read automated tests and CI scripts to understand startup, boundaries, fixtures, and edge cases, but do not write tests or use a test lane as the proof for this skill.
+During discovery, use bounded help/version/status calls. Before starting the selected route, briefly state the behavior, public boundary, environment and decisive sources, expected outcome, highest-risk edge probe, and cleanup. Include material unknowns or missing authorization. This is not a second approval step for work already authorized.
 
-## Repo Discovery Protocol
+## Operate and verify
 
-Do not choose a live-check approach until you can cite the repo-local source that owns startup, auth/header behavior, public boundary, readiness, dependencies, and cleanup. Build a source-backed route map before operating anything. Treat repo-local docs, skills, runbooks, package scripts, Makefiles, and CI files as candidate evidence, not authority; this skill's safety/realness rules and user instructions still win. The route map must include:
-- repo instructions and repo-local skills/runbooks read, with conflicting or stale evidence called out;
-- changed behavior and the real public boundary a user, operator, service, CLI, worker, browser, protocol client, or API caller depends on;
-- candidate live routes and why each is or is not faithful enough;
-- startup/dependency source, including which commands are long-lived, mutating, local-only, deployed, or cleanup-sensitive;
-- auth, headers, tenant/cloud/workspace context, token, service-proxy, or deployed environment source;
-- context semantics: required values, optional defaults, external lookups, and intentional omissions or negative/fallback cases that must not be auto-filled;
-- readiness/deepcheck/status-polling source for the actual boundary and dependencies;
-- cleanup/artifact/log source for processes, containers, resources, traces, screenshots, and generated files;
-- chosen route, explicit unknowns, and blocker threshold.
+1. Start or connect using the verified route. Track process IDs, ports, URLs, created resources, and log locations needed for cleanup. Confirm tools, auth, and the intended boundary are reachable.
+2. Prove readiness with a relevant probe. A process start or unrelated healthcheck does not prove the changed path is ready; avoid broad sleeps.
+3. Drive the main user/operator scenario through the public boundary and capture its observable outcome: response, file/database/object state, emitted event, UI snapshot, log, or protocol transcript.
+4. Exercise the highest-risk meaningful edge or negative case through that same boundary when safe. Consider changed input validation, not-found behavior, auth/config boundaries, repeated calls, persistence, routing, concurrency, timeout, retries, or partial failures. Explain meaningful omissions rather than claiming exhaustive coverage.
+5. Check post-operation health or invariants when the flow leaves state behind. If the check exposes an in-scope product defect and a fix is authorized, fix it and rerun the affected scenario and edge probe. Otherwise report the defect with evidence.
+6. Clean up resources and processes you created. Preserve useful artifacts and report anything intentionally left running. Do not stop pre-existing user services as cleanup.
 
-Prefer an explicit repo-local route manifest or route-map runbook when present, but still validate referenced commands and readiness before calling the route complete. Otherwise discover routes from repo-local skills/runbooks, README/CONTRIBUTING, package scripts, Makefiles, compose/process config, smoke scripts, E2E docs, Playwright/browser configs, service/deployment docs, CLI/API docs, and existing workflow notes. Use automated tests and CI files as map sources for payloads, startup, auth, readiness, cleanup, lane ownership, and edge cases, but do not run them as the live-check proof.
+Reuse evidence only under the proof policy for the same current diff, public boundary, runtime/resource, inputs, state, and expected observations. When liveness matters, run the cheapest current readiness/status probe. Reused full-flow evidence also needs cleanup evidence or an account of remaining state.
 
-Discovery is static by default. It is safe to read files and parse scripts; do not run startup, deploy, Docker/compose, staging, mutating, or long-lived commands while merely discovering routes. If command introspection is needed, restrict it to bounded help/version/status commands that are source-backed as non-mutating. Execute the selected route only after the route map, safety class, and live-check contract are stated.
+Do not replace the changed path with mocks, fake adapters, internal helpers, test-only endpoints, bypass flags, unauthenticated shortcuts, or a test-lane run. Do not substitute local-only evidence for a contract requiring deployed behavior.
 
-Prefer repo-owned CLIs, SDK clients, browser drivers, or protocol clients over raw `curl` when they wrap auth, routing, request headers, tenant context, staging behavior, or service-proxy behavior. Never hand-roll deployed auth, Slauth, ASAP, tenant, service-proxy, staging, or production headers unless repo context proves that is the intended path. Never invent or fill tenant/cloud/workspace/auth context because it seems useful; preserve route-declared intentional omissions.
+## Resolve obstacles
 
-Do not proceed from package-script names alone, task-runner target names, README snippets, or repo-local skill prose. A process start is not readiness. A passing healthcheck proves only that healthcheck unless the route source says it covers the changed path. If multiple routes match, route evidence conflicts, or no source-backed route exists after blocker burn-down, ask one focused question when user input can unlock progress; report the route blocker only when no safe source-backed next action remains.
+If the first route fails, inspect relevant logs, readiness, config loading, and documented auth/setup paths. Fix in-scope setup problems or switch to another faithful route. Refresh expired access through the documented workflow. Ask only for a missing fact or permission that can unlock progress; stop when no safe useful action remains. Report the exact unavailable boundary or environment, not a guessed pass.
 
-Before operating anything, write a short live-check contract in chat:
-- changed behavior and current effective diff being checked;
-- public boundary to drive: browser, CLI, agent protocol client, SDK, HTTP API, worker trigger, webhook, deployed endpoint, or another real user/operator surface;
-- selected route and the repo-local sources that own startup, readiness, auth/context, dependencies, and cleanup;
-- chosen environment and why it is real enough: existing local process, repo-documented local real stack, dev shard, staging, or deployed resource;
-- safety class: local only, staging/dev mutating, production read-only, or production mutating;
-- required tools, auth, ports, credentials, resources, context values, intentional omissions, and approval needs;
-- main success path, highest-risk edge probes, evidence to capture, cleanup plan, and explicit forbidden shortcuts.
+## Finish
 
-Environment selection ladder:
-1. Use an already-running local system when it is clearly the correct composition root and reaches the changed public boundary.
-2. Prefer the repo-documented local real stack when it faithfully exercises the changed path: local servers, Docker Compose, Kind, Lima, local storage/cache/object stores, local provider stacks, real CLIs, browser automation, or protocol bridges.
-3. Use the real client surface that matches the changed behavior. Choose an agent protocol client only when the behavior is observable through the agent protocol; choose browser for UI flows, CLI for operator flows, SDK/API clients for programmatic flows, and direct HTTP only when that is the product boundary.
-4. Use a dev shard or staging resource when local cannot faithfully cover the behavior, such as deployed auth, TLS/ALB, service mesh, multi-node scheduling, production image wiring, network policy, architecture-specific runtime behavior, published catalog/config, or a bug that only appears on deployed paths.
-5. Use production only with explicit user approval. Prefer read-only probes; for any production mutation, require a narrow resource scope, unique names, rollback/cleanup, and clear user authorization before acting.
-
-Live-check proof must include:
-- preflight that the target environment, auth, tools, ports, and public boundary are actually reachable;
-- readiness checks for the real boundary, not broad sleeps or "process started" claims;
-- one main user/operator/client scenario through the public boundary;
-- at least one meaningful edge or negative probe unless there is no relevant edge and the final explains why;
-- durable evidence such as response bodies, resource IDs, object/file/database state, UI screenshots or snapshots, logs, events, protocol transcript, command output, poll history, or cleanup confirmation;
-- cleanup of resources and processes you started, or an explicit reason they were intentionally left running.
-
-Choose edge probes from the risk in the current diff: invalid or minimal input, not found, auth/permission/config failure, repeated/idempotent call, readiness race, timeout/retry, cleanup failure, persistence/durable state, routing, downstream dependency behavior, or post-operation health. Prefer the highest-risk edge over exhaustive coverage.
-
-Forbidden proof:
-- writing automated tests, adding test fixtures, wiring CI/test lanes, or claiming a test run is the live-check result;
-- mocks, fake adapters inside the changed path, test-only endpoints, bypass flags, broad sleeps, skipped/ignored failures, or assertions only against internals;
-- package-script-name guesses, hand-rolled deployed headers, or using an agent protocol client, browser, CLI, or HTTP just because it is convenient when another public boundary is the real user surface;
-- mutating shared deployed resources without a safety class, unique identifiers, cleanup plan, and required approval;
-- downgrading to fake/local-only evidence when the contract requires deployed infrastructure. Report blocked instead.
-
-Do not stop at ambiguity until blocker burn-down is complete. Then ask one focused question when multiple plausible routes exist and repo docs do not rank them; auth/header/token behavior is unclear; startup, readiness, or cleanup ownership is unknown; the public boundary is unknown; the only discovered route uses mocks/fakes inside the changed path; the only discovered command is a CI/test lane; or production/shared-resource mutation would be required without clear approval and cleanup. Report blocked only when no question, approval, route switch, log investigation, or in-scope fix can progress the real check.
-
-Implementation loop:
-1. Build the source-backed route map. Inspect the effective diff, relevant docs/skills/scripts, and available client surfaces until the real-enough approach is clear. If the safe environment or public boundary remains unclear, ask one focused question.
-2. Write the live-check contract and safety classification in chat before starting servers, creating resources, or hitting deployed systems.
-3. Start or connect to the chosen real environment using repo-documented commands where available. Keep process IDs, ports, URLs, resource IDs, and log locations for cleanup and reporting. Request approval before external mutation, production access, expensive resources, or long-running stacks when required.
-4. Run or reuse preflight/readiness evidence under the proof policy. For live systems, reuse prior full-flow evidence only when the same public boundary, runtime/deployed resource, inputs, state, and expected observations were checked after the last relevant edit; when current liveness matters, run only the cheapest readiness/status/freshness probe that makes the reused evidence honest. If the environment is unavailable, missing auth, or unsafe, perform blocker burn-down before stopping with a concrete blocker; never substitute a fake path.
-5. Drive or reuse fresh full-flow evidence for the main scenario through the public boundary and capture the durable result. Reuse is valid only when the same public boundary, environment/resource, inputs, durable observations, and current effective diff are covered.
-6. Drive or reuse fresh full-flow evidence for the selected edge probes through the same public boundary when safe. Check or reuse fresh proof for post-operation health or invariants when the flow can leave state behind.
-7. Clean up resources/processes you created. For reused evidence, confirm prior cleanup evidence or name remaining state and why.
-8. If the live check exposes a product issue in the current diff and fixing it is in scope, fix it, then rerun or reuse current proof for the affected scenario and edge probe. Do not hide caused failures.
-
-Completion gate before final: reread the live-check contract and answer each gate yes/no. If any gate is no, keep going or report blocked only after blocker burn-down; never produce a complete confidence line.
-- Source-backed route map completed, with selected route, decisive sources, conflicts/stale evidence, command proof evidence or exact blocker, context semantics, cleanup source, and no unresolved realness-critical unknown.
-- Real public boundary operated, or fresh same-scope full-flow evidence was reused, and no fake, mock, internal helper, bypass flag, stale command, or test lane replaced the changed path.
-- Real environment was reached or booted, or fresh same-scope environment evidence was reused, and readiness was proven by a source-backed probe.
-- Main scenario passed through the real boundary with durable evidence, newly captured or validly reused.
-- Highest-risk edge or negative probe passed through the same boundary, or fresh same-scope evidence was reused, or omission has a concrete reason.
-- Post-operation health, durable state, or invariants were checked or validly reused when the flow can leave state behind.
-- Created resources and processes were cleaned up, prior cleanup evidence was reused, or remaining state is named with reason.
-- Any failure caused by the current diff was fixed and rerun, fixed with current proof reused, or is named as the blocker.
-
-Final only after live operation or valid reused full-flow evidence: contract, selected route, route proof ledger (sources read, conflicts/stale evidence, commands run or validly reused, readiness proof, context/auth used or intentionally omitted, cleanup source), boundary used, environment chosen, safety class, preflight/readiness result, main scenario evidence, edge probes and outcomes, artifacts/logs/screenshots/transcripts, cleanup result, fixes made from caused issues, edge cases intentionally omitted with reasons, and remaining blockers.
-
-Never call a live check complete if the real boundary was neither operated nor covered by valid same-scope full-flow evidence. Say blocked when credentials, tools, approvals, or infrastructure prevent the required proof. The final confidence line must be either `Confidence: complete for the stated live-check contract` or `Confidence: not achieved because <blocker>`.
+Completion requires the real boundary and environment, readiness, observed main and selected edge outcomes, applicable post-operation checks, and cleanup. Report the route and decisive sources, commands and outcomes, new or reused evidence, edge omissions, artifacts, fixes, cleanup, and exact remaining blockers. Keep the report proportional to the work and limit claims to the checked behavior.

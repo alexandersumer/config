@@ -116,10 +116,10 @@ For edit work:
 - run `wc -w` before and after
 - run the style audit
 - run `git diff --check`
-- run `npm run lint:check -- src/content/blog/what-to-do-if-you-take-agi-seriously.md`
-- run `npm run build` and `npm run test` when the user asks for final polish, completion, or publish readiness
+- run `./node_modules/.bin/prettier --check src/content/blog/what-to-do-if-you-take-agi-seriously.md`; verify the local formatter exists first. `lint:check` checks the whole repo even when another path is appended.
+- inspect the current package scripts before broader verification. In this site, `npm test` already runs the build and unit tests; run it once when final polish, completion, or publish readiness requires those checks.
 
-Do not claim the essay is complete, current, or clean without fresh verification in the same turn. Do not promise a subjective guarantee about style; report the objective scans and the manual read.
+Do not claim the essay is complete, current, or clean without new or validly reused verification under the proof policy. Do not promise a subjective guarantee about style; report the objective scans and the manual read.
 
 ## Final response
 

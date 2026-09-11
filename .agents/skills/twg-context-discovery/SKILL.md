@@ -11,13 +11,6 @@ description: >
 Use the root `twg` skill. Get command grammar from live `twg help`,
 `twg help <terms>`, or `twg help describe <path>`.
 
-## CLI launcher fallback
-
-Run `twg <command>`. On shell `command not found`, use `$HOME/.local/bin/twg`
-(macOS/Linux) / `$env:LOCALAPPDATA\Programs\twg\bin\twg.exe` (PowerShell), then
-tell user to add that directory to PATH. Do not treat auth or command errors as
-PATH failures.
-
 ## First Move
 
 Resolve the anchor before widening:

@@ -8,18 +8,13 @@ description: >
 
 # twg-jira-resolve-merged-work
 
+Use the root `twg` skill for launcher, output, and auth handling.
+
 Resolve stale Jira workitems only when merged PR evidence is strong. Plan first;
 mutate only after approval.
 
 Use exact command grammar from live `twg help` / `twg help describe <path>`; do not
 guess board, sprint, transition, workspace, repo, PR, or field syntax.
-
-## CLI launcher fallback
-
-Run `twg <command>`. On shell `command not found`, use `$HOME/.local/bin/twg`
-(macOS/Linux) / `$env:LOCALAPPDATA\Programs\twg\bin\twg.exe` (PowerShell), then
-tell user to add that directory to PATH. Do not treat auth or command errors as
-PATH failures.
 
 ## Scope
 

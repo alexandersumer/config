@@ -11,21 +11,6 @@ description: >
 TWG routing: use typed commands for anchors. If uncertain, inspect `twg help <terms>`,
 `twg help describe <path>`, or `twg help discover-skills "<intent>"`.
 
-## Overview
-
-Load the narrowest workflow skill:
-
-- `twg-status-rollups` for status and decision-readiness; load it before
-  `twg-engineering-work` for PR rollups.
-- `twg-context-discovery` for dependencies, graphs, repos, and catch-ups.
-- `twg-agentic-search` for fuzzy cross-product Rovo/company-knowledge research.
-- `twg-responsibility-routing` for owners, experts, approvers, and escalation.
-- `twg-engineering-work` for code search, PRs, contributors, and hot areas.
-- `twg-jira-resolve-merged-work` for stale Jira work backed by merged PRs.
-- `twg-operational-health` for handoffs, incidents, Assets, staffing, meetings, and risk.
-- `twg-bench-lite` for read-only single-prompt A/B comparisons.
-
-
 ## Invocation And Output
 
 Run `twg <command>`. On shell `command not found`, use `$HOME/.local/bin/twg`
@@ -65,12 +50,11 @@ requested for setup/auth/repair or required by a specific companion skill.
 
 ## Sandboxed Pipeline Logs
 
-Pipeline logs can redirect to S3. If a sandboxed `twg bb pipeline get`, `wait`, `grep`, or
-`tail` log request has a network-blocked message, S3 hostname, or log-only HTTP 403 while
-metadata succeeds, treat it as a sandbox restriction, not an authentication failure.
-
-Request an approved unsandboxed retry of that command only. If unavailable, give the user the
-exact terminal command; never request credentials or tokens.
+Pipeline logs can redirect to S3. An explicit sandbox network denial justifies an
+approved unsandboxed retry of that exact log request. An S3 hostname or HTTP 403
+alone does not prove a sandbox failure: when metadata succeeds, inspect the log
+error for an expired signed URL, access denial, or network restriction before
+choosing a retry. Do not refresh service credentials merely because logs failed.
 
 ## Bounded Evidence Loop
 
@@ -104,7 +88,7 @@ Converge; prefer typed or product-native evidence.
   - Known Jira/Atlas keys are positional for `jira workitem get`, `goals get`, and `projects get`; `--key` is compatibility only.
   - `work query` is user activity (`--scope me|user`), never `--scope global`; use `work search` for topics and advertised filters such as `--types`.
   - For inferred teams (`ari:cloud:graph::jiraTeam/...` or `ari:cloud:graph-store::inferred-team/...`), see `references/inferred-teams.md` and use explicit `--include-inferred`.
-- Use `search-code`; omit `--app` so all available indexed SCM surfaces are searched; use `--repo` only as a discovery anchor; widen after generated-doc or incomplete hits.
+- For code search, load `../twg-engineering-work/references/code-search.md`. Honor an explicitly scoped repository or provider; omit `--app` for unscoped discovery. Widen only when the requested scope permits it and a concrete evidence gap justifies it.
 
 ## Assets / CMDB graph
 
@@ -124,6 +108,7 @@ Use a concrete key, URL, ARI, slug, account ID, name, topic, `me`, or window.
 - `../twg-engineering-work/SKILL.md` for code search, PRs, and reviews;
   `../twg-jira-resolve-merged-work/SKILL.md` for stale Jira work backed by merged PRs.
 - `../twg-operational-health/SKILL.md` for handoffs, reliability, incidents, assets, staffing, and risk.
+- `../twg-bench-lite/SKILL.md` for requested read-only A/B comparisons.
 
 
 ## Rules

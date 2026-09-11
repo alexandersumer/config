@@ -20,8 +20,9 @@ twg assets reference-type query --schema-id <schema-id> --include-all -o json
 query`/`assets object query` for device/person joins. `assets type query`
 requires `--schema-id` and does not accept `--limit`.
 
-When an object-reference write reports that cross-schema relations are
-disabled, enable them explicitly for the source schema:
+If an object-reference write requires cross-schema relations, inspect the source
+schema setting. Enable it only when that schema-level change is authorized;
+permission to add one reference does not imply permission to change schema policy:
 
 ```bash
 twg assets objectschema settings update <schema-id> --allow-other-object-schema true

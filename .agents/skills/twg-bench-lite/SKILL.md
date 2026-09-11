@@ -7,17 +7,12 @@ description: >
 
 # twg-bench-lite
 
+Use the root `twg` skill for launcher, output, and auth handling.
+
 Run one read-only prompt twice: once with free Atlassian/local MCP context and
 once with paid Atlassian Teamwork Graph context through TWG CLI. This is a
 skill-first workflow with a thin `twg benchmark lite run` bridge. The benchmark
 repo owns reusable runner, judge, and report-template code.
-
-## CLI launcher fallback
-
-Run `twg <command>`. On shell `command not found`, use `$HOME/.local/bin/twg`
-(macOS/Linux) / `$env:LOCALAPPDATA\Programs\twg\bin\twg.exe` (PowerShell), then
-tell user to add that directory to PATH. Do not treat auth or command errors as
-PATH failures.
 
 ## Runtime Support
 
@@ -39,6 +34,7 @@ runtime first:
 twg benchmark lite --check
 ```
 
+Inspect `ready` and each required check; exit code 0 alone does not prove readiness.
 The default check is Codex; use `--agent rovo` when the run should use Rovo.
 
 For Rovo runs:
@@ -68,13 +64,7 @@ twg skills install --yes
 Then start a fresh Codex thread so agent discovery refreshes. Do not substitute
 generic agents for manual orchestration because arm isolation is the point.
 
-Before a live run, verify setup with:
-
-```bash
-twg benchmark lite --check
-```
-
-This checks the bundled runner artifact and the selected live-run runtime.
+The prerequisite check verifies the bundled runner artifact and selected runtime; do not repeat it unless setup changed.
 Codex checks include the Codex executable and Codex home. Rovo checks include
 the Rovo executable and OAuth status. If `--judge-agent` differs from `--agent`,
 the check verifies both runtimes. It also reports the global `twg-bench-lite`
@@ -128,8 +118,11 @@ done.
 Read both answers before interpreting token delta. Classify as `equivalent`,
 `twg-better`, `control-better`, `capability-gain`, or `not-comparable`.
 `not-comparable` is a real outcome for missing, unusable, or non-comparable
-answers, not a placeholder. Claim observed savings only for `equivalent` or
-`twg-better`; for `capability-gain`, report capability instead.
+answers. Claim observed savings only for `equivalent` or `twg-better` when the
+required comparison-integrity checks are established. A runner report with
+`integrity.valid: false` or unobserved isolation/model checks is not a validated
+savings result; report its measurement limits. For `capability-gain`, report
+capability instead.
 
 Evaluate coverage, correctness, evidence quality, directness, and limitations.
 Do not assign numeric quality scores.

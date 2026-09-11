@@ -92,17 +92,13 @@ The YAML summary is a pointer, not the answer.
   for routing, titles, owners, statuses, URLs, and dates.
 - If `stdout_stats` or `stdout_shape` is present and `output_files.compact` is
   absent or insufficient, filter `output_files.stdout` with targeted `jq`.
-- For answers that require item names, URLs, owners, statuses, blockers, dates, or
-  evidence, read the JSON file even when the summary looks plausible.
+- Use inline or compact records when they contain the needed evidence. Counts
+  and shape samples alone do not establish item names, URLs, owners, or status.
 
-**`stdout_shape` samples are statistical, not exhaustive.** The shape shows a
-merged schema with a small number of example string values per field — it is not a
-complete inventory. For `context` commands this matters most: external artifact links
-(Figma, GitHub, Google Docs, and other third-party app URLs) appear toward the
-**tail** of relationship arrays and are the entries most likely to be absent from
-`stdout_shape` samples. If the goal is relationship or URL discovery, always read
-`output_files.stdout` rather than treating shape samples as the full result. The
-related workflow guidance lives in `twg-context-discovery/SKILL.md`.
+`stdout_shape` samples are not an inventory and imply no ordering of missing
+relationships. For exhaustive relationship or URL discovery, inspect the full
+relevant arrays in `output_files.stdout` and account for pagination. For a bounded
+answer, inline or compact evidence may suffice. See `twg-context-discovery`.
 
 ## Output Budget Controls
 
