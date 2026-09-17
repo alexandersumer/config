@@ -83,7 +83,6 @@ pub(crate) fn install_command(args: &[String]) -> Result<()> {
     })?;
     apply_skill_links(claude_skill_plan)?;
     install_config_tools_binary(&home_dir)?;
-    install_codex_launcher(&home_dir)?;
 
     println!();
     println!(
@@ -507,7 +506,6 @@ fn legacy_relay_config_errors(home_dir: &Path) -> Result<Vec<String>> {
 fn managed_binary_errors(home_dir: &Path) -> Result<Vec<String>> {
     let mut errors = Vec::new();
     errors.extend(config_tools_binary_errors(home_dir)?);
-    errors.extend(codex_launcher_errors(home_dir)?);
     errors.sort();
     Ok(errors)
 }
@@ -548,47 +546,6 @@ fn config_tools_binary_errors(home_dir: &Path) -> Result<Vec<String>> {
         )]),
         Err(err) => Err(format!(
             "{}: cannot inspect config-tools binary: {err}",
-            target.display()
-        )),
-    }
-}
-
-fn codex_launcher_errors(home_dir: &Path) -> Result<Vec<String>> {
-    let target = home_dir.join(".local/bin/codex");
-    match fs::symlink_metadata(&target) {
-        Ok(metadata) if metadata.is_file() => {
-            if !is_executable_file(&metadata) {
-                return Ok(vec![format!("{} is not executable", target.display())]);
-            }
-            let existing = fs::read_to_string(&target).map_err(|err| {
-                format!(
-                    "{}: cannot read managed Codex launcher: {err}",
-                    target.display()
-                )
-            })?;
-            if existing == codex_launcher_script() {
-                Ok(Vec::new())
-            } else {
-                Ok(vec![format!(
-                    "{} does not match the managed Codex launcher",
-                    target.display()
-                )])
-            }
-        }
-        Ok(metadata) if metadata.file_type().is_symlink() => Ok(vec![format!(
-            "{} is a symlink; expected managed Codex launcher file",
-            target.display()
-        )]),
-        Ok(_) => Ok(vec![format!(
-            "{} exists but is not the managed Codex launcher file",
-            target.display()
-        )]),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(vec![format!(
-            "{} is missing; expected managed Codex launcher file",
-            target.display()
-        )]),
-        Err(err) => Err(format!(
-            "{}: cannot inspect managed Codex launcher: {err}",
             target.display()
         )),
     }
@@ -646,98 +603,6 @@ fn install_config_tools_binary(home_dir: &Path) -> Result<()> {
         )
     })?;
     println!("Installed config-tools binary -> {}", target.display());
-    Ok(())
-}
-
-fn install_codex_launcher(home_dir: &Path) -> Result<()> {
-    let bin_dir = home_dir.join(".local/bin");
-    fs::create_dir_all(&bin_dir).map_err(|err| {
-        format!(
-            "{}: cannot create local binary directory: {err}",
-            bin_dir.display()
-        )
-    })?;
-
-    let target = bin_dir.join("codex");
-    verify_codex_launcher_target(&target)?;
-    fs::write(&target, codex_launcher_script()).map_err(|err| {
-        format!(
-            "{}: cannot install managed Codex launcher: {err}",
-            target.display()
-        )
-    })?;
-    set_executable_permissions(&target)?;
-    println!("Installed managed Codex launcher -> {}", target.display());
-    Ok(())
-}
-
-fn codex_launcher_script() -> &'static str {
-    "#!/bin/sh\n\
-set -u\n\
-\n\
-home_dir=${HOME:-}\n\
-if [ -n \"$home_dir\" ] && [ -x \"$home_dir/.local/bin/config-tools\" ]; then\n\
-  \"$home_dir/.local/bin/config-tools\" repair-codex-config --home \"$home_dir\" >/dev/null 2>&1 || true\n\
-fi\n\
-\n\
-real_codex=${CODEX_REAL_BINARY:-/opt/homebrew/bin/codex}\n\
-if [ ! -x \"$real_codex\" ]; then\n\
-  printf '%s\\n' \"codex launcher: real Codex binary not found at $real_codex\" >&2\n\
-  exit 127\n\
-fi\n\
-\n\
-exec \"$real_codex\" \"$@\"\n"
-}
-
-fn verify_codex_launcher_target(target: &Path) -> Result<()> {
-    match fs::symlink_metadata(target) {
-        Ok(metadata) if metadata.is_file() => {
-            let existing = fs::read_to_string(target).map_err(|err| {
-                format!("{}: cannot read existing Codex launcher: {err}", target.display())
-            })?;
-            if existing.contains("repair-codex-config")
-                && existing.contains("/opt/homebrew/bin/codex")
-            {
-                Ok(())
-            } else {
-                Err(format!(
-                    "Error: {} already exists and does not look like the managed Codex launcher.\nBack it up and remove it first, then re-run this command.",
-                    target.display()
-                ))
-            }
-        }
-        Ok(metadata) if metadata.file_type().is_symlink() => Err(format!(
-            "Error: {} is already a symlink to {}.\nBack it up and remove it first, then re-run this command.",
-            target.display(),
-            fs::read_link(target)
-                .map_err(|err| format!("{}: cannot read symlink: {err}", target.display()))?
-                .display()
-        )),
-        Ok(_) => Err(format!(
-            "Error: {} already exists and is not the managed Codex launcher.\nBack it up and remove it first, then re-run this command.",
-            target.display()
-        )),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(err) => Err(format!(
-            "{}: cannot inspect Codex launcher target: {err}",
-            target.display()
-        )),
-    }
-}
-
-#[cfg(unix)]
-fn set_executable_permissions(path: &Path) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o755)).map_err(|err| {
-        format!(
-            "{}: cannot set executable permissions: {err}",
-            path.display()
-        )
-    })
-}
-
-#[cfg(not(unix))]
-fn set_executable_permissions(_path: &Path) -> Result<()> {
     Ok(())
 }
 

@@ -655,20 +655,9 @@ pub(crate) fn test_install_command() -> Result<()> {
             installed_binary.display()
         ));
     }
-    let installed_codex_launcher = home.path().join(".local/bin/codex");
-    let installed_codex_launcher_text =
-        fs::read_to_string(&installed_codex_launcher).map_err(|err| {
-            format!(
-                "{}: cannot read installed Codex launcher: {err}",
-                installed_codex_launcher.display()
-            )
-        })?;
-    for expected in ["repair-codex-config", "/opt/homebrew/bin/codex"] {
-        if !installed_codex_launcher_text.contains(expected) {
-            return Err(format!(
-                "installed Codex launcher missed {expected:?}:\n{installed_codex_launcher_text}"
-            ));
-        }
+    let codex_path = home.path().join(".local/bin/codex");
+    if codex_path.exists() || codex_path.is_symlink() {
+        return Err("install must not create a Codex wrapper".to_string());
     }
     #[cfg(unix)]
     if fs::metadata(&installed_binary)
@@ -679,16 +668,6 @@ pub(crate) fn test_install_command() -> Result<()> {
         == 0
     {
         return Err("installed config-tools binary should be executable".to_string());
-    }
-    #[cfg(unix)]
-    if fs::metadata(&installed_codex_launcher)
-        .map_err(|err| format!("cannot inspect installed Codex launcher: {err}"))?
-        .permissions()
-        .mode()
-        & 0o111
-        == 0
-    {
-        return Err("installed Codex launcher should be executable".to_string());
     }
     run_command(
         home.path(),
@@ -751,12 +730,21 @@ pub(crate) fn test_install_command() -> Result<()> {
             "stale managed Claude skill drift check missed removed-skill: {stale_claude_drift}"
         ));
     }
+    let external_codex = "#!/bin/sh\nexit 0\n";
+    fs::write(&codex_path, external_codex)
+        .map_err(|err| format!("cannot create independently installed Codex fixture: {err}"))?;
     install_command(&[
         "--config-root".to_string(),
         fixture.path().display().to_string(),
         "--home".to_string(),
         home.path().display().to_string(),
     ])?;
+    if fs::read_to_string(&codex_path)
+        .map_err(|err| format!("cannot read independently installed Codex fixture: {err}"))?
+        != external_codex
+    {
+        return Err("reinstall must preserve independently installed Codex".to_string());
+    }
     if removed_claude_skill.exists() || removed_claude_skill.is_symlink() {
         return Err("install left a stale managed Claude skill symlink behind".to_string());
     }
