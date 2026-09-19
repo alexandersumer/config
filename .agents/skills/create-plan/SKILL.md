@@ -1,6 +1,6 @@
 ---
 name: create-plan
-description: Write a spec and implementation plan artifact. Use when the user asks to create planning files, a proposal, design doc, or implementation plan.
+description: Write a saved spec, proposal, design document, or implementation plan. Use when the user requests a planning artifact or output file; use create-chat-plan for planning directly in conversation.
 ---
 
 Use `topic`, `$ARGUMENTS`, or the conversation context as the seed. Write the requested spec, design, proposal, or implementation plan. Keep implementation steps in the same file when that is sufficient; add a companion plan only when requested or when the detail warrants a separate file.

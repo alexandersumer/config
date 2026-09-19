@@ -27,7 +27,7 @@ Command roles:
 - `check-install`: non-mutating verification that all managed home config links, Codex skills/config, Claude Code skills, and the managed config-tools binary match this checkout.
 - `repair-codex-config`: removes deprecated/disabled Codex feature flags from `~/.codex/config.toml`.
 - `prepare`: runs the same verification as `check`.
-- `pre-commit`: safe hook entrypoint; runs `prepare` and `check-install`.
+- `pre-commit`: non-mutating hook entrypoint; runs `prepare` to validate the repository without requiring it to be installed in the current home directory.
 - `install`: intentional home-directory mutation for `~/.agents`, custom `~/.codex/skills` and `~/.claude/skills` symlinks, Codex config flag repair, `~/.local/bin/config-tools`. Codex itself is installed and updated through its official distribution; this installer does not create a Codex launcher.
 - `install-git-hooks`: intentional local Git config mutation for `core.hooksPath`.
 
@@ -108,19 +108,23 @@ Git intentionally does not auto-enable arbitrary hooks from a freshly cloned che
 
 ## Acceptance criteria
 
-A change is accepted only if all of these pass locally:
+Repository changes must pass these checks locally:
 
 ```bash
-cargo fmt --check
-cargo check
-cargo run -- check
-cargo run -- check-codex-skills
-cargo run -- check-claude-skills
-cargo run -- check-install
 cargo run -- pre-commit
 ```
 
-Config-internal preparation and home install behavior must also be verified without touching the real home directory:
+The hook includes formatting, compilation, unit and integration tests, skill validation, and regression tests. Installation regression tests use temporary homes. The pre-commit integration test checks an uninstalled checkout and verifies that invalid skills and failing tests still block commits.
+
+To diagnose the current user's installation, run these explicit checks separately. Installation drift does not block repository commits:
+
+```bash
+cargo run -- check-codex-skills
+cargo run -- check-claude-skills
+cargo run -- check-install
+```
+
+For manual verification of install behavior, use a temporary home without touching the real home directory:
 
 ```bash
 cargo run -- prepare

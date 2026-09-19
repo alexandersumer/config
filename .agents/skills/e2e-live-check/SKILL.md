@@ -1,6 +1,6 @@
 ---
 name: e2e-live-check
-description: "Operate a real running system end to end without writing automated tests or running CI/test lanes. Use when the user wants live E2E QA of the current effective diff through local real services, agent protocol clients, CLI, browser, HTTP APIs, staging/dev shards, or deployed resources. The skill discovers the most appropriate real-enough environment, drives the public boundary, covers relevant edge cases, captures evidence, cleans up, and reports blockers honestly."
+description: Perform live end-to-end QA through a real running system without writing automated tests or running CI/test lanes. Use for one-off runtime verification; use e2e-automated-tests for durable automated coverage.
 ---
 
 ## Proof policy
