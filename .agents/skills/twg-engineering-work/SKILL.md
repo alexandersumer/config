@@ -47,6 +47,8 @@ uncertain routes/contracts.
 
 ## Route Selection
 
+- For missing company context in a review, use `../twg-code-review/SKILL.md` as
+  a lookup companion. Keep the chosen code/design review workflow and output.
 - For queues, query candidate PRs first, then hydrate selected PRs needing action.
 - For stale reviews, group by repo, author, reviewer, and stage before fetching
   detailed comments or diffs.

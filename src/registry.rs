@@ -70,6 +70,7 @@ const REQUIRED_CUSTOM_SKILL_NAMES: &[&str] = &[
     "twg",
     "twg-agentic-search",
     "twg-bench-lite",
+    "twg-code-review",
     "twg-confluence",
     "twg-context-discovery",
     "twg-engineering-work",
@@ -255,8 +256,9 @@ fn skill_name_regex() -> &'static Regex {
 fn validate_description(value: Option<&Value>, context: &str) -> Result<String> {
     let description = value
         .and_then(Value::as_str)
+        .map(str::trim)
         .ok_or_else(|| format!("{context}: description must be a non-empty string"))?;
-    if description.trim().is_empty() {
+    if description.is_empty() {
         return Err(format!("{context}: description must be a non-empty string"));
     }
     if description.contains('\n') {
@@ -422,6 +424,31 @@ mod tests {
         );
         assert!(validate_skill_name(Some(&Value::String("CleanUp".to_string())), "skill").is_err());
         assert!(validate_skill_name(Some(&Value::String("".to_string())), "skill").is_err());
+    }
+
+    #[test]
+    fn folded_description_before_metadata_is_a_single_line() {
+        let value = yaml_value(
+            "description: >\n  Review a requested change\n  using its linked requirements.\nmetadata:\n  audience: engineering\n",
+        );
+        let metadata = value.as_mapping().expect("front matter mapping");
+        assert_eq!(
+            validate_description(get(metadata, "description"), "skill")
+                .expect("folded description"),
+            "Review a requested change using its linked requirements."
+        );
+    }
+
+    #[test]
+    fn descriptions_reject_blank_and_embedded_newlines() {
+        for yaml in [
+            "description: '   '",
+            "description: |\n  First line.\n  Second line.\n",
+        ] {
+            let value = yaml_value(yaml);
+            let metadata = value.as_mapping().expect("front matter mapping");
+            assert!(validate_description(get(metadata, "description"), "skill").is_err());
+        }
     }
 
     #[test]

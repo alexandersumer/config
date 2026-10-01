@@ -48,6 +48,11 @@ This exception covers only non-interactive `twg auth refresh`. Do not run login,
 update, upkeep, forced refresh, connector auth, or other credential commands unless explicitly
 requested for setup/auth/repair or required by a specific companion skill.
 
+Bitbucket API tokens and Git SSH credentials are separate from TWG OAuth. Do not
+run `twg auth refresh` for a Bitbucket token failure. Use another available read-only
+source for the needed evidence before asking for credential repair. If access still
+blocks a required fact, name that fact and continue the work the available evidence supports.
+
 ## Sandboxed Pipeline Logs
 
 Pipeline logs can redirect to S3. An explicit sandbox network denial justifies an
@@ -110,6 +115,10 @@ Use a concrete key, URL, ARI, slug, account ID, name, topic, `me`, or window.
 - `../twg-operational-health/SKILL.md` for handoffs, reliability, incidents, assets, staffing, and risk.
 - `../twg-bench-lite/SKILL.md` for requested read-only A/B comparisons.
 
+
+Use `twg-code-review` only to supply missing company context to an existing review.
+Keep the chosen code/design review workflow; TWG lookup does not start a second review
+or require a structured report.
 
 ## Rules
 
