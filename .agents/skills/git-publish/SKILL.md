@@ -26,7 +26,7 @@ Non-default branches are normal publish sources. Never end with “PR not create
      - staged diff: `git diff --cached`
      - unstaged diff: `git diff`
      - relevant untracked files from `git ls-files --others --exclude-standard`, rendered or summarized as new-file diffs
-2. Stop before any write if `HEAD` is detached or missing, the current branch name is empty, `origin` has zero or multiple push URLs, or repository/remote identity is otherwise ambiguous. Git pushes to every configured push URL, so one URL is required for a single safe publish target.
+2. Resolve repository/remote identity before pushing. `origin` must have one verified push URL; use task context and Git configuration to resolve missing or conflicting target information before asking. Git pushes to every configured push URL, so one URL is required for a single safe publish target.
 3. Resolve the PR destination branch with the local-first default branch resolver:
    - Use `refs/remotes/origin/HEAD` only when it resolves to an existing local `refs/remotes/origin/<branch>` ref.
    - Otherwise use a local `origin/main` or `origin/master` candidate only when exactly one exists.
@@ -37,9 +37,9 @@ Non-default branches are normal publish sources. Never end with “PR not create
    - branch diff: committed changes reachable from `HEAD` and not in the resolved destination branch, including local commits on the default branch before a publish branch is created
    - working-tree diff: staged, unstaged, and relevant untracked changes
 6. If there is no branch diff and no working-tree diff, stop.
-7. Confirm the combined effective changes form one coherent subject. If the committed branch diff and working-tree diff are unrelated, stop and ask how to split or scope the publish.
+7. Publish the coherent changes requested by the user. When unrelated work is present, isolate the intended changes on a suitable branch/worktree and preserve the rest. Ask only when the intended scope cannot be determined.
 8. Choose a valid Conventional Commit subject and write a non-empty, grounded PR body from the combined effective changes. Use plain paragraphs explaining the overall change and only the why or material implementation details supported by the evidence; do not add headings, checklists, invented issue context, risks, or test results. Freeze this subject/body pair for every provider path below.
-9. If currently on `main`, `master`, or the resolved PR destination branch, create a focused branch from the current `HEAD` before staging or committing, named from the subject, for example `fix/short-topic`; do not push local default-branch commits directly to the destination branch.
+9. If HEAD is detached or on the destination/default branch, create a focused source branch at the current commit before staging or committing. Preserve existing commits and working-tree changes; choose an unused name without asking. Reuse a suitable existing branch/worktree when continuing its work. Do not push directly to the destination branch.
 10. If there are publishable working-tree changes, stage intended changes unless explicitly excluded, then commit them with the chosen subject before pushing. Do not stage unrelated files.
 11. If there are no publishable working-tree changes but the source branch already has a branch diff, skip committing and continue.
 12. Push the source branch to `origin`, setting upstream if needed.
@@ -88,7 +88,7 @@ Use this path when the current harness exposes a controlled PR facility compatib
 
 ### Bitbucket CLI fallback path: no-reviewer PR
 
-Use the verified push workspace/repository explicitly on every call. Prefer `twg`; if it is unavailable, use `bb` after inspecting its installed help. Do not switch providers or rely on remote auto-detection.
+Use the verified push workspace/repository explicitly on every call. Prefer `twg`; if it is unavailable or its credentials fail, use an authenticated `bb` client after inspecting its installed help. Do not switch providers or rely on remote auto-detection.
 
 With TWG:
 

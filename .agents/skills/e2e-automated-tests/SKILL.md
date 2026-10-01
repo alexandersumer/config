@@ -31,7 +31,7 @@ Do not substitute mocks or fake backends inside the tested path, internal helper
 
 ## Resolve obstacles
 
-If the first route fails, inspect the relevant logs, readiness, config loading, auth path, and lane wiring. Try another repo-supported route only if it tests the same contract. Refresh expired access through the documented auth workflow and fix local setup within scope. Ask only for a missing fact or authorization that would unlock progress. Stop with the exact blocker when no safe useful action remains; do not exhaust unrelated setup paths or quietly weaken the contract.
+Inspect logs, readiness, config, and lane wiring; repair in-scope setup problems. Use `auth-preflight` for missing or expired access and command approval for sandbox restrictions, then resume the scenario. A timeout or unavailable client does not prove the capability is unavailable; try a supported equivalent route without changing identity or weakening the contract. Request a necessary human action when discovered and continue independent work while waiting. Stop only the affected path when no safe useful next action remains; preserve its failed or unverified status and finish the remaining authorized work.
 
 ## Finish
 

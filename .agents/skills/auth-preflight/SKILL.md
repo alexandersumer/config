@@ -32,7 +32,7 @@ Ask one concise question only when multiple plausible targets remain after using
 2. Prefer the narrowest credential that satisfies the intended action. Do not request every known audience, broad groups, or unrelated environments as a shortcut.
 3. If a status/cache command exists, run it before the first productive call.
 4. If access is missing, expired, invalid, or MFA-required, immediately refresh or generate that exact credential for refresh/request tasks and for productive work that depends on access. For check-only tasks, report the missing/expired/MFA-required state without generating unless the user asked to refresh. Browser/MFA prompts are expected confirmation when refresh or productive work requires them.
-5. If token generation times out or returns an unclear result, check the cache/status once before declaring failure.
+5. If token generation times out or returns an unclear result, check the cache/status once. If human sign-in is still needed, initiate the supported flow and provide its current prompt; ask for completion when the prompt is ready, not after it expires. Continue independent work while waiting.
 6. If no status check exists, use the cheapest safe read-only probe that proves access to the intended target. If the intended call is read-only and no cheaper probe exists, it may be the first call; handle any auth-shaped failure with the one-retry rule below. For mutating workflows, never use the mutation itself as the auth probe; find a separate safe probe or report the blocker.
 
 ## Execute without looping
@@ -40,7 +40,7 @@ Ask one concise question only when multiple plausible targets remain after using
 1. Run the intended tool call after preflight passes. If no status/cache check or cheaper safe probe exists and the intended call is read-only, that call may serve as the first access proof.
 2. On one auth-shaped failure from a read-only or known-idempotent call, refresh or generate the exact same credential once, then retry the original call once.
 3. On one auth-shaped failure from a mutating or non-idempotent call, retry only if the tool guarantees no side effect occurred or a status/idempotency/dedupe check proves retry safety. Otherwise refresh the credential if appropriate, report the uncertain operation state, and stop before repeating the mutation.
-4. Never loop on auth. If the safe retry still fails, stop with the exact blocker.
+4. Never loop on unchanged auth. If the safe retry still fails, stop retrying that credential path; check an available equivalent client and continue independent work. Report the exact remaining access gap.
 5. Distinguish auth failures from other failures:
    - missing, expired, invalid, or MFA-required token: refresh once for productive work or explicit refresh/request tasks; for check-only tasks, report the status without refreshing;
    - permission, group, policy, or account denial after valid auth: report the access blocker;

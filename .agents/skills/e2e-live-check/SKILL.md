@@ -34,7 +34,7 @@ Do not replace the changed path with mocks, fake adapters, internal helpers, tes
 
 ## Resolve obstacles
 
-If the first route fails, inspect relevant logs, readiness, config loading, and documented auth/setup paths. Fix in-scope setup problems or switch to another faithful route. Refresh expired access through the documented workflow. Ask only for a missing fact or permission that can unlock progress; stop when no safe useful action remains. Report the exact unavailable boundary or environment, not a guessed pass.
+Inspect logs, readiness, config, and lane wiring; repair in-scope setup problems. Use `auth-preflight` for missing or expired access and command approval for sandbox restrictions, then resume the scenario. A timeout or unavailable client does not prove the capability is unavailable; try a supported equivalent route without changing identity or weakening the contract. Request a necessary human action when discovered and continue independent work while waiting. Stop only the affected path when no safe useful next action remains; preserve its failed or unverified status and finish the remaining authorized work.
 
 ## Finish
 

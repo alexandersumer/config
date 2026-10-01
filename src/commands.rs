@@ -51,7 +51,46 @@ pub(crate) fn prepare_command(args: &[String]) -> Result<()> {
 }
 
 pub(crate) fn pre_commit_command(args: &[String]) -> Result<()> {
-    prepare_command(args)
+    let (config_root, _) = parse_config_args(args, false)?;
+    if !config_root.join(".git").exists() {
+        return prepare_command(args);
+    }
+
+    let snapshot = tempfile::Builder::new()
+        .prefix("config-pre-commit-")
+        .tempdir()
+        .map_err(|err| format!("cannot create staged snapshot: {err}"))?;
+    let prefix = format!("--prefix={}/", snapshot.path().display());
+    run_git(&config_root, &["checkout-index", "--all", &prefix])?;
+
+    // Git's hook environment must not redirect fixture commands to the real index.
+    let git_vars = std::process::Command::new("git")
+        .args(["rev-parse", "--local-env-vars"])
+        .current_dir(&config_root)
+        .output()
+        .map_err(|err| format!("cannot inspect Git environment: {err}"))?;
+    if !git_vars.status.success() {
+        return Err("cannot inspect Git environment".to_string());
+    }
+    let mut command = std::process::Command::new("cargo");
+    command
+        .args(["run", "--target-dir"])
+        .arg(snapshot.path().join("target"))
+        .args(["--", "prepare"])
+        .current_dir(snapshot.path())
+        .env_remove("CARGO_TARGET_DIR")
+        .env_remove("CARGO_BUILD_TARGET_DIR");
+    for name in String::from_utf8_lossy(&git_vars.stdout).lines() {
+        command.env_remove(name);
+    }
+    let status = command
+        .status()
+        .map_err(|err| format!("cannot validate staged snapshot: {err}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("staged checks failed with {status}"))
+    }
 }
 
 pub(crate) fn install_git_hooks_command(args: &[String]) -> Result<()> {

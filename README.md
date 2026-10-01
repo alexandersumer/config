@@ -27,7 +27,7 @@ Command roles:
 - `check-install`: non-mutating verification that all managed home config links, Codex skills/config, Claude Code skills, and the managed config-tools binary match this checkout.
 - `repair-codex-config`: removes deprecated/disabled Codex feature flags from `~/.codex/config.toml`.
 - `prepare`: runs the same verification as `check`.
-- `pre-commit`: non-mutating hook entrypoint; runs `prepare` to validate the repository without requiring it to be installed in the current home directory.
+- `pre-commit`: validates an isolated snapshot of the Git index, so unstaged and untracked work cannot affect the commit checks. Outside Git, runs `prepare` on the supplied checkout. No home installation is required.
 - `install`: intentional home-directory mutation for `~/.agents`, custom `~/.codex/skills` and `~/.claude/skills` symlinks, Codex config flag repair, `~/.local/bin/config-tools`. Codex itself is installed and updated through its official distribution; this installer does not create a Codex launcher.
 - `install-git-hooks`: intentional local Git config mutation for `core.hooksPath`.
 
@@ -114,7 +114,7 @@ Repository changes must pass these checks locally:
 cargo run -- pre-commit
 ```
 
-The hook includes formatting, compilation, unit and integration tests, skill validation, and regression tests. Installation regression tests use temporary homes. The pre-commit integration test checks an uninstalled checkout and verifies that invalid skills and failing tests still block commits.
+The hook runs formatting, compilation, unit and integration tests, skill validation, and regression tests against the staged snapshot. It preserves the working tree and index. Installation regression tests use temporary homes. The pre-commit integration test checks an uninstalled checkout and verifies that invalid skills and failing tests still block commits.
 
 To diagnose the current user's installation, run these explicit checks separately. Installation drift does not block repository commits:
 

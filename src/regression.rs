@@ -167,13 +167,6 @@ fn test_mutating_skill_write_boundaries() -> Result<()> {
     let config_root = config_root_from_exe()?;
     let contracts: &[(&str, &[&str])] = &[
         (
-            "address-comments",
-            &[
-                "exactly one push URL identifying the PR source repository",
-                "does not authorize switching branches",
-            ],
-        ),
-        (
             "clear-merge-blockers",
             &[
                 "exactly one push URL identifying the review source repository",

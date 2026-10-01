@@ -70,3 +70,91 @@ fn pre_commit_checks_repository_without_requiring_home_installation() {
     assert!(!result.status.success(), "failing tests must block commits");
     assert!(String::from_utf8_lossy(&result.stderr).contains("cargo test failed"));
 }
+
+fn git(root: &Path, args: &[&str]) {
+    let result = Command::new("git")
+        .args(args)
+        .current_dir(root)
+        .output()
+        .expect("run fixture git");
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+}
+
+#[test]
+fn pre_commit_validates_index_and_preserves_local_changes() {
+    let fixture = tempfile::tempdir().expect("fixture checkout");
+    let root = fixture.path();
+    let source = Path::new(env!("CARGO_MANIFEST_DIR"));
+    if source.join(".git").exists() {
+        git(
+            source,
+            &[
+                "checkout-index",
+                "--all",
+                &format!("--prefix={}/", root.display()),
+            ],
+        );
+        fs::remove_dir_all(root.join("tests")).expect("exclude recursive integration tests");
+    } else {
+        for entry in walkdir::WalkDir::new(source)
+            .into_iter()
+            .filter_entry(|entry| {
+                entry.depth() == 0
+                    || !matches!(
+                        entry.file_name().to_str(),
+                        Some("target" | "tests" | ".git")
+                    )
+            })
+        {
+            let entry = entry.expect("walk staged source");
+            let destination = root.join(entry.path().strip_prefix(source).unwrap());
+            if entry.file_type().is_dir() {
+                fs::create_dir_all(destination).expect("create fixture directory");
+            } else if entry.file_type().is_file() {
+                fs::copy(entry.path(), destination).expect("copy fixture file");
+            }
+        }
+    }
+    git(root, &["init", "--quiet"]);
+    git(root, &["add", "."]);
+    let source_file = root.join("src/main.rs");
+    fs::write(&source_file, "invalid unstaged Rust\n").unwrap();
+    let unrelated = root.join(".agents/skills/unrelated-local-skill");
+    fs::create_dir_all(&unrelated).unwrap();
+    fs::write(unrelated.join("SKILL.md"), "untracked work\n").unwrap();
+    let result = run("pre-commit", root);
+    assert!(
+        result.status.success(),
+        "staged checks should ignore local changes: {}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(&source_file).unwrap(),
+        "invalid unstaged Rust\n"
+    );
+    assert_eq!(
+        fs::read_to_string(unrelated.join("SKILL.md")).unwrap(),
+        "untracked work\n"
+    );
+
+    let skill = root.join(".agents/skills/surgical-edit/SKILL.md");
+    let valid = fs::read(&skill).unwrap();
+    fs::write(&skill, "invalid staged skill\n").unwrap();
+    git(root, &["add", ".agents/skills/surgical-edit/SKILL.md"]);
+    fs::write(&skill, &valid).unwrap();
+    let result = run("pre-commit", root);
+    assert!(
+        !result.status.success(),
+        "invalid staged skill must block commit even with valid working copy"
+    );
+    assert!(
+        String::from_utf8_lossy(&result.stderr).contains("Config validation failed"),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert_eq!(fs::read(&skill).unwrap(), valid);
+}
