@@ -81,11 +81,13 @@ blocks a required fact, name that fact and continue the work the available evide
 
 ## Sandboxed Pipeline Logs
 
-Pipeline logs can redirect to S3. A sandboxed `twg bb pipeline get`, `wait`, `grep`, or
-`tail` log request that shows a network-blocked message, S3 hostname, or log-only HTTP 403
-while metadata succeeds is a sandbox restriction, not an auth failure. Request an approved
-unsandboxed retry of that command only, or give the user the exact terminal command. Never
-request credentials.
+Pipeline logs can redirect to S3. An explicit sandbox network denial justifies an
+approved unsandboxed retry of the exact `twg bb pipeline get`, `grep`, or `tail`
+request. An S3 hostname or log-only HTTP 403 alone does not prove a sandbox
+restriction, even when metadata succeeds. Inspect the error for an expired signed
+URL, log access denial, or explicit network restriction before choosing recovery.
+Do not refresh service credentials solely because fetching logs failed. If command
+approval is unavailable or declined, give the user the exact terminal command.
 
 ## Bounded Evidence Loop
 

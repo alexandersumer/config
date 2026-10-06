@@ -65,8 +65,10 @@ Use `twg artifacts file share <artifact-id> --account-id <account-id>` to grant
 specific users access to an existing private artifact. Repeat `--account-id` or
 pass a comma-separated list. The command accepts Atlassian account IDs and full
 `ari:cloud:identity::user/...` ARIs and validates them before changing access.
-If the artifact is open or shared, change it to private before adding explicit
-user grants.
+Named grants require a private artifact. If it is open or shared, preserve its
+current visibility unless the user explicitly authorizes restricting it to
+private. Explain that restriction's effect on existing readers before requesting
+that specific visibility change or applying an already authorized change.
 
 Use `twg artifacts file unshare <artifact-id> --account-id <account-id>` to
 revoke named user grants, or `--all` to revoke every explicit audience grant,
@@ -74,9 +76,9 @@ including users, groups, and teams. Revocation does not change the artifact's
 general access. Named account IDs are validated before access changes are made.
 The validation checks the artifact's current explicit grants, so a grant can be
 removed even when the user's profile is hidden or the account is closed.
-It requires confirmation; pass `--yes` in agent mode or only after the user has
-approved the complete resolved audience set. `--all` is never inferred from an
-empty user list.
+Pass `--yes` only after the user has authorized the resolved recipients or the
+explicit `--all` scope; agent mode does not authorize revocation. `--all` is never
+inferred from an empty user list.
 
 Use `twg artifacts file update <artifact-id> [path]` to change an existing
 artifact. Pass a replacement file path to publish new content; omit it to
