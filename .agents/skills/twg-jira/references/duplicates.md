@@ -7,7 +7,7 @@ description: Detect duplicate Jira issues across a bounded scope with semantic c
 Use this decision policy with existing TWG capabilities. It does not replace
 JQL querying, `jira workitem similar`, or native workitem reads.
 
-Load `querying.md` when the prompt needs a bounded Jira candidate
+Load `references/querying.md` when the prompt needs a bounded Jira candidate
 set. Use live `twg help` for exact command grammar.
 
 Detect whether a target Jira issue duplicates another issue in the requested
@@ -58,15 +58,10 @@ Read the target with the native Jira workitem read. Do not request or inspect
 comments or issue links. Record its created time, project, issue type, summary,
 description, status, and URL.
 
-Request only the needed Jira fields, then project every native read with
-`--select` and literal paths for key, summary, description, created time,
-project, issue type, status, and URL. Include the applicable single-item and
-batched `data.items.data.*` paths advertised by live help, and ensure at least
-the key path resolves. Do not use `--agent-fields` for this boundary: it
-preserves the full payload beside the compact summary. Stop if
-`runtime_advisories` reports an unmatched selection. Do not rely on the
-requested Jira field list alone because the native response can include
-relationship fields outside that list.
+Project every native read with `--agent-fields` or an equivalent output filter
+so only key, summary, description, created time, project, issue type, status,
+and URL become model visible. Do not rely on a requested field list alone
+because the native response can include relationship fields outside that list.
 
 Classify the target as one of these types:
 
@@ -121,10 +116,10 @@ When the user requests a created time filter, use only a quoted date in
 `YYYY-MM-DD HH:MM`, `YYYY/MM/DD HH:MM`, or `YYYY-MM-DD` format. Never use an ISO
 timestamp containing `T` or `Z`.
 
-Start in the target project when its key is known. Include one cross-project
-query only when the user's requested project, board, or JQL scope permits it and
-a strong semantic result has not already caused the early exit. Use `ORDER BY
-created DESC`. Use a limit from 20 to 50, with 20 for broad text searches.
+Start in the target project when its key is known. Always include one
+cross project query unless a strong semantic result already caused the early
+exit. Use `ORDER BY created DESC`. Use a limit from 20 to 50, with 20 for broad
+text searches.
 
 Choose queries by type:
 
@@ -210,10 +205,9 @@ Select the passing candidate with the highest confidence. When confidence is
 equal, prefer the earliest created candidate, then the lowest numbered key.
 
 Never select a semantic result without hydrating and evaluating it. A hydrated
-semantic result that passes every applicable gate, including Gate 4 for alerts
-and incidents, with confidence of at least 0.50 remains eligible even when it
-does not reach the early exit threshold. Return no duplicate only when every
-result fails a gate or has confidence below 0.50.
+semantic result that passes Gates 0 through 3 with confidence of at least 0.50
+remains eligible even when it does not reach the early exit threshold. Return
+no duplicate only when every result fails a gate or has confidence below 0.50.
 
 ## Output
 

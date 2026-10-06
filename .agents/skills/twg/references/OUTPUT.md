@@ -20,7 +20,8 @@ authorization in some agent runtimes.
 The CLI core applies the same file-backed protection for direct structured
 agent calls such as `twg --mode agent --output json work query`. It only applies
 when the caller has not explicitly chosen `--output-summary`, `--output-file`, or
-`--output text`.
+`--output text`. Use `--output-summary none` when a script needs structured output
+directly on stdout inside an agent runtime.
 
 ## Envelope Shape
 
@@ -86,19 +87,32 @@ Act on `error.repair` and `error.retry.guidance` directly. Bulk diagnostics
 
 The YAML summary is a pointer, not the answer.
 
-- If `stdout_inline` is present, you may answer from it.
-- If `output_files.compact` is present, inspect that compact JSON first. It is
-  generated from the command's advertised output contract and is usually enough
-  for routing, titles, owners, statuses, URLs, and dates.
-- If `stdout_stats` or `stdout_shape` is present and `output_files.compact` is
-  absent or insufficient, filter `output_files.stdout` with targeted `jq`.
-- Use inline or compact records when they contain the needed evidence. Counts
-  and shape samples alone do not establish item names, URLs, owners, or status.
+- Use sufficient `stdout_inline` first. If it is absent or insufficient, inspect
+  only the compact or full output file returned by this invocation and permitted
+  by the host; load this reference when the envelope needs interpretation. The
+  compact file is generated from the command's advertised output contract and is
+  usually enough for routing, titles, owners, statuses, URLs, and dates.
+- If `stdout_stats` or `stdout_shape` is present and compact output is absent or
+  insufficient, a targeted projection of `output_files.stdout` is allowed only
+  where the host permits local inspection. This does not authorize arbitrary host
+  files, credentials, another comparison arm, or a file not returned by the same
+  invocation.
+- A restricted host may allow inspection of sandbox-local files returned by the
+  same invocation even when it does not allow arbitrary shell commands. Follow
+  the host policy: use supported output options first, then inspect only those
+  returned files if permitted, or report that the presentation/coverage is
+  insufficient. Never infer absence from an unreadable file.
+- For answers that require item names, URLs, owners, statuses, blockers, dates, or
+  evidence, read the JSON file even when the summary looks plausible.
 
-`stdout_shape` samples are not an inventory and imply no ordering of missing
-relationships. For exhaustive relationship or URL discovery, inspect the full
-relevant arrays in `output_files.stdout` and account for pagination. For a bounded
-answer, inline or compact evidence may suffice. See `twg-context-discovery`.
+**`stdout_shape` samples are statistical, not exhaustive.** The shape shows a
+merged schema with a small number of example string values per field — it is not a
+complete inventory. For `context` commands this matters most: external artifact links
+(Figma, GitHub, Google Docs, and other third-party app URLs) appear toward the
+**tail** of relationship arrays and are the entries most likely to be absent from
+`stdout_shape` samples. If the goal is relationship or URL discovery, always read
+`output_files.stdout` rather than treating shape samples as the full result. The
+related workflow guidance lives in `twg-context-discovery/SKILL.md`.
 
 ## Output Budget Controls
 
@@ -107,6 +121,7 @@ Use these flags to keep agent stdout manageable:
 ```bash
 twg <cmd> --output-summary stats
 twg <cmd> --output-summary auto
+twg <cmd> --output-summary none
 twg <cmd> --agent-fields data.items.key,data.items.status
 twg <cmd> --select data.items.key,data.items.status
 ```
@@ -115,6 +130,8 @@ twg <cmd> --select data.items.key,data.items.status
 - `--output-summary auto` - inline small results, summarize large results.
 - `--output-summary inline` - force inline selected data; in agent mode very
   large inline payloads are capped and fall back to file-backed summary output.
+- `--output-summary none` - disable automatic summary envelopes and emit the
+  selected structured format directly on stdout.
 - `--agent-fields` - narrow the summary while preserving the full JSON file.
   Presets such as `@rows`, `@compact`, and `@evidence` are command-scoped when
   advertised by help; on commands without a preset contract they safely fall
@@ -131,7 +148,7 @@ twg <cmd> --select data.items.key,data.items.status
   warning goes to stderr. A selection that is part literal paths and part
   presets the command does not advertise projects the paths that resolved and
   names the dropped presets under `runtime_advisories.selectUnresolved` - a
-  separate key from `selectUnmatched`, because the payload *was* projected.
+  separate key from `selectUnmatched`, because the payload _was_ projected.
   A top-level array payload stays an array.
   Failed commands are never projected - the `ok: false` recovery envelope is
   returned whole, because `error.code`, `error.repair`, and `error.retry` are
@@ -149,8 +166,10 @@ projection. Do not retry multiple incompatible `.data.*`, `.result.*`, or
 array-vs-object guesses. Combine related facts in one `jq` projection per output
 file instead of running repeated `jq .` or one-field probes.
 
-If a local `jq` command fails, stop probing nearby paths. Re-read the compact
-file or the command's help-described view, then use at most one exact projection.
+If a permitted local `jq` command fails, stop probing nearby paths. Re-read the
+compact file or the command's help-described view, then use at most one exact
+projection. A failed projection is a presentation gap, not evidence that the
+underlying source returned no matching rows.
 A collection reported as `0` means "no rows returned". A collection absent from
 `stdout_stats.collections` means the payload holds no such array at all - not
 that the output contract changed. The exception is `collections_omitted`: when

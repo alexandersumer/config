@@ -38,8 +38,13 @@ Resolve the subject and time window before querying:
 
 - For "me", use exact command flags `--scope me` and set
   `SUBJECT_IS_ME=true`.
+- When the person's identity matters to the answer, resolve the authenticated
+  user once with the native user command and retain the returned account ID and
+  display name. Do not treat the literal `me` selector as evidence of identity
+  or tell the user to contact the same person because the subject was not
+  resolved.
 - For another person, resolve their account ID first, use exact command flags
-  `--scope user --account-id <id>`, and set `SUBJECT_IS_ME=false`.
+  `--scope user --identifier <id>`, and set `SUBJECT_IS_ME=false`.
 - If the prompt gives a relative window, use `--since <duration>`.
 - If it gives an explicit calendar window, use `--from <YYYY-MM-DD>` and
   `--to <YYYY-MM-DD>` when live `twg work query` help advertises those flags.
@@ -65,7 +70,7 @@ For personal project discovery, use `twg projects query --scope me --include-inf
 (`owner` by default; use `--role contributor` for
 collaborative work). Check `projectType`, `meta.coverage`, and `warnings`;
 hydrate inferred evidence through its Jira or Confluence links.
-`[Paid: Intelligence]`; may consume Rovo credits.
+`[Paid: Enriched]`; may consume Rovo credits.
 
 1. Baseline activity:
    for self, run
@@ -73,17 +78,25 @@ hydrate inferred evidence through its Jira or Confluence links.
    or use `--from <YYYY-MM-DD> --to <YYYY-MM-DD>` for explicit calendar windows.
    For self restart/catch-up after time away, use the same unrestricted query;
    omitting `--types` previews every supported person-scoped work section in one
-   batch. Do not narrow it to `assigned` or create source quotas. On failure,
-   retry once with supported person-scoped sections rather than switching to a
-   tenant-wide inventory.
+   batch. Do not narrow it to `assigned` or create source quotas. If the query
+   hits a relationship/safety limit or returns partial coverage, follow the
+   command's repair guidance with supported person-scoped sections or a
+   material-gap query while preserving the same person, window, and explicit
+   scope. Do not silently shrink the requested window or types, treat a
+   counts-only response as an inventory, or switch to a tenant-wide query.
+   Record omitted, unavailable, and still-uncovered sections.
    For another person, run
-   `twg work query --scope user --account-id <id> --activity all --ranked --since <window> --items-per-section 2 -o json`,
+   `twg work query --scope user --identifier <id> --activity all --ranked --since <window> --items-per-section 2 -o json`,
    or use `--from <YYYY-MM-DD> --to <YYYY-MM-DD>` for explicit calendar windows.
-   Inspect title or summary, relationship, recency, and URL across the combined
-   preview before opening details. Each item carries `activityAt`, the timestamp
-   of the relationship that matched the window — use it for recency and to show
-   why an item is in the window, not `createdAt`. Hydrate only candidates whose
-   detail could change priorities, decisions, blockers, or next actions.
+   Inspect the returned inline/compact evidence before opening details; a shape
+   or stats summary is not a complete inventory. Each item carries `activityAt`,
+   the timestamp of the relationship that matched the window — use it for
+   recency and to show why an item is in the window, not `createdAt`. Treat
+   per-section limits as a preview, track sections or relationships not covered,
+   and hydrate candidates whose detail could change identity, scope, priority,
+   freshness, decisions, blockers, or next actions. Use supported scoped native
+   evidence for a material uncovered gap; do not turn a partial preview into a
+   tenant-wide inventory.
 2. PR state:
    use `twg pull-requests query --scope me ...` or
    `twg pull-requests query --scope user --account-id <id> ...` for authored,
@@ -110,6 +123,9 @@ hydrate inferred evidence through its Jira or Confluence links.
    add docs/query or docs/search, meetings/videos, Jira workitem details,
    projects, goals, or context commands only when they explain momentum,
    blockers, decisions, ownership, or stakeholder impact.
+   For current or ongoing priorities, combine activity with active project/goal
+   state and recorded commitments, deadlines, risks, or decisions. Absence from
+   a recent activity window is not evidence that an active project is irrelevant.
 
 ## Short Window And Restart Rules
 
@@ -123,14 +139,32 @@ there was no work when coverage was incomplete.
 
 For restart, OOO catch-up, or handoff, treat counts, returned projects, status,
 and recorded owners as context—not proof of personal priority. Establish
-priority from direct execution plus decision or discussion evidence. Cluster by
-outcome and rank across the combined preview by recency and decision pressure.
+priority from explicit priority, supported commitments or deadlines, risk,
+decisions, and direct execution or discussion evidence. Reviewer activity,
+comment volume, and counts do not override an explicit priority or create a
+second priority when the evidence supports only one. Cluster by outcome and
+rank across the combined preview by recency and decision pressure.
+When the request asks for current or ongoing priorities, pair the activity
+preview with active owned project/goal state and its recorded updates before
+ranking; do not infer that an active project is irrelevant because it had no
+matching activity in the requested window.
 Prefer two complementary signals for a selected cluster when available, but do
-not require them. Use at most three targeted hydrations total; use
-`collaborators` once only if conversation evidence is missing. Do not reopen
-broad inventories, hydrate every PR, force one candidate per source section, or
-invent a second workstream with weak support. Do not mention an empty section
-unless access failed or the prompt specifically required evidence from it.
+not require them. Use a bounded batch of targeted hydrations and continue while
+each read can change identity, scope, priority, freshness, a decision, blocker,
+or next action. Use `collaborators` only when it can close a material ownership
+or discussion gap. Stop when those claims are supported or a remaining gap is
+unavailable, and disclose incomplete coverage. Do not reopen broad inventories,
+hydrate every PR, force one candidate per source section, or invent a second
+workstream with weak support.
+
+Common command shapes when a summary also covers a team:
+
+- Person: `twg people search --name "<name>"` for the account ID.
+- Team: `twg teams query -q "<team>"`, then `twg teams members list <team-ari>`. It returns
+  up to 100 members per page; follow `--after` until the list is complete.
+- Several people's work: `twg work query --scope user --identifier <id> --identifier <id> --types <types> --since <window>`,
+  one `--identifier` per member and at most 25 per call. Split larger teams into batches,
+  check each person's result for errors, and report any members left uncovered.
 
 ## Synthesis
 

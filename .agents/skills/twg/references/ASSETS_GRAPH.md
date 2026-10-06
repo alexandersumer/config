@@ -19,16 +19,12 @@ The downloaded schema is the source of truth. Resolve every type, relationship,
 and field name **from it** — never from `assets search`, AQL, or the prompt's
 wording verbatim.
 
-1. **Fetch the schema once, to a task-scoped file.** Create a unique temporary
-   directory with `mktemp -d` when shell utilities are available, or use the
-   execution environment's unique run directory, then pass an absolute path such
-   as `<task-dir>/assets-schema.json` to `--output-file`. Add `--workspace
-   <id-or-ari>` / `--site <site>` for a non-default workspace. Reuse the file only
-   within the same task and exact workspace/site context; never reuse a fixed
-   shared `/tmp` path across tasks or tenants. The schema is large — piping to
-   stdout truncates into invalid JSON — so use `--output-file` and inspect only
-   bounded fields (cached ~24h). This *is* discovery: do **not** `help describe`
-   the graph subcommands first.
+1. **Fetch the schema once, to a file.**
+   `twg assets graph schema -o json --output-file /tmp/assets-schema.json` (add
+   `--workspace <id-or-ari>` / `--site <site>` for a non-default workspace). Use an
+   absolute path so re-runs reuse it. It is large — piping to stdout truncates into
+   invalid JSON — so always `--output-file` and `jq` the file (cached ~24h). This
+   *is* discovery: do **not** `help describe` the graph subcommands first.
    Once you know the nouns, scope reads with `--node <name>` (repeatable, fuzzy):
    `twg assets graph schema --node "Maruti Suzuki" -o json` returns just that type
    plus its relationships — prefer it over re-`jq`-ing the whole file.

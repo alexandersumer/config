@@ -74,9 +74,8 @@ tree:
     link: {}
 ```
 
-Loose search returns JSONL (`meta` followed by `idx` records). Root and namespace
-maps return YAML. Omit `-o json` for both; the CLI rejects that override. Exact
-executable `help describe` contracts accept JSON.
+The default output for loose search is JSONL. The first record is `type: "meta"`
+and matching command records are `type: "idx"`.
 
 Use `describe` when you are about to inspect a namespace or execute an
 unfamiliar command. Exact executable commands return JSON by default:
