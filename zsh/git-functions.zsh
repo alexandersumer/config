@@ -1,5 +1,6 @@
 # shellcheck shell=zsh
 # Git helper functions used across interactive shells.
+typeset -g _HOME_RESET_HELPER_DIR="${${(%):-%x}:A:h}"
 
 function _branch_from_remote_head_ref() {
     local remote="$1"
@@ -105,241 +106,15 @@ function _build_commit_message() {
     fi
 }
 
-function _remove_worktrees_for_branches() {
-    local -a branches=("$@")
-    local wt_output
-    wt_output=$(git worktree list --porcelain 2>/dev/null)
-
-    # More than one "worktree" line means linked worktrees exist.
-    (( $(echo "$wt_output" | grep -c '^worktree ') > 1 )) || return 0
-
-    local wt_path="" wt_line wt_branch branch
-    while IFS= read -r wt_line; do
-        if [[ "$wt_line" == worktree\ * ]]; then
-            wt_path="${wt_line#worktree }"
-        elif [[ "$wt_line" == branch\ refs/heads/* ]]; then
-            wt_branch="${wt_line#branch refs/heads/}"
-            for branch in "${branches[@]}"; do
-                if [[ "$wt_branch" == "$branch" ]]; then
-                    printf '\033[33mremoving worktree using branch %s: %s\033[0m\n' "$branch" "$wt_path"
-                    git worktree remove --force "$wt_path" 2>/dev/null
-                    break
-                fi
-            done
-            wt_path=""
-        fi
-    done <<< "$wt_output"
-    git worktree prune 2>/dev/null
-}
-
-function _refs_from_fetch_ref_failure() {
-    local remote="$1"
-    local fetch_output="$2"
-
-    {
-        printf '%s\n' "$fetch_output" \
-            | grep -E "(cannot lock ref|cannot update the ref|removing stale tracking ref|is at [0-9a-f]+ but expected)" \
-            | grep -oE "refs/remotes/${remote}/[^'[:space:]\":]+" \
-            | sed 's/\.lock$//'
-        printf '%s\n' "$fetch_output" \
-            | awk -v remote="$remote" '
-                / - \[deleted\][[:space:]]+\(none\)[[:space:]]+-> / {
-                    ref = $NF
-                    if (ref == remote || index(ref, remote "/") == 1) {
-                        print "refs/remotes/" ref
-                    }
-                }
-            '
-    } | awk '!seen[$0]++'
-}
-
-function _fetch_is_full_remote_prune() {
-    local remote="$1"
-    shift
-    local -a args=("$@")
-    local arg
-    local saw_fetch=0 saw_prune=0 saw_remote=0 saw_refspec=0
-
-    for arg in "${args[@]}"; do
-        case "$arg" in
-            fetch)
-                saw_fetch=1
-                ;;
-            --prune|-p)
-                saw_prune=1
-                ;;
-            --*)
-                ;;
-            "$remote")
-                saw_remote=1
-                ;;
-            git|command)
-                ;;
-            *)
-                if (( saw_remote )); then
-                    saw_refspec=1
-                fi
-                ;;
-        esac
-    done
-
-    (( saw_fetch && saw_prune && saw_remote && ! saw_refspec ))
-}
-
-function _cleanup_fetch_ref_failure() {
-    local git_dir="$1"
-    local remote="$2"
-    local fetch_output="$3"
-    local cleanup_round="$4"
-    local refs_to_delete ref ref_path log_path _p _dir _stop _cleanup_dir
-    local -a refs_array=()
-    local -a cleaned_refs=()
-
-    if (( cleanup_round == 0 )); then
-        printf '\033[33mfetch failed, cleaning up stale refs and retrying…\033[0m\n' >&2
-    fi
-
-    # Remove leftover lock files before every retry. Some large repos can hit
-    # multiple stale remote-tracking refs in a single prune sequence.
-    for _cleanup_dir in "$git_dir/refs/remotes/$remote" "$git_dir/logs/refs/remotes/$remote"; do
-        [[ -d "$_cleanup_dir" ]] || continue
-        find "$_cleanup_dir" -name "*.lock" -delete 2>/dev/null
-    done
-
-    refs_to_delete=$(_refs_from_fetch_ref_failure "$remote" "$fetch_output")
-
-    if [[ -z "$refs_to_delete" ]]; then
-        return 0
-    fi
-
-    refs_array=(${(f)refs_to_delete})
-    for ref in "${refs_array[@]}"; do
-        ref_path="$git_dir/$ref"
-        log_path="$git_dir/logs/$ref"
-
-        rm -f "${ref_path}.lock" 2>/dev/null
-
-        if git update-ref -d "$ref" >/dev/null 2>&1; then
-            cleaned_refs+=("$ref")
-        else
-            # Fall back to direct cleanup for broken D/F states that Git cannot
-            # lock or parse well enough for update-ref.
-            if [[ -f "$ref_path" ]]; then
-                printf '\033[33mwarning: removing stale ref %s\033[0m\n' "$ref" >&2
-                rm -f "$ref_path"
-                cleaned_refs+=("$ref")
-            elif [[ -d "$ref_path" ]]; then
-                printf '\033[33mwarning: removing stale ref directory %s\033[0m\n' "$ref" >&2
-                rm -rf "$ref_path"
-                cleaned_refs+=("$ref")
-            fi
-
-            if [[ -f "$git_dir/packed-refs" ]] && grep -q " ${ref}$" "$git_dir/packed-refs" 2>/dev/null; then
-                printf '\033[33mwarning: removing stale packed ref %s\033[0m\n' "$ref" >&2
-                git pack-refs --all --prune >/dev/null 2>&1 || true
-                if [[ -f "$git_dir/packed-refs" ]] && grep -q " ${ref}$" "$git_dir/packed-refs" 2>/dev/null; then
-                    sed -i.bak "\| ${ref}$|d" "$git_dir/packed-refs" && rm -f "$git_dir/packed-refs.bak"
-                fi
-                if [[ "${cleaned_refs[-1]:-}" != "$ref" ]]; then
-                    cleaned_refs+=("$ref")
-                fi
-            fi
-        fi
-
-        rm -f "${log_path}.lock" "$log_path" 2>/dev/null
-        [[ -d "$log_path" ]] && rm -rf "$log_path"
-
-        # Resolve D/F conflicts: a parent of the failing ref may exist as a
-        # file (old branch) when a child path (new branch) needs it to be a
-        # directory.
-        for _p in "$ref_path" "$log_path"; do
-            _dir="${_p%/*}"
-            _stop="$git_dir/refs/remotes/$remote"
-            [[ "$_p" == "$log_path" ]] && _stop="$git_dir/logs/refs/remotes/$remote"
-            while [[ "$_dir" != "$_stop" && "$_dir" == "${_stop}/"* ]]; do
-                if [[ -f "$_dir" ]]; then
-                    printf '\033[33mwarning: removing file blocking directory %s\033[0m\n' "${_dir#$git_dir/}" >&2
-                    rm -f "$_dir"
-                fi
-                _dir="${_dir%/*}"
-            done
-        done
-    done
-
-    if (( ${#cleaned_refs[@]} > 0 )); then
-        printf '%s\n' "${cleaned_refs[@]}" | awk '!seen[$0]++'
-    fi
-}
-
-function _fetch_with_ref_cleanup() {
-    local git_dir="$1"
-    local remote="$2"
-    shift 2
-    local fetch_output fetch_status=0 stale_output cleaned_output
-    local -i cleanup_rounds=0
-    local -i max_cleanup_rounds=3
-    local -a fetch_cmd=("$@")
-    local -a manual_deleted_refs=()
-    local -a stale_fetch_refs=()
-    local -a cleaned_refs=()
-
-    while true; do
-        fetch_output=$("${fetch_cmd[@]}" 2>&1)
-        fetch_status=$?
-
-        if (( fetch_status == 0 )); then
-            stale_output=$(printf '%s\n' "$fetch_output" \
-                | grep "removing stale tracking ref" \
-                | grep -oE "refs/remotes/${remote}/[^'[:space:]\":]+" \
-                | awk '!seen[$0]++')
-            if [[ -n "$stale_output" ]]; then
-                stale_fetch_refs=(${(f)stale_output})
-            fi
-            break
-        fi
-
-        if (( cleanup_rounds >= max_cleanup_rounds )); then
-            printf '%s\n' "$fetch_output" >&2
-            break
-        fi
-
-        printf '%s\n' "$fetch_output" >&2
-        local cleanup_output_file
-        cleanup_output_file=$(mktemp -t git-fetch-ref-cleanup.XXXXXX) || return 1
-        _cleanup_fetch_ref_failure "$git_dir" "$remote" "$fetch_output" "$cleanup_rounds" > "$cleanup_output_file"
-        cleaned_output=$(cat "$cleanup_output_file")
-        rm -f "$cleanup_output_file"
-        if [[ -n "$cleaned_output" ]]; then
-            cleaned_refs=(${(f)cleaned_output})
-            manual_deleted_refs+=("${cleaned_refs[@]}")
-        fi
-
-        (( cleanup_rounds++ ))
-        if (( cleanup_rounds < max_cleanup_rounds )); then
-            sleep $(( cleanup_rounds < 3 ? cleanup_rounds : 3 ))
-        fi
-    done
-
+function _fetch_checked() {
+    local fetch_output fetch_status
+    fetch_output=$("$@" 2>&1)
+    fetch_status=$?
+    [[ -n "$fetch_output" ]] && printf '%s\n' "$fetch_output" >&2
     if (( fetch_status != 0 )); then
-        if _fetch_is_full_remote_prune "$remote" "${fetch_cmd[@]}"; then
-            printf '\033[33mwarning: full remote prune failed after cleanup attempts; continuing with default branch reset\033[0m\n' >&2
-            return 0
-        fi
-        printf '\033[31merror: git fetch failed after cleanup attempts\033[0m\n' >&2
-        return $fetch_status
+        printf 'error: fetch failed (exit %d); reset was not performed\n' "$fetch_status" >&2
     fi
-
-    if (( ${#manual_deleted_refs[@]} > 0 )); then
-        printf '\033[33mcleaned up stale tracking refs:\033[0m\n'
-        printf '  %s\n' "${manual_deleted_refs[@]}"
-    fi
-
-    if (( ${#stale_fetch_refs[@]} > 0 )); then
-        printf '\033[33mgit fetch pruned stale tracking refs:\033[0m\n'
-        printf '  %s\n' "${stale_fetch_refs[@]}"
-    fi
-
-    return 0
+    return "$fetch_status"
 }
 
 function _print_reset_to_remote_default_dangerous_error() {
@@ -359,7 +134,7 @@ function _print_reset_to_remote_default_dangerous_error() {
 function _ensure_reset_to_remote_default_worktree_clean() {
     local git_status
 
-    git_status=$(git status --porcelain=v1 --untracked-files=no 2>/dev/null)
+    git_status=$(git status --porcelain=v1 --untracked-files=no 2>/dev/null) || return $?
     if [[ -n "$git_status" ]]; then
         _print_reset_to_remote_default_dangerous_error "$git_status"
         return 1
@@ -427,15 +202,24 @@ function _reset_to_remote_default_single() {
 
     _ensure_reset_to_remote_default_worktree_clean || return $?
 
+    local -a fetch_cmd=(git fetch)
+    if [[ "${HOME_RESET_SUPERVISED:-}" == 1 ]]; then
+        fetch_cmd=(git -c maintenance.auto=false -c gc.auto=0 fetch)
+    fi
+
     if (( sync_fetch )); then
         # ── Synchronous full fetch ────────────────────────────────────
-        # Fetch with retry and cleanup of transient/stale remote-tracking
-        # ref state, including "cannot lock ref ... is at X but expected Y".
-        _fetch_with_ref_cleanup "$git_dir" "$remote" git fetch --prune "$remote" || return $?
+        # Fetch errors propagate unchanged; bulk callers decide whether to retry.
+        _fetch_checked "${fetch_cmd[@]}" --prune "$remote" || return $?
 
         # ── Resolve target branch from full fetch ──────────────────────
         if (( branch_from_arg == 0 )); then
-            branch=$(_get_default_branch "$remote")
+            if [[ "${HOME_RESET_SUPERVISED:-}" == 1 ]]; then
+                branch=$(command python3 "$_HOME_RESET_HELPER_DIR/home_reset.py" --remote-branch "$remote") || return $?
+                _set_remote_head_ref "$remote" "$branch"
+            else
+                branch=$(_get_default_branch "$remote")
+            fi
         fi
     else
         # ── Fast single-branch fetch ──────────────────────────────────
@@ -444,7 +228,7 @@ function _reset_to_remote_default_single() {
         fi
 
         if [[ -n "$branch" ]]; then
-            _fetch_with_ref_cleanup "$git_dir" "$remote" git fetch "$remote" "$branch" || return $?
+            _fetch_checked git fetch "$remote" "$branch" || return $?
         fi
     fi
 
@@ -459,17 +243,26 @@ function _reset_to_remote_default_single() {
     fi
 
     _reset_to_remote_default_is_safe || return $?
-    if (( do_prune )); then
-        _fetch_with_ref_cleanup "$git_dir" "$remote" git fetch --prune --no-tags "$remote" || return $?
+    if (( do_prune && ! sync_fetch )); then
+        _fetch_checked git fetch --prune --no-tags "$remote" || return $?
+    fi
+
+    if [[ "${HOME_RESET_SUPERVISED:-}" == 1 ]]; then
+        command python3 "$_HOME_RESET_HELPER_DIR/home_reset.py" --prepare-tree "$remote/$branch" "$branch" || return $?
     fi
 
     # ── Reset to remote branch ─────────────────────────────────────────
     printf 'resetting to \033[32m%s/%s\033[0m\n' "$remote" "$branch"
 
+    local -a switch_cmd=(git switch) reset_cmd=(git reset)
+    if [[ "${HOME_RESET_SUPERVISED:-}" == 1 ]]; then
+        switch_cmd+=(--no-recurse-submodules --no-overwrite-ignore)
+        reset_cmd+=(--no-recurse-submodules)
+    fi
     if git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null 2>&1; then
-        git switch "$branch" || return $?
+        "${switch_cmd[@]}" "$branch" || return $?
     else
-        git switch --create "$branch" "$remote/$branch" || return $?
+        "${switch_cmd[@]}" --create "$branch" "$remote/$branch" || return $?
     fi
 
     upstream_ref=$(git rev-parse --symbolic-full-name "$branch@{upstream}" 2>/dev/null)
@@ -479,22 +272,14 @@ function _reset_to_remote_default_single() {
         fi
     fi
 
-    git reset --hard "$remote/$branch" || return $?
+    if [[ "${HOME_RESET_SUPERVISED:-}" == 1 ]]; then
+        command python3 "$_HOME_RESET_HELPER_DIR/home_reset.py" --check-tree "$remote/$branch" || return $?
+    fi
+    "${reset_cmd[@]}" --hard "$remote/$branch" || return $?
 
     # ── Prune local branches ──────────────────────────────────────────
     if (( do_prune )); then
         prune_all_except_remote_default "$branch" || return $?
-    fi
-
-    # ── Background fetch for remote branch availability ───────────────
-    if (( ! sync_fetch )); then
-        printf '\033[33mupdating remote branches in background…\033[0m\n'
-        # Run the background fetch in its own subshell so it fully detaches
-        # from the parent job table.  This avoids `disown: no current job`
-        # errors when reset_to_remote_default itself is called from inside a
-        # subshell/pipeline (e.g. by reset_all_to_remote_default), which would
-        # otherwise leak a non-zero exit status out of this function.
-        ( git fetch --prune --no-tags "$remote" &>/dev/null & ) 2>/dev/null
     fi
 
     return 0
@@ -762,7 +547,27 @@ function prune_branch() {
         return 0
     fi
 
-    _remove_worktrees_for_branches "${targets[@]}"
+    local wt_output wt_line
+    local -A checked_out=()
+    local -a deletable=()
+    wt_output=$(git worktree list --porcelain) || return $?
+    for wt_line in "${(@f)wt_output}"; do
+        if [[ "$wt_line" == branch\ refs/heads/* ]]; then
+            checked_out[${wt_line#branch refs/heads/}]=1
+        fi
+    done
+    for branch in "${targets[@]}"; do
+        if [[ -n "${checked_out[$branch]-}" ]]; then
+            printf 'keeping branch %s (checked out in a worktree)\n' "$branch"
+        else
+            deletable+=("$branch")
+        fi
+    done
+    targets=("${deletable[@]}")
+    if (( ${#targets[@]} == 0 )); then
+        printf 'no unused branches to prune\n'
+        return 0
+    fi
 
     printf 'pruning local branches: \033[32m%s\033[0m\n' "${(j: :)targets}"
     if git branch -D "${targets[@]}"; then
@@ -904,22 +709,7 @@ function soft_reset_remote_default() {
 }
 
 function _is_transient_git_failure() {
-    local log_file="$1"
-    [[ -s "$log_file" ]] || return 1
-    grep -q -E \
-        -e 'Permission denied \(publickey' \
-        -e 'kex_exchange_identification' \
-        -e 'Could not resolve host' \
-        -e 'Connection (timed out|reset|refused|closed)' \
-        -e 'Operation timed out' \
-        -e 'early EOF' \
-        -e 'RPC failed' \
-        -e 'unable to access .*(Couldn'\''t connect|Failed to connect|Could not resolve)' \
-        -e 'remote end hung up unexpectedly' \
-        -e 'fetch-pack: unexpected disconnect' \
-        -e 'TLS connection was non-properly terminated' \
-        -e 'HTTP/[0-9.]+ 5[0-9]{2}' \
-        -- "$log_file"
+    command python3 "$_HOME_RESET_HELPER_DIR/home_reset.py" --retryable "$1"
 }
 
 function _reset_to_remote_default_multi() {
@@ -1211,386 +1001,8 @@ function reset_all_to_remote_default() {
     reset_to_remote_default --multi "$@"
 }
 
-function _home_reset_to_origin_usage() {
-    cat <<'EOF'
-usage: home_reset_to_origin [--list] [--all-home] [--include-nested] [--retries N] [--retry-delay SECS] [--root PATH|PATH] [-- single-repo args...]
-
-Recursively finds git repositories under your default workspace roots and resets
-each one to its remote default branch using the same safety checks as reset_to_origin.
-
-Default roots are existing directories from HOME_RESET_TO_ORIGIN_ROOTS, or:
-  ~/atlassian ~/oss ~/src ~/stable
-
-options:
-  --list             print discovered repositories without resetting them
-  --all-home         scan all of $HOME instead of the fast default workspace roots
-  --include-nested   include repos found inside another repo; by default they are pruned
-  --retries N        retry transient git/network failures N times per repo (default: 3)
-  --retry-delay S    base delay in seconds between retries (default: 2)
-  --root PATH        scan PATH instead of the default workspace roots
-  --                 pass remaining arguments to the single-repo reset helper
-EOF
-}
-
-function _home_reset_to_origin_default_roots() {
-    local configured_roots="${HOME_RESET_TO_ORIGIN_ROOTS:-}"
-    local root
-    local -a default_roots=()
-
-    if [[ -n "$configured_roots" ]]; then
-        default_roots=( ${(z)configured_roots} )
-    else
-        default_roots=("$HOME/atlassian" "$HOME/oss" "$HOME/src" "$HOME/stable")
-    fi
-
-    for root in "${default_roots[@]}"; do
-        [[ -d "$root" ]] && printf '%s\0' "${root:A}"
-    done
-}
-
-function _home_reset_to_origin_prune_expr() {
-    local root="$1"
-
-    if [[ "$root" == "$HOME" || "$root" == "$HOME/"* ]]; then
-        printf '%s\n' \
-            "$HOME/Library" \
-            "$HOME/.Trash" \
-            "$HOME/.cache" \
-            "$HOME/Downloads" \
-            "$HOME/Applications" \
-            "$HOME/Desktop" \
-            "$HOME/Documents" \
-            "$HOME/Movies" \
-            "$HOME/Music" \
-            "$HOME/Pictures" \
-            "$HOME/Public" \
-            "$HOME/.npm" \
-            "$HOME/.pyenv" \
-            "$HOME/.sdkman" \
-            "$HOME/.Trash"
-    fi
-}
-
-function _home_reset_to_origin_find_git_entries() {
-    local root="$1"
-    local -a prune_paths=()
-    local -a prune_names=(node_modules .venv venv target dist build .next .turbo .gradle)
-    local prune_path prune_name prune_output
-    local -a find_args=("$root" '(')
-    local -i first=1
-
-    prune_output=$(_home_reset_to_origin_prune_expr "$root")
-    if [[ -n "$prune_output" ]]; then
-        prune_paths=("${(@f)prune_output}")
-    fi
-
-    for prune_path in "${prune_paths[@]}"; do
-        if (( first )); then
-            first=0
-        else
-            find_args+=(-o)
-        fi
-        find_args+=(-path "$prune_path")
-    done
-
-    for prune_name in "${prune_names[@]}"; do
-        if (( first )); then
-            first=0
-        else
-            find_args+=(-o)
-        fi
-        find_args+=(-name "$prune_name")
-    done
-
-    if (( first )); then
-        command find "$root" '(' -name .git -type d -print0 -prune -o -name .git -type f -print0 ')'
-    else
-        find_args+=(')' -prune -o '(' -name .git -type d -print0 -prune -o -name .git -type f -print0 ')')
-        command find "${find_args[@]}"
-    fi
-}
-
-function _home_reset_to_origin_repo_roots() {
-    local root="$1"
-    local include_nested="${2:-0}"
-    local git_entry repo root_abs repo_abs top_level candidate selected_repo
-    local -i inside_selected=0
-    local -A seen=()
-    local -a candidates=()
-    local -a selected=()
-
-    root_abs="${root:A}"
-
-    while IFS= read -r -d '' git_entry; do
-        repo="${git_entry:h}"
-        repo_abs="${repo:A}"
-        top_level=$(git -C "$repo_abs" rev-parse --show-toplevel 2>/dev/null) || continue
-        top_level="${top_level:A}"
-
-        if [[ -z "${seen[$top_level]-}" ]]; then
-            seen[$top_level]=1
-            candidates+=("$top_level")
-        fi
-    done < <(_home_reset_to_origin_find_git_entries "$root_abs")
-
-    if (( include_nested )); then
-        (( ${#candidates[@]} > 0 )) && printf '%s\0' "${candidates[@]}"
-        return 0
-    fi
-
-    for candidate in "${(o)candidates[@]}"; do
-        inside_selected=0
-        for selected_repo in "${selected[@]}"; do
-            if [[ "$candidate" == "$selected_repo"/* ]]; then
-                inside_selected=1
-                break
-            fi
-        done
-        (( inside_selected )) && continue
-        selected+=("$candidate")
-    done
-
-    (( ${#selected[@]} > 0 )) && printf '%s\0' "${selected[@]}"
-}
-
 function home_reset_to_origin() {
-    local root="$HOME"
-    local arg log_file entry repo_name display_root scan_label
-    local -a positional=()
-    local -a reset_args=()
-    local -a repos=()
-    local -a roots=()
-    local -a failed_repos=()
-    local -A seen_repo=()
-    local -i list_only=0 all_home=0 include_nested=0 parsing=1
-    local -i max_attempts=3 retry_base_delay=2
-    local -i total=0 ok_count=0 fail_count=0 retried_count=0 index=0
-    local -i attempt=0 delay=0 status_code=0
-
-    while (( parsing && $# > 0 )); do
-        arg="$1"
-        case "$arg" in
-            --help|-h)
-                _home_reset_to_origin_usage
-                return 0
-                ;;
-            --list)
-                list_only=1
-                shift
-                ;;
-            --all-home)
-                all_home=1
-                shift
-                ;;
-            --include-nested)
-                include_nested=1
-                shift
-                ;;
-            --root)
-                if [[ -z "${2-}" ]]; then
-                    printf '\033[31merror: --root requires a path\033[0m\n' >&2
-                    return 1
-                fi
-                positional+=("$2")
-                shift 2
-                ;;
-            --retries)
-                if [[ -z "${2-}" || "$2" != <-> ]]; then
-                    printf '\033[31merror: --retries requires a non-negative integer\033[0m\n' >&2
-                    return 1
-                fi
-                max_attempts=$2
-                (( max_attempts < 1 )) && max_attempts=1
-                shift 2
-                ;;
-            --retry-delay)
-                if [[ -z "${2-}" || "$2" != <-> ]]; then
-                    printf '\033[31merror: --retry-delay requires a non-negative integer\033[0m\n' >&2
-                    return 1
-                fi
-                retry_base_delay=$2
-                shift 2
-                ;;
-            --)
-                shift
-                reset_args=("$@")
-                parsing=0
-                ;;
-            --*)
-                printf '\033[31merror: unknown option %s\033[0m\n' "$arg" >&2
-                return 1
-                ;;
-            *)
-                positional+=("$arg")
-                shift
-                ;;
-        esac
-    done
-
-    if (( ${#positional[@]} > 1 )); then
-        printf '\033[31merror: too many root paths\033[0m\n' >&2
-        return 1
-    fi
-
-    if (( ${#positional[@]} == 1 )); then
-        roots=("${positional[1]}")
-        scan_label="${positional[1]}"
-    elif (( all_home )); then
-        roots=("$HOME")
-        scan_label="$HOME"
-    else
-        while IFS= read -r -d '' entry; do
-            roots+=("$entry")
-        done < <(_home_reset_to_origin_default_roots)
-        scan_label="default workspace roots"
-    fi
-
-    if (( ${#roots[@]} == 0 )); then
-        printf '\033[33mno default workspace roots found; set HOME_RESET_TO_ORIGIN_ROOTS or use --all-home/--root\033[0m\n' >&2
-        return 0
-    fi
-
-    if (( list_only || include_nested || all_home )); then
-        for root in "${roots[@]}"; do
-            if [[ -d "$root" ]]; then
-                root="${root:A}"
-            else
-                printf '\033[31merror: %s is not a directory\033[0m\n' "$root" >&2
-                return 1
-            fi
-
-            while IFS= read -r -d '' entry; do
-                if [[ -z "${seen_repo[$entry]-}" ]]; then
-                    seen_repo[$entry]=1
-                    repos+=("$entry")
-                fi
-            done < <(_home_reset_to_origin_repo_roots "$root" "$include_nested")
-        done
-
-        total=${#repos[@]}
-        if (( list_only )); then
-            (( total > 0 )) && printf '%s\n' "${repos[@]}"
-            return 0
-        fi
-    fi
-
-    if (( include_nested || all_home )); then
-        printf 'scanning \033[32m%s\033[0m (%d git repos, retries=%d)\n' \
-            "$scan_label" "$total" "$max_attempts"
-
-        if (( total == 0 )); then
-            return 0
-        fi
-
-        log_file=$(mktemp -t home_reset_to_origin.XXXXXX) || {
-            printf '\033[31merror: could not create temp log file\033[0m\n' >&2
-            return 1
-        }
-        trap 'rm -f "$log_file"; trap - INT TERM; return 130' INT TERM
-
-        for entry in "${repos[@]}"; do
-            (( ++index ))
-            repo_name="$entry"
-            for display_root in "${roots[@]}"; do
-                display_root="${display_root:A}"
-                if [[ "$entry" == "$display_root"/* ]]; then
-                    repo_name="${entry#$display_root/}"
-                    break
-                fi
-            done
-
-            printf '\n[%d/%d] \033[32m%s\033[0m\n' "$index" "$total" "$repo_name"
-            printf -- '----------------------------------------\n'
-
-            attempt=1
-            status_code=0
-            while (( attempt <= max_attempts )); do
-                : > "$log_file"
-                if (( ${#reset_args[@]} > 0 )); then
-                    ( cd -- "$entry" && reset_to_origin "${reset_args[@]}" ) 2>&1 | tee "$log_file"
-                    status_code=${pipestatus[1]}
-                else
-                    ( cd -- "$entry" && reset_to_origin ) 2>&1 | tee "$log_file"
-                    status_code=${pipestatus[1]}
-                fi
-
-                if (( status_code == 0 )); then
-                    break
-                fi
-
-                if (( attempt >= max_attempts )) || ! _is_transient_git_failure "$log_file"; then
-                    break
-                fi
-
-                delay=$(( retry_base_delay * (1 << (attempt - 1)) ))
-                printf '\033[33mretry attempt %d/%d in %ds\033[0m\n' \
-                    "$(( attempt + 1 ))" "$max_attempts" "$delay"
-                printf -- '----------------------------------------\n'
-                sleep "$delay"
-                (( ++attempt ))
-            done
-
-            if (( status_code == 0 )); then
-                (( ++ok_count ))
-                if (( attempt > 1 )); then
-                    (( ++retried_count ))
-                    printf '\033[32mrecovered after %d attempts\033[0m\n' "$attempt"
-                fi
-            else
-                (( ++fail_count ))
-                local plural=s
-                (( attempt == 1 )) && plural=
-                failed_repos+=("$entry (exit $status_code after $attempt attempt$plural)")
-            fi
-        done
-
-        rm -f "$log_file"
-        trap - INT TERM
-
-        printf '\n========================================\n'
-        printf 'summary: %d total, \033[32m%d ok\033[0m (\033[33m%d retried\033[0m), \033[31m%d failed\033[0m\n' \
-            "$total" "$ok_count" "$retried_count" "$fail_count"
-
-        if (( fail_count > 0 )); then
-            printf '\033[31mfailed repositories:\033[0m\n'
-            for entry in "${failed_repos[@]}"; do
-                printf '  %s\n' "$entry"
-            done
-            return 1
-        fi
-
-        return 0
-    fi
-
-    total=${#roots[@]}
-    for root in "${roots[@]}"; do
-        (( ++index ))
-        root="${root:A}"
-        printf '\n[%d/%d roots] \033[32m%s\033[0m\n' "$index" "$total" "$root"
-        printf '========================================\n'
-
-        local -a multi_argv=("$root" --retries "$max_attempts" --retry-delay "$retry_base_delay")
-        if (( ${#reset_args[@]} > 0 )); then
-            multi_argv+=(-- "${reset_args[@]}")
-        fi
-
-        reset_to_origin --multi "${multi_argv[@]}"
-        status_code=$?
-        if (( status_code != 0 )); then
-            failed_repos+=("$root (exit $status_code)")
-            (( ++fail_count ))
-        fi
-    done
-
-    if (( fail_count > 0 )); then
-        printf '\n\033[31mfailed roots:\033[0m\n'
-        for entry in "${failed_repos[@]}"; do
-            printf '  %s\n' "$entry"
-        done
-        return 1
-    fi
-
-    return 0
+    command python3 "$_HOME_RESET_HELPER_DIR/home_reset.py" "$@"
 }
 
 # Backward-compatible aliases for the previous origin-named entry points.

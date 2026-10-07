@@ -2,6 +2,79 @@
 
 Personal configuration and agent-skill registry.
 
+## Parallel home reset
+
+```zsh
+home_reset_to_origin --list
+home_reset_to_origin --jobs 4 --timeout 300 --retries 3
+home_reset_to_origin --root ~/oss --jobs 2
+```
+
+Requires Python 3 and zsh on macOS or Linux. The shell entry point delegates to
+`zsh/home_reset.py`; `zsh/repo_batch.py` handles bounded workers, locks, deadlines,
+and retries without knowing Git reset policy.
+
+The default roots are `~/atlassian`, `~/oss`, `~/src`, and `~/stable`.
+`HOME_RESET_TO_ORIGIN_ROOTS` can supply a shell-quoted list of roots. Discovery
+walks folders in sorted order, skips build/cache directories and directory
+symlinks, and stops at repositories unless `--include-nested` is set. `--list`
+uses the same discovery as execution. `--all-home` expands discovery to the home
+directory while excluding personal/system folders. Roots run in order, with up
+to four concurrent repositories inside each root. Jobs sharing a Git common
+directory serialize; overlapping batch invocations refuse a busy repository.
+
+Completed repositories get an immediate `OK`, `FAILED`, or `CANCELLED` status.
+Full logs print in traversal order after each root finishes. All attempts are
+retained in each repository log, with a final summary and `results.json`
+in the printed temporary log directory. Logs may contain private remote URLs;
+the directory is private to the current user and remains until cleaned up.
+
+`--retries` retains its legacy meaning of total attempts, with zero treated as
+one, and a maximum of ten. Only recognized temporary network failures and
+timeouts retry. Authentication errors, dirty files, and Git lock errors fail
+promptly. Retry delays double with jitter and cap near 30 seconds. `--timeout`
+is a deadline for the entire attempt, including hooks and Git subprocesses.
+Timeouts and Ctrl-C kill each worker's process group before releasing its
+repository lock. This is a hard stop, so interrupted Git writes can leave locks
+that the runner reports rather than deleting. Genuine signal permission errors
+remain failures. Any failed repository yields exit 1; cancellation yields 130.
+
+Home reset now always fetches synchronously and preserves local branches and
+linked worktrees instead of pruning them. It refuses dirty tracked files,
+unfinished Git operations, and untracked/ignored paths that would be overwritten
+by either the local default branch or the fetched target. It disables recursive
+submodule checkout/reset and checks again after switching branches. Before
+replacing an existing default-branch tip, it saves a ref under
+`refs/home-reset-backups/<timestamp>/<branch>`. Recover a saved tip with
+`git branch recovered-work <printed-backup-ref>`.
+
+This still deliberately switches to the remote default branch and resets its
+tracked tree. It is not an atomic transaction across repositories. The lock
+coordinates this batch runner, not editors or unrelated Git commands; run it
+while repositories are otherwise idle. A forced kill or machine failure can
+interrupt Git and leave a lock requiring investigation; the runner never deletes
+Git locks automatically. The shared reset helper now propagates failed fetches
+without ref/lock repair or hidden background fetches. Branch pruning preserves
+every branch checked out in a worktree, including the canonical checkout, and
+only deletes eligible unused branches. Single-repository reset still prunes
+unused branches unless `--no-prune` is supplied. All bulk retry paths use the
+same network-failure classifier.
+
+Checks and a reproducible benchmark use disposable local repositories:
+
+```sh
+python3 tests/test_home_reset.py
+python3 tests/benchmark_home_reset.py
+cargo run -- test-validate
+```
+
+The benchmark compares the original script at the recorded pre-change revision
+with one, two, and four supervised workers on twelve clones. It waits for the original
+script's detached fetches, uses a controlled 250 ms delay per fetch, verifies
+every final HEAD, and writes three samples per configuration to
+`tests/home-reset-benchmark.json`. It measures controlled latency; live remote
+performance depends on network and server limits.
+
 ## Tooling
 
 Config tooling is implemented in Rust via the `config-tools` binary.

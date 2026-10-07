@@ -98,16 +98,15 @@ fn pre_commit_validates_index_and_preserves_local_changes() {
                 &format!("--prefix={}/", root.display()),
             ],
         );
-        fs::remove_dir_all(root.join("tests")).expect("exclude recursive integration tests");
+        fs::remove_file(root.join("tests/pre_commit.rs"))
+            .expect("exclude recursive integration tests");
     } else {
         for entry in walkdir::WalkDir::new(source)
             .into_iter()
             .filter_entry(|entry| {
                 entry.depth() == 0
-                    || !matches!(
-                        entry.file_name().to_str(),
-                        Some("target" | "tests" | ".git")
-                    )
+                    || (!matches!(entry.file_name().to_str(), Some("target" | ".git"))
+                        && entry.path() != source.join("tests/pre_commit.rs"))
             })
         {
             let entry = entry.expect("walk staged source");

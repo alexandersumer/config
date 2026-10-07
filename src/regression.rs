@@ -1204,7 +1204,8 @@ functions home_reset_to_origin >/dev/null
 "#,
         config_root.join("zsh/git-functions.zsh").display()
     );
-    run_command(&config_root, "zsh", &["-c", &script])
+    run_command(&config_root, "zsh", &["-c", &script])?;
+    run_command(&config_root, "python3", &["tests/test_home_reset.py"])
 }
 
 fn test_axiom_alias_zsh_wiring() -> Result<()> {
