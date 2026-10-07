@@ -14,7 +14,7 @@ import tempfile
 import time
 
 from repo_batch import Job, Supervisor
-from batch_output import BatchOutput, duration
+from batch_output import BatchOutput, color, duration, quantity
 
 
 PRUNE = {"node_modules", ".venv", "venv", "target", "dist", "build", ".next", ".turbo", ".gradle", ".git"}
@@ -25,7 +25,7 @@ def git(path, *args):
     return subprocess.check_output(["git", "-C", str(path), *args], stderr=subprocess.PIPE, timeout=15)
 
 
-def discover(root, recursive, nested):
+def discover(root, recursive, nested, excluded=None):
     candidates = []
     if recursive:
         def failed(error):
@@ -50,6 +50,11 @@ def discover(root, recursive, nested):
         top = Path(os.fsdecode(git(candidate, "rev-parse", "--show-toplevel"))[:-1]).resolve()
         common = Path(os.fsdecode(git(candidate, "rev-parse", "--git-common-dir"))[:-1])
         common = (candidate / common).resolve()
+        git_dir = Path(os.fsdecode(git(candidate, "rev-parse", "--git-dir"))[:-1])
+        if (candidate / git_dir).resolve() != common:
+            if excluded is not None:
+                excluded.add(top)
+            continue
         if top not in seen:
             seen.add(top)
             found.append((top, common))
@@ -57,7 +62,7 @@ def discover(root, recursive, nested):
 
 
 def retryable(log):
-    if re.search(r"Permission denied|Access denied|Forbidden|Authentication failed|could not read Username|Host key verification failed|refusing|would be overwritten|Git operation in progress|cannot lock|Repository is busy", log, re.I):
+    if re.search(r"Permission denied|Access denied|Forbidden|Authentication failed|could not read Username|Host key verification failed|You may not have access to this repository|refusing|would be overwritten|Git operation in progress|cannot lock|Repository is busy", log, re.I):
         return False
     return bool(re.search(r"Could not resolve|Connection (?:timed out|reset|refused|closed)|Operation timed out|early EOF|unexpected disconnect|remote end hung up|TLS connection was non-properly terminated|(?:HTTP/[\d.]+\s+|returned error:?\s*)(?:5\d\d|429)\b|Failed to connect|Couldn't connect|kex_exchange_identification", log, re.I))
 
@@ -127,10 +132,14 @@ def failure_reason(result):
     latest = re.split(r"(?m)^Attempt \d+/\d+\n", log)[-1]
     lines = [display(line, multiline=True).strip() for line in latest.splitlines() if line.strip()]
     meaningful = [line for line in lines if not line.startswith("error: fetch failed")]
+    if any("You may not have access to this repository or it no longer exists" in line for line in meaningful):
+        return "Bitbucket: repository unavailable or access denied. Check the origin URL and repository permissions."
     errors = [line for line in meaningful if re.search(r"fatal:|error:|Error:|denied|cannot lock|Worker failure|Repository is busy", line, re.I)]
     reason = (errors or meaningful or lines or [f"Command failed (exit {result.code})."])[0]
     if "would discard local changes" in reason or "Tracked changes or a dirty submodule" in reason:
         return "Tracked files have local changes; left unchanged."
+    if "is already used by worktree" in reason:
+        return "The default branch is checked out in another worktree; left unchanged."
     reason = re.sub(r"^(?:fatal|error):\s*", "", reason, flags=re.I)
     return reason[:197] + "..." if len(reason) > 200 else reason
 
@@ -199,12 +208,12 @@ def main(argv=None):
         roots = [Path(p).expanduser().resolve() for p in shlex.split(os.environ["HOME_RESET_TO_ORIGIN_ROOTS"])]
     else:
         roots = [home / p for p in ("atlassian", "oss", "src", "stable") if (home / p).is_dir()]
-    discovered, seen = [], set()
+    discovered, seen, excluded = [], set(), set()
     for root in roots:
         if not root.is_dir():
             parser.error(f"not a directory: {root}")
         entries = []
-        for path, common in discover(root, True, args.include_nested):
+        for path, common in discover(root, True, args.include_nested, excluded):
             if path not in seen:
                 seen.add(path)
                 entries.append((path, common))
@@ -216,7 +225,9 @@ def main(argv=None):
         return 0
     total = sum(len(entries) for _, entries in discovered)
     if not total:
-        print("No repositories found.")
+        print("No repositories to reset.")
+        if excluded:
+            print(color(f"Skipped {quantity(len(excluded), 'linked worktree')}.", "yellow"))
         return 0
     log_dir = Path(tempfile.mkdtemp(prefix="home-reset-"))
     source = Path(__file__).with_name("git-functions.zsh")
@@ -227,12 +238,14 @@ def main(argv=None):
     previous = {s: signal.signal(s, stop) for s in (signal.SIGINT, signal.SIGTERM)}
     all_results = []
     started = time.monotonic()
-    print(f"Resetting {total} repositories with {args.jobs} workers.", flush=True)
+    print(f"Resetting {quantity(total, 'repository', 'repositories')} with {quantity(args.jobs, 'worker')}.", flush=True)
+    if excluded:
+        print(color(f"Skipped {quantity(len(excluded), 'linked worktree')}.", "yellow"), flush=True)
     try:
         for root, entries in discovered:
             if not entries:
                 continue
-            print(f"\n{short_path(root)} ({len(entries)} repositories)", flush=True)
+            print(f"\n{short_path(root)} ({quantity(len(entries), 'repository', 'repositories')})", flush=True)
             jobs = [Job(str(path), path, ("zsh", "-f", "-c", 'source "$1"; shift; _reset_to_remote_default_single "$@" --sync --no-prune', "home-reset", str(source), *forwarded), common) for path, common in entries]
             with BatchOutput([job.name for job in jobs], lambda name: short_path(name, root), failure_reason) as output:
                 supervisor.progress = output.progress
@@ -244,15 +257,16 @@ def main(argv=None):
                     print(display(result.log.read_text(errors="replace"), multiline=True), end="", flush=True)
         record = [dict(name=r.name, code=r.code, attempts=r.attempts, seconds=r.seconds, log=str(r.log)) for r in all_results]
         (log_dir / "results.json").write_text(json.dumps(record, indent=2))
+        (log_dir / "excluded-worktrees.json").write_text(json.dumps([str(p) for p in sorted(excluded)], indent=2))
         ok = sum(r.code == 0 for r in all_results)
         recovered = sum(r.code == 0 and r.attempts > 1 for r in all_results)
         failed = sum(r.code not in (0, 130) for r in all_results)
         cancelled = sum(r.code == 130 for r in all_results)
-        counts = [f"{ok} succeeded"]
+        counts = [color(f"{ok} succeeded", "green") if ok else "0 succeeded"]
         if failed:
-            counts.append(f"{failed} failed")
+            counts.append(color(f"{failed} failed", "red"))
         if cancelled:
-            counts.append(f"{cancelled} cancelled")
+            counts.append(color(f"{cancelled} cancelled", "yellow"))
         print(f"\nFinished in {duration(time.monotonic() - started)}: {', '.join(counts)}.")
         if recovered:
             print(f"{recovered} recovered after retry.")

@@ -17,18 +17,24 @@ and retries without knowing Git reset policy.
 The default roots are `~/atlassian`, `~/oss`, `~/src`, and `~/stable`.
 `HOME_RESET_TO_ORIGIN_ROOTS` can supply a shell-quoted list of roots. Discovery
 walks folders in sorted order, skips build/cache directories and directory
-symlinks, and stops at repositories unless `--include-nested` is set. `--list`
+symlinks, and stops at repositories unless `--include-nested` is set. Linked
+worktrees are excluded before fetching: each primary checkout is reset once,
+while linked branches and files are left alone. A separate Git directory does
+not make a primary checkout a linked worktree. `--list`
 uses the same discovery as execution. `--all-home` expands discovery to the home
 directory while excluding personal/system folders. Roots run in order, with up
 to four concurrent repositories inside each root. Jobs sharing a Git common
 directory serialize; overlapping batch invocations refuse a busy repository.
 
-The default output shows one result per repository in traversal order, using
-names relative to the workspace. Failures include a concise reason and log filename;
-successful retries include the attempt count. During long waits, an occasional
-progress line names the active repositories. `--verbose` prints full Git logs
+The default output shows one live progress line per workspace in a terminal,
+with failures reported immediately using workspace-relative names. Successful
+repositories do not generate individual rows. Green marks success, red marks
+failure, and yellow marks skipped worktrees or cancellation; `NO_COLOR`,
+`TERM=dumb`, and redirected output disable colors. Redirected output uses plain
+progress lines only when the completed count changes, plus one wait notice per
+slow active repository. `--verbose` prints full Git logs in traversal order
 after each workspace. All attempts are retained in each repository log,
-with a final summary and `results.json`
+with a final summary, `results.json`, and `excluded-worktrees.json`
 in the printed temporary log directory. Logs may contain private remote URLs;
 the directory is private to the current user and remains until cleaned up.
 

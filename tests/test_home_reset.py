@@ -17,7 +17,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "zsh"))
 from repo_batch import Job, Result, Supervisor
-from batch_output import BatchOutput
+from batch_output import BatchOutput, color
 from home_reset import discover, failure_reason, retryable
 
 
@@ -229,31 +229,69 @@ runpy.run_path({str(ROOT / 'zsh/home_reset.py')!r}, run_name='__main__')
 
 
 class OutputTests(unittest.TestCase):
-    def test_results_remain_ordered_and_errors_visible(self):
+    def test_failure_is_immediate_while_earlier_job_is_pending(self):
         stream = io.StringIO()
         with BatchOutput(['first', 'second'], str, lambda r: 'Access denied.', stream) as output:
             output.completed(Result('second', 1, 1, 0, Path('0002.log')))
-            self.assertEqual(stream.getvalue(), '')
+            self.assertIn('failed: second', stream.getvalue())
+            self.assertIn('Access denied.', stream.getvalue())
             output.completed(Result('first', 0, 3, 0, Path('0001.log')))
         text = stream.getvalue()
-        self.assertLess(text.index('first'), text.index('second'))
-        self.assertIn('first (3 attempts)', text)
-        self.assertIn('failed', text)
-        self.assertIn('Access denied.', text)
-        self.assertIn('Log: 0002.log', text)
+        self.assertIn('2/2 complete, 1 failed', text)
+        self.assertNotIn('first', text)
+        self.assertNotIn('Log:', text)
 
-    def test_long_wait_reports_active_names_without_startup_chatter(self):
+    def test_pipeline_does_not_repeat_unchanged_progress(self):
         stream = io.StringIO()
-        with BatchOutput(['first'], str, str, stream, interval=.05) as output:
-            output.progress(Job('first', Path('.'), (), Path('.')), 1, 'RUNNING')
-            self.assertEqual(stream.getvalue(), '')
+        with BatchOutput(['first', 'second'], str, str, stream, interval=.03) as output:
+            output.progress(Job('second', Path('.'), (), Path('.')), 1, 'RUNNING')
+            output.completed(Result('first', 0, 1, 0, Path('0001.log')))
             deadline = time.monotonic() + 2
-            while 'Waiting for: first' not in stream.getvalue() and time.monotonic() < deadline:
+            while 'Waiting for second' not in stream.getvalue() and time.monotonic() < deadline:
                 time.sleep(.01)
-        self.assertIn('Progress: 0/1 complete. Waiting for: first', stream.getvalue())
+            time.sleep(.1)
+            self.assertEqual(stream.getvalue().count('1/2 complete'), 1)
+            self.assertEqual(stream.getvalue().count('Waiting for second'), 1)
+            output.completed(Result('second', 0, 1, 0, Path('0002.log')))
+        self.assertIn('2/2 complete', stream.getvalue())
         before = stream.getvalue()
-        time.sleep(.1)
+        time.sleep(.05)
         self.assertEqual(stream.getvalue(), before)
+
+    def test_terminal_uses_one_progress_line_and_keeps_failure(self):
+        class Terminal(io.StringIO):
+            def isatty(self):
+                return True
+        stream = Terminal()
+        with patch.dict(os.environ, {'NO_COLOR': '1'}):
+            with BatchOutput(['first', 'second'], str, lambda r: 'Access denied.', stream) as output:
+                output.completed(Result('second', 1, 1, 0, Path('0002.log')))
+                output.completed(Result('first', 0, 1, 0, Path('0001.log')))
+        text = stream.getvalue()
+        self.assertIn('failed: second', text)
+        self.assertIn('2/2 complete, 1 failed', text)
+        self.assertEqual(text.count('\n'), 3)
+        self.assertNotIn('\x1b', text)
+
+    def test_color_respects_terminal_no_color_and_dumb(self):
+        class Terminal(io.StringIO):
+            def isatty(self):
+                return True
+        stream = Terminal()
+        with patch.dict(os.environ, {'TERM': 'xterm', 'NO_COLOR': ''}):
+            self.assertEqual(color('failed', 'red', stream), '\x1b[31mfailed\x1b[0m')
+            self.assertEqual(color('failed', 'red', io.StringIO()), 'failed')
+        for env in ({'NO_COLOR': '1', 'TERM': 'xterm'}, {'NO_COLOR': '', 'TERM': 'dumb'}):
+            with patch.dict(os.environ, env):
+                self.assertEqual(color('failed', 'red', stream), 'failed')
+
+    def test_bitbucket_reason_does_not_guess_between_access_and_missing_repo(self):
+        with tempfile.TemporaryDirectory() as root:
+            log = Path(root) / '0001.log'
+            log.write_text('Attempt 1/3\nYou may not have access to this repository or it no longer exists in this workspace.\nfatal: Could not read from remote repository.\nerror: fetch failed (exit 128); reset was not performed\n')
+            result = Result('repo', 128, 1, 0, log)
+            self.assertIn('repository unavailable or access denied', failure_reason(result))
+            self.assertFalse(retryable(log.read_text()))
 
     def test_failure_reason_uses_last_attempt_and_strips_terminal_color(self):
         with tempfile.TemporaryDirectory() as root:
@@ -422,7 +460,9 @@ os.execv({real_git!r},[{real_git!r},*sys.argv[1:]])
         # before reaching fetch. Verify the actual attempt budget and final code.
         self.assertIn("Attempt 1/2", result.stdout)
         self.assertIn("Attempt 2/2", result.stdout)
-        self.assertIn("2 attempts", result.stdout)
+        logs = Path(result.stdout.split('Logs: ', 1)[1].strip())
+        record = json.loads((logs / 'results.json').read_text())[0]
+        self.assertEqual((record['attempts'], record['code']), (2, 124))
         self.assertIn("exit=124", result.stdout)
         self.assertEqual(self.git(self.repo, "rev-parse", "HEAD"), self.old)
 
@@ -470,6 +510,45 @@ os.execv({real_git!r},[{real_git!r},*sys.argv[1:]])
         result = subprocess.run([sys.executable, str(ROOT / "zsh/home_reset.py"), "--list"], env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertEqual(len(result.stdout.splitlines()), 1)
+
+    def test_linked_worktrees_are_excluded_before_fetch_and_preserved(self):
+        self.git(self.repo, 'branch', 'feature')
+        linked = self.workspace / '0 linked worktree'
+        self.git(self.repo, 'worktree', 'add', str(linked), 'feature')
+        (linked / 'file').write_text('precious linked edits\n')
+        excluded = set()
+        found = discover(self.workspace, True, False, excluded)
+        self.assertEqual([path for path, common in found], [self.repo.resolve()])
+        self.assertEqual(excluded, {linked.resolve()})
+        preview = self.run_home('--list')
+        self.assertEqual(preview.returncode, 0, preview.stdout)
+        self.assertNotIn('0 linked worktree', preview.stdout)
+        result = self.run_home()
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn('Skipped 1 linked worktree', result.stdout)
+        self.assertIn('1/1 complete', result.stdout)
+        self.assertEqual(self.git(self.repo, 'rev-parse', 'HEAD'), self.new)
+        self.assertEqual(self.git(linked, 'rev-parse', 'HEAD'), self.old)
+        self.assertEqual((linked / 'file').read_text(), 'precious linked edits\n')
+        logs = Path(result.stdout.split('Logs: ', 1)[1].strip())
+        self.assertEqual(json.loads((logs / 'excluded-worktrees.json').read_text()), [str(linked.resolve())])
+        only_linked = self.run_home('--root', str(linked))
+        self.assertEqual(only_linked.returncode, 0, only_linked.stdout)
+        self.assertIn('No repositories to reset', only_linked.stdout)
+        self.assertEqual((linked / 'file').read_text(), 'precious linked edits\n')
+
+    def test_separate_git_directory_is_not_mistaken_for_linked_worktree(self):
+        separate = self.workspace / 'separate'
+        separate.mkdir()
+        metadata = self.root / 'separate-metadata'
+        self.git(separate, 'init', '-b', 'main', '--separate-git-dir', str(metadata))
+        (separate / 'file').write_text('normal primary checkout\n')
+        self.git(separate, 'add', '.')
+        self.git(separate, 'commit', '-m', 'initial')
+        excluded = set()
+        found = discover(self.workspace, True, False, excluded)
+        self.assertIn((separate.resolve(), metadata.resolve()), found)
+        self.assertFalse(excluded)
 
     def test_discovery_groups_symlinks_and_preview_match(self):
         group = self.workspace / "group"
@@ -565,7 +644,8 @@ os.execv({real_git!r},[{real_git!r},*sys.argv[1:]])
     def test_default_output_is_short_and_full_logs_remain_available(self):
         result = self.run_home()
         self.assertEqual(result.returncode, 0, result.stdout)
-        self.assertRegex(result.stdout, r'1/1\s+ok\s+a repo')
+        self.assertIn('1/1 complete', result.stdout)
+        self.assertNotIn('a repo', result.stdout)
         self.assertNotIn('RUNNING', result.stdout)
         self.assertNotIn('Attempt 1/3', result.stdout)
         self.assertNotIn(str(self.repo), result.stdout)
