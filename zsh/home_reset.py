@@ -11,10 +11,10 @@ import signal
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 
 from repo_batch import Job, Supervisor
+from batch_output import BatchOutput, duration
 
 
 PRUNE = {"node_modules", ".venv", "venv", "target", "dist", "build", ".next", ".turbo", ".gradle", ".git"}
@@ -109,6 +109,32 @@ def display(value, multiline=False):
     return "".join(c if (multiline and c == "\n") or c.isprintable() else f"\\x{ord(c):02x}" for c in value)
 
 
+def short_path(path, root=None):
+    path = Path(path)
+    if root is not None:
+        relative = path.relative_to(root)
+        return display(relative if relative != Path(".") else path.name)
+    try:
+        return "~/" + display(path.relative_to(Path.home()))
+    except ValueError:
+        return display(path)
+
+
+def failure_reason(result):
+    if result.code == 124:
+        return "Timed out."
+    log = result.log.read_text(errors="replace")
+    latest = re.split(r"(?m)^Attempt \d+/\d+\n", log)[-1]
+    lines = [display(line, multiline=True).strip() for line in latest.splitlines() if line.strip()]
+    meaningful = [line for line in lines if not line.startswith("error: fetch failed")]
+    errors = [line for line in meaningful if re.search(r"fatal:|error:|Error:|denied|cannot lock|Worker failure|Repository is busy", line, re.I)]
+    reason = (errors or meaningful or lines or [f"Command failed (exit {result.code})."])[0]
+    if "would discard local changes" in reason or "Tracked changes or a dirty submodule" in reason:
+        return "Tracked files have local changes; left unchanged."
+    reason = re.sub(r"^(?:fatal|error):\s*", "", reason, flags=re.I)
+    return reason[:197] + "..." if len(reason) > 200 else reason
+
+
 def positive(value):
     n = int(value)
     if n < 1:
@@ -148,6 +174,7 @@ def main(argv=None):
     parser.add_argument("--all-home", action="store_true")
     parser.add_argument("--include-nested", action="store_true")
     parser.add_argument("--list", action="store_true")
+    parser.add_argument("--verbose", action="store_true", help="print full Git logs after each workspace")
     if "--" in argv:
         split = argv.index("--")
         options, forwarded = argv[:split], argv[split + 1:]
@@ -194,40 +221,42 @@ def main(argv=None):
     log_dir = Path(tempfile.mkdtemp(prefix="home-reset-"))
     source = Path(__file__).with_name("git-functions.zsh")
     env = dict(os.environ, HOME_RESET_SUPERVISED="1", GIT_TERMINAL_PROMPT="0", GCM_INTERACTIVE="Never", NO_COLOR="1", TERM="dumb")
-    output_guard = threading.Lock()
-    def progress(job, attempt, message):
-        with output_guard:
-            print(f"{message}: {display(job.name)} | attempt {attempt}/{max(1, args.retries)}", flush=True)
-    supervisor = Supervisor(args.jobs, max(1, args.retries), args.timeout, args.retry_delay, log_dir, retryable, env, progress)
+    supervisor = Supervisor(args.jobs, max(1, args.retries), args.timeout, args.retry_delay, log_dir, retryable, env)
     def stop(signum, frame):
         supervisor.cancel()
     previous = {s: signal.signal(s, stop) for s in (signal.SIGINT, signal.SIGTERM)}
     all_results = []
     started = time.monotonic()
-    print(f"Resetting {total} repositories; workers={args.jobs}, attempts={max(1, args.retries)}, deadline={args.timeout}s/attempt.", flush=True)
-    print(f"Branches/worktrees preserved. Logs: {log_dir}", flush=True)
+    print(f"Resetting {total} repositories with {args.jobs} workers.", flush=True)
     try:
         for root, entries in discovered:
-            print(f"\nWorkspace: {display(root)} ({len(entries)} repositories)", flush=True)
+            if not entries:
+                continue
+            print(f"\n{short_path(root)} ({len(entries)} repositories)", flush=True)
             jobs = [Job(str(path), path, ("zsh", "-f", "-c", 'source "$1"; shift; _reset_to_remote_default_single "$@" --sync --no-prune', "home-reset", str(source), *forwarded), common) for path, common in entries]
-            done = 0
-            def completed(result):
-                nonlocal done
-                done += 1
-                label = "OK" if result.code == 0 else "CANCELLED" if result.code == 130 else "FAILED"
-                with output_guard:
-                    print(f"[{done}/{len(jobs)} finished] {label}: {display(result.name)} ({result.attempts} attempts, {result.seconds:.1f}s)", flush=True)
-            results = supervisor.batch(jobs, completed)
+            with BatchOutput([job.name for job in jobs], lambda name: short_path(name, root), failure_reason) as output:
+                supervisor.progress = output.progress
+                results = supervisor.batch(jobs, output.completed)
             all_results.extend(results)
-            for result in results:
-                print(f"\n--- {display(result.name)} | exit={result.code} | log={result.log} ---")
-                print(display(result.log.read_text(errors="replace"), multiline=True), end="", flush=True)
+            if args.verbose:
+                for result in results:
+                    print(f"\n--- {display(result.name)} | exit={result.code} | log={result.log} ---")
+                    print(display(result.log.read_text(errors="replace"), multiline=True), end="", flush=True)
         record = [dict(name=r.name, code=r.code, attempts=r.attempts, seconds=r.seconds, log=str(r.log)) for r in all_results]
         (log_dir / "results.json").write_text(json.dumps(record, indent=2))
         ok = sum(r.code == 0 for r in all_results)
         recovered = sum(r.code == 0 and r.attempts > 1 for r in all_results)
-        print(f"\nSummary: {len(all_results)} total | {ok} OK ({recovered} recovered) | {len(all_results) - ok} failed/cancelled | {time.monotonic() - started:.1f}s")
-        print(f"Full logs and results: {log_dir}")
+        failed = sum(r.code not in (0, 130) for r in all_results)
+        cancelled = sum(r.code == 130 for r in all_results)
+        counts = [f"{ok} succeeded"]
+        if failed:
+            counts.append(f"{failed} failed")
+        if cancelled:
+            counts.append(f"{cancelled} cancelled")
+        print(f"\nFinished in {duration(time.monotonic() - started)}: {', '.join(counts)}.")
+        if recovered:
+            print(f"{recovered} recovered after retry.")
+        print(f"Logs: {log_dir}")
         return 130 if supervisor.cancelled.is_set() else int(ok != len(all_results))
     finally:
         for s, handler in previous.items():

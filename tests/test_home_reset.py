@@ -1,4 +1,5 @@
 import concurrent.futures
+import io
 import json
 import os
 from pathlib import Path
@@ -15,8 +16,9 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "zsh"))
-from repo_batch import Job, Supervisor
-from home_reset import discover, retryable
+from repo_batch import Job, Result, Supervisor
+from batch_output import BatchOutput
+from home_reset import discover, failure_reason, retryable
 
 
 def command(cwd, *args, env=None):
@@ -226,6 +228,40 @@ runpy.run_path({str(ROOT / 'zsh/home_reset.py')!r}, run_name='__main__')
             self.assertEqual(result.attempts, 2 if i % 3 == 1 else 1)
 
 
+class OutputTests(unittest.TestCase):
+    def test_results_remain_ordered_and_errors_visible(self):
+        stream = io.StringIO()
+        with BatchOutput(['first', 'second'], str, lambda r: 'Access denied.', stream) as output:
+            output.completed(Result('second', 1, 1, 0, Path('0002.log')))
+            self.assertEqual(stream.getvalue(), '')
+            output.completed(Result('first', 0, 3, 0, Path('0001.log')))
+        text = stream.getvalue()
+        self.assertLess(text.index('first'), text.index('second'))
+        self.assertIn('first (3 attempts)', text)
+        self.assertIn('failed', text)
+        self.assertIn('Access denied.', text)
+        self.assertIn('Log: 0002.log', text)
+
+    def test_long_wait_reports_active_names_without_startup_chatter(self):
+        stream = io.StringIO()
+        with BatchOutput(['first'], str, str, stream, interval=.05) as output:
+            output.progress(Job('first', Path('.'), (), Path('.')), 1, 'RUNNING')
+            self.assertEqual(stream.getvalue(), '')
+            deadline = time.monotonic() + 2
+            while 'Waiting for: first' not in stream.getvalue() and time.monotonic() < deadline:
+                time.sleep(.01)
+        self.assertIn('Progress: 0/1 complete. Waiting for: first', stream.getvalue())
+        before = stream.getvalue()
+        time.sleep(.1)
+        self.assertEqual(stream.getvalue(), before)
+
+    def test_failure_reason_uses_last_attempt_and_strips_terminal_color(self):
+        with tempfile.TemporaryDirectory() as root:
+            log = Path(root) / '0001.log'
+            log.write_text('Attempt 1/2\nConnection reset\nAttempt 2/2\n\033[31mPermission denied (publickey)\033[0m\nerror: fetch failed (exit 1); reset was not performed\n')
+            self.assertEqual(failure_reason(Result('repo', 1, 2, 0, log)), 'Permission denied (publickey)')
+
+
 class GitTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -380,7 +416,7 @@ os.execv({real_git!r},[{real_git!r},*sys.argv[1:]])
         self.assertNotIn("continuing", result.stdout)
 
     def test_real_fetch_timeout(self):
-        result = self.run_home("--timeout", "1", "--retries", "2", env=self.shim("hang"))
+        result = self.run_home("--verbose", "--timeout", "1", "--retries", "2", env=self.shim("hang"))
         self.assertEqual(result.returncode, 1, result.stdout)
         # The deadline includes startup/preflight; a loaded attempt can expire
         # before reaching fetch. Verify the actual attempt budget and final code.
@@ -402,7 +438,7 @@ os.execv({real_git!r},[{real_git!r},*sys.argv[1:]])
             process.send_signal(signal.SIGINT)
             output, _ = process.communicate(timeout=5)
             self.assertEqual(process.returncode, 130, output)
-            self.assertIn("CANCELLED", output)
+            self.assertIn("cancelled", output)
             with self.assertRaises(ProcessLookupError):
                 os.kill(int(marker.read_text()), 0)
             self.assertEqual(self.git(self.repo, "rev-parse", "HEAD"), self.old)
@@ -447,7 +483,7 @@ os.execv({real_git!r},[{real_git!r},*sys.argv[1:]])
         self.assertEqual(len(preview.stdout.splitlines()), 2)
         result = self.run_home()
         self.assertEqual(result.returncode, 0, result.stdout)
-        self.assertIn("2 total | 2 OK", result.stdout)
+        self.assertIn("2 succeeded", result.stdout)
 
     def test_submodule_worktree_is_not_recursively_reset(self):
         self.git(self.seed, "-c", "protocol.file.allow=always", "submodule", "add", str(self.origin), "module")
@@ -513,7 +549,7 @@ os.execv({real_git!r},[{real_git!r},*sys.argv[1:]])
         self.assertEqual((linked / "uncommitted").read_text(), "keep")
         backups = self.git(self.repo, "for-each-ref", "--format=%(objectname)", "refs/home-reset-backups")
         self.assertIn(self.old, backups)
-        self.assertIn("1 total | 1 OK", result.stdout)
+        self.assertIn("1 succeeded", result.stdout)
         self.assertNotIn("\x1b", result.stdout)
 
     def test_dirty_repo_fails_while_others_finish(self):
@@ -524,7 +560,23 @@ os.execv({real_git!r},[{real_git!r},*sys.argv[1:]])
         self.assertEqual((self.repo / "file").read_text(), "local changes")
         self.assertEqual(self.git(self.repo, "rev-parse", "HEAD"), self.old)
         self.assertEqual(self.git(other, "rev-parse", "HEAD"), self.new)
-        self.assertIn("1 failed/cancelled", result.stdout)
+        self.assertIn("1 succeeded, 1 failed", result.stdout)
+
+    def test_default_output_is_short_and_full_logs_remain_available(self):
+        result = self.run_home()
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertRegex(result.stdout, r'1/1\s+ok\s+a repo')
+        self.assertNotIn('RUNNING', result.stdout)
+        self.assertNotIn('Attempt 1/3', result.stdout)
+        self.assertNotIn(str(self.repo), result.stdout)
+        self.assertNotIn('HEAD is now', result.stdout)
+        directory = Path(result.stdout.split('Logs: ', 1)[1].strip())
+        self.assertIn('HEAD is now', (directory / '0001.log').read_text())
+        self.assertEqual(json.loads((directory / 'results.json').read_text())[0]['code'], 0)
+        verbose = self.run_home('--verbose')
+        self.assertEqual(verbose.returncode, 0, verbose.stdout)
+        self.assertIn('Attempt 1/3', verbose.stdout)
+        self.assertIn('HEAD is now', verbose.stdout)
 
     def test_untracked_and_ignored_collisions_refused(self):
         for ignored in (False, True):

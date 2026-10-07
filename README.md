@@ -23,9 +23,12 @@ directory while excluding personal/system folders. Roots run in order, with up
 to four concurrent repositories inside each root. Jobs sharing a Git common
 directory serialize; overlapping batch invocations refuse a busy repository.
 
-Completed repositories get an immediate `OK`, `FAILED`, or `CANCELLED` status.
-Full logs print in traversal order after each root finishes. All attempts are
-retained in each repository log, with a final summary and `results.json`
+The default output shows one result per repository in traversal order, using
+names relative to the workspace. Failures include a concise reason and log filename;
+successful retries include the attempt count. During long waits, an occasional
+progress line names the active repositories. `--verbose` prints full Git logs
+after each workspace. All attempts are retained in each repository log,
+with a final summary and `results.json`
 in the printed temporary log directory. Logs may contain private remote URLs;
 the directory is private to the current user and remains until cleaned up.
 
