@@ -29,12 +29,13 @@ def quantity(count, singular, plural=None):
 
 
 class BatchOutput:
-    def __init__(self, names, name, failure, stream=None, interval=15, on_error=None):
+    def __init__(self, names, name, failure, stream=None, interval=15, on_error=None, notice=None):
         self.names = names
         self.name = name
         self.failure = failure
         self.stream = stream if stream is not None else sys.stdout
         self.interval = interval
+        self.notice = notice or (lambda result: "")
         self.on_error = on_error or (lambda: None)
         self.error = None
         self.guard = threading.Lock()
@@ -69,6 +70,13 @@ class BatchOutput:
                 raise self.error
             self.active.pop(result.name, None)
             self.results[result.name] = result
+            notice = self.notice(result)
+            if notice:
+                self.write("")
+                self.write("  " + color("Warning:", "yellow", self.stream) + " " + self.name(result.name))
+                for line in textwrap.wrap(notice, max(20, shutil.get_terminal_size().columns - 4), break_long_words=False, break_on_hyphens=False):
+                    self.write("    " + line)
+                self.write("")
             if result.code not in (0, 130):
                 self.write("")
                 self.write("  " + color("Failed:", "red", self.stream) + " " + self.name(result.name))

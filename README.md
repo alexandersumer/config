@@ -255,3 +255,22 @@ The executable-file check should print only:
 ```
 
 `.githooks/pre-commit` delegates to Rust and should contain no config-tool logic beyond `cargo run -- pre-commit`.
+
+## Resetting workspace repositories
+
+`home_reset_to_origin` processes canonical repositories with four supervised workers, preserving linked worktrees and local branches. Use `--list` to inspect discovery without resetting anything. Fetch failures stop that repository before reset.
+
+For remote branch names that differ only by case on a case-insensitive filesystem, use:
+
+```bash
+home_reset_to_origin --root ~/atlassian/convo-ai --resolve-case-conflicts
+```
+
+Recovery changes only the checkout's Git configuration and remote-tracking references. It keeps the remote default branch, an explicitly requested target, local branch names, and local upstream dependencies. It refuses recovery when multiple colliding branches are protected or the fetch mapping is customized. Otherwise it keeps the lowercase spelling when available and excludes the other spellings with exact negative fetch refspecs. Existing tracking tips are saved under `refs/home-reset-backups/case-conflicts/` before removal. Remote branches and linked worktree contents are untouched. Recovery is unnecessary on case-sensitive filesystems or with reftable storage; tag collisions still require manual repair.
+
+Exclusions persist for ordinary future fetches. Every run reports them as warnings and records them in `results.json`; the final status distinguishes completion with fetch exclusions from unrestricted completion. To undo one exclusion after its remote collision is resolved:
+
+```bash
+git -C ~/atlassian/convo-ai config --local --fixed-value --unset-all remote.origin.fetch '^refs/heads/EXCLUDED_BRANCH'
+git -C ~/atlassian/convo-ai fetch --prune origin
+```

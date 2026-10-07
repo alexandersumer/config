@@ -205,6 +205,7 @@ function _reset_to_remote_default_single() {
     local -a fetch_cmd=(git fetch)
     if [[ "${HOME_RESET_SUPERVISED:-}" == 1 ]]; then
         fetch_cmd=(git -c maintenance.auto=false -c gc.auto=0 fetch)
+        command python3 "$_HOME_RESET_HELPER_DIR/fetch_policy.py" "$remote" "$branch" || return $?
     fi
 
     if (( sync_fetch )); then

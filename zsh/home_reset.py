@@ -127,6 +127,15 @@ def short_path(path, root=None):
         return display(path)
 
 
+def fetch_exclusions(result):
+    return sorted(set(re.findall(r"(?m)^Fetch exclusion: (.+)$", result.log.read_text(errors="replace"))))
+
+
+def exclusion_notice(result):
+    excluded = fetch_exclusions(result)
+    return "Fetch excludes " + ", ".join(display(ref) for ref in excluded) + "." if excluded else ""
+
+
 def failure_reason(result):
     if result.code == 124:
         return f"Timed out after {quantity(result.attempts, 'attempt')}. See the log for the operation that exceeded its deadline."
@@ -135,7 +144,7 @@ def failure_reason(result):
     lines = [display(line, multiline=True).strip() for line in latest.splitlines() if line.strip()]
     meaningful = [line for line in lines if not line.startswith("error: fetch failed")]
     if any("case-insensitive filesystem" in line for line in meaningful):
-        return "Remote refs differ only by case on this case-insensitive filesystem. Fetch failed; reset was not performed."
+        return "Remote refs differ only by case on this case-insensitive filesystem. Fetch failed; reset was not performed. Use --resolve-case-conflicts to exclude unused colliding branches locally."
     if any("You may not have access to this repository or it no longer exists" in line for line in meaningful):
         return "Fetch failed: Bitbucket repository unavailable or access denied. Check the origin URL and your repository access. Reset was not performed."
     errors = [line for line in meaningful if re.search(r"fatal:|error:|Error:|denied|cannot lock|Worker failure|Repository is busy", line, re.I)]
@@ -187,6 +196,7 @@ def main(argv=None):
     parser.add_argument("--all-home", action="store_true")
     parser.add_argument("--include-nested", action="store_true")
     parser.add_argument("--list", action="store_true")
+    parser.add_argument("--resolve-case-conflicts", action="store_true", help="persist local fetch exclusions for colliding branches not needed by local work; never changes remote branches")
     parser.add_argument("--verbose", action="store_true", help="print full Git logs after each workspace")
     if "--" in argv:
         split = argv.index("--")
@@ -235,7 +245,7 @@ def main(argv=None):
         return 0
     log_dir = Path(tempfile.mkdtemp(prefix="home-reset-"))
     source = Path(__file__).with_name("git-functions.zsh")
-    env = dict(os.environ, HOME_RESET_SUPERVISED="1", GIT_TERMINAL_PROMPT="0", GCM_INTERACTIVE="Never", NO_COLOR="1", TERM="dumb")
+    env = dict(os.environ, HOME_RESET_RESOLVE_CASE_CONFLICTS="1" if args.resolve_case_conflicts else "0", HOME_RESET_SUPERVISED="1", GIT_TERMINAL_PROMPT="0", GCM_INTERACTIVE="Never", NO_COLOR="1", TERM="dumb")
     supervisor = Supervisor(args.jobs, max(1, args.retries), args.timeout, args.retry_delay, log_dir, retryable, env)
     def stop(signum, frame):
         supervisor.cancel()
@@ -251,7 +261,7 @@ def main(argv=None):
                 continue
             print(f"\n{short_path(root)} ({quantity(len(entries), 'repository', 'repositories')})", flush=True)
             jobs = [Job(str(path), path, ("zsh", "-f", "-c", 'source "$1"; shift; _reset_to_remote_default_single "$@" --sync --no-prune', "home-reset", str(source), *forwarded), common) for path, common in entries]
-            with BatchOutput([job.name for job in jobs], lambda name: short_path(name, root), failure_reason, on_error=supervisor.cancel) as output:
+            with BatchOutput([job.name for job in jobs], lambda name: short_path(name, root), failure_reason, on_error=supervisor.cancel, notice=exclusion_notice) as output:
                 supervisor.progress = output.progress
                 results = supervisor.batch(jobs, output.completed)
             all_results.extend(results)
@@ -259,7 +269,7 @@ def main(argv=None):
                 for result in results:
                     print(f"\n--- {display(result.name)} | exit={result.code} | log={result.log} ---")
                     print(display(result.log.read_text(errors="replace"), multiline=True), end="", flush=True)
-        record = [dict(name=r.name, code=r.code, attempts=r.attempts, seconds=r.seconds, log=str(r.log)) for r in all_results]
+        record = [dict(name=r.name, code=r.code, attempts=r.attempts, seconds=r.seconds, log=str(r.log), fetch_exclusions=fetch_exclusions(r)) for r in all_results]
         (log_dir / "results.json").write_text(json.dumps(record, indent=2))
         (log_dir / "excluded-worktrees.json").write_text(json.dumps([str(p) for p in sorted(excluded)], indent=2))
         ok = sum(r.code == 0 for r in all_results)
@@ -271,7 +281,10 @@ def main(argv=None):
             counts.append(color(f"{failed} failed", "red"))
         if cancelled:
             counts.append(color(f"{cancelled} cancelled", "yellow"))
-        outcome = "Interrupted" if cancelled else "Completed with failures" if failed else "Completed"
+        excluded_repos = sum(bool(fetch_exclusions(r)) for r in all_results)
+        if excluded_repos:
+            counts.append(color(quantity(excluded_repos, "repository with fetch exclusions", "repositories with fetch exclusions"), "yellow"))
+        outcome = "Interrupted" if cancelled else "Completed with failures" if failed else "Completed with fetch exclusions" if excluded_repos else "Completed"
         print(f"\n{outcome} in {duration(time.monotonic() - started)}: {', '.join(counts)}.")
         if recovered:
             print(f"{recovered} recovered after retry.")

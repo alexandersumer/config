@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT / "zsh"))
 from repo_batch import Job, Result, Supervisor
 from batch_output import BatchOutput, color
 from home_reset import discover, failure_reason, retryable
+from fetch_policy import collision_exclusions, needs_case_recovery
 
 
 def command(cwd, *args, env=None):
@@ -281,6 +282,22 @@ runpy.run_path({str(ROOT / 'zsh/home_reset.py')!r}, run_name='__main__')
             self.assertEqual(result.attempts, 2 if i % 3 == 1 else 1)
 
 
+class FetchPolicyTests(unittest.TestCase):
+    def test_collision_choice_is_deterministic_and_protects_local_dependencies(self):
+        names = ['NOISSUE/topic', 'noissue/topic', 'Main', 'main']
+        self.assertEqual(collision_exclusions(names, {'Main'}), ['NOISSUE/topic', 'main'])
+        self.assertEqual(collision_exclusions(list(reversed(names)), {'Main'}), ['NOISSUE/topic', 'main'])
+        self.assertEqual(collision_exclusions(['Branch', 'branch'], {'Branch'}), ['branch'])
+
+    def test_reftable_never_needs_case_recovery(self):
+        with patch('fetch_policy.git', return_value=['reftable']):
+            self.assertFalse(needs_case_recovery())
+
+    def test_multiple_protected_branches_refuse_entire_plan(self):
+        with self.assertRaisesRegex(ValueError, 'multiple protected'):
+            collision_exclusions(['Topic', 'topic'], {'Topic', 'topic'})
+
+
 class OutputTests(unittest.TestCase):
     def test_failure_is_immediate_while_earlier_job_is_pending(self):
         stream = io.StringIO()
@@ -394,7 +411,8 @@ class OutputTests(unittest.TestCase):
             log = Path(root) / '0001.log'
             log.write_text("Attempt 1/1\nerror: You're on a case-insensitive filesystem, and the remote you are\ntrying to fetch from has references that only differ in casing.\nerror: fetch failed (exit 1); reset was not performed\n")
             result = Result('repo', 1, 1, 0, log)
-            self.assertEqual(failure_reason(result), 'Remote refs differ only by case on this case-insensitive filesystem. Fetch failed; reset was not performed.')
+            self.assertIn('Fetch failed; reset was not performed.', failure_reason(result))
+            self.assertIn('--resolve-case-conflicts', failure_reason(result))
             self.assertFalse(retryable(log.read_text()))
 
 
@@ -770,6 +788,93 @@ runpy.run_path({str(ROOT / 'zsh/home_reset.py')!r}, run_name='__main__')
         self.assertEqual(self.git(self.repo, "rev-parse", "HEAD"), self.old)
         self.assertEqual(self.git(other, "rev-parse", "HEAD"), self.new)
         self.assertIn("1 succeeded, 1 failed", result.stdout)
+
+    def case_collision(self):
+        self.git(self.origin, 'update-ref', 'refs/heads/NOISSUE/topic', self.old)
+        self.git(self.origin, 'pack-refs', '--all')
+        self.git(self.origin, 'update-ref', 'refs/heads/noissue/topic', self.new)
+        self.git(self.origin, 'pack-refs', '--all')
+        refs = self.git(self.origin, 'for-each-ref', '--format=%(refname)', 'refs/heads')
+        self.assertIn('refs/heads/NOISSUE/topic', refs)
+        self.assertIn('refs/heads/noissue/topic', refs)
+
+    def test_case_recovery_is_opt_in_preserves_worktree_and_reports_exclusion(self):
+        self.case_collision()
+        failed = self.run_home()
+        self.assertNotEqual(failed.returncode, 0, failed.stdout)
+        self.assertEqual(self.git(self.repo, 'rev-parse', 'HEAD'), self.old)
+        self.assertIn('--resolve-case-conflicts', failed.stdout)
+        self.assertNotIn('^refs/heads/', self.git(self.repo, 'config', '--get-all', 'remote.origin.fetch'))
+        # Preserve an existing tracking tip and real unfinished linked work.
+        self.git(self.repo, 'update-ref', 'refs/remotes/origin/NOISSUE/topic', self.old)
+        linked = self.workspace / 'active worktree'
+        self.git(self.repo, 'worktree', 'add', '-b', 'unfinished', str(linked), self.old)
+        (linked / 'file').write_text('unfinished work')
+        (linked / 'untracked').write_text('keep')
+        result = self.run_home('--resolve-case-conflicts')
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(self.git(self.repo, 'rev-parse', 'HEAD'), self.new)
+        self.assertEqual(self.git(linked, 'rev-parse', 'HEAD'), self.old)
+        self.assertEqual((linked / 'file').read_text(), 'unfinished work')
+        self.assertEqual((linked / 'untracked').read_text(), 'keep')
+        self.assertEqual(self.git(self.origin, 'rev-parse', 'refs/heads/NOISSUE/topic'), self.old)
+        self.assertEqual(self.git(self.origin, 'rev-parse', 'refs/heads/noissue/topic'), self.new)
+        self.assertIn('Warning:', result.stdout)
+        self.assertIn('refs/heads/NOISSUE/topic', result.stdout)
+        self.assertIn('1 repository with fetch exclusions', result.stdout)
+        backups = self.git(self.repo, 'for-each-ref', '--format=%(objectname)', 'refs/home-reset-backups/case-conflicts')
+        self.assertIn(self.old, backups)
+        log_dir = Path(result.stdout.split('Logs: ', 1)[1].strip())
+        records = json.loads((log_dir / 'results.json').read_text())
+        self.assertEqual(records[0]['fetch_exclusions'], ['refs/heads/NOISSUE/topic'])
+        repeat = self.run_home('--resolve-case-conflicts')
+        self.assertEqual(repeat.returncode, 0, repeat.stdout)
+        self.assertEqual(self.git(self.repo, 'config', '--get-all', 'remote.origin.fetch').count('^refs/heads/NOISSUE/topic'), 1)
+        self.assertIn('Warning:', self.run_home().stdout)
+
+    def test_case_recovery_refuses_conflicting_local_dependencies(self):
+        self.case_collision()
+        self.git(self.repo, 'branch', 'NOISSUE/topic', self.old)
+        self.git(self.repo, 'branch', 'dependent', self.old)
+        self.git(self.repo, 'config', 'branch.dependent.remote', 'origin')
+        self.git(self.repo, 'config', 'branch.dependent.merge', 'refs/heads/noissue/topic')
+        before = self.git(self.repo, 'config', '--get-all', 'remote.origin.fetch')
+        result = self.run_home('--resolve-case-conflicts')
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn('multiple protected branches', result.stdout)
+        self.assertEqual(before, self.git(self.repo, 'config', '--get-all', 'remote.origin.fetch'))
+        self.assertEqual(self.git(self.repo, 'rev-parse', 'HEAD'), self.old)
+
+    def test_case_recovery_keeps_remote_default_branch(self):
+        self.git(self.origin, 'pack-refs', '--all')
+        self.git(self.origin, 'update-ref', 'refs/heads/MAIN', self.old)
+        self.git(self.origin, 'pack-refs', '--all')
+        result = self.run_home('--resolve-case-conflicts')
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(self.git(self.repo, 'rev-parse', 'HEAD'), self.new)
+        self.assertIn('^refs/heads/MAIN', self.git(self.repo, 'config', '--get-all', 'remote.origin.fetch'))
+        self.assertNotIn('^refs/heads/main', self.git(self.repo, 'config', '--get-all', 'remote.origin.fetch'))
+        self.assertIn('Completed with fetch exclusions', result.stdout)
+
+    def test_case_recovery_refuses_existing_exclusion_of_protected_branch(self):
+        self.case_collision()
+        self.git(self.repo, 'branch', 'NOISSUE/topic', self.old)
+        self.git(self.repo, 'config', '--add', 'remote.origin.fetch', '^refs/heads/NOISSUE/topic')
+        before = self.git(self.repo, 'config', '--get-all', 'remote.origin.fetch')
+        result = self.run_home('--resolve-case-conflicts')
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn('Protected branch already excluded', result.stdout)
+        self.assertEqual(before, self.git(self.repo, 'config', '--get-all', 'remote.origin.fetch'))
+        self.assertEqual(self.git(self.repo, 'rev-parse', 'HEAD'), self.old)
+
+    def test_case_recovery_refuses_custom_fetch_mapping(self):
+        self.git(self.repo, 'config', '--add', 'remote.origin.fetch', '+refs/heads/main:refs/remotes/alternate/main')
+        before = self.git(self.repo, 'config', '--get-all', 'remote.origin.fetch')
+        result = self.run_home('--resolve-case-conflicts')
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn('custom mappings were left unchanged', ' '.join(result.stdout.split()))
+        self.assertEqual(before, self.git(self.repo, 'config', '--get-all', 'remote.origin.fetch'))
+        self.assertEqual(self.git(self.repo, 'rev-parse', 'HEAD'), self.old)
 
     def test_default_output_is_short_and_full_logs_remain_available(self):
         result = self.run_home()
