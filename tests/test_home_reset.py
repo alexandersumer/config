@@ -130,6 +130,44 @@ class BatchTests(unittest.TestCase):
         self.assertEqual(result.code, 130, result.log.read_text())
         self.assertLess(time.monotonic() - start, 3)
 
+    def test_cancellation_before_spawn_never_starts_worker(self):
+        supervisor = self.supervisor()
+        supervisor.progress = lambda *args: supervisor.cancel()
+        job = self.job('cancel-before-spawn', 'raise RuntimeError("must not execute")')
+        with patch('repo_batch.subprocess.Popen', wraps=subprocess.Popen) as spawn:
+            result = supervisor.batch([job])[0]
+        spawn.assert_not_called()
+        self.assertEqual((result.code, result.attempts), (130, 0))
+
+    def test_cancellation_waits_for_inflight_spawn_before_returning(self):
+        supervisor = self.supervisor()
+        job = self.job('inflight-spawn', 'import time; time.sleep(20)')
+        entered, resume, cancelling, finished = (threading.Event() for _ in range(4))
+        real_spawn = subprocess.Popen
+        def launch(*args, **kwargs):
+            entered.set()
+            if not resume.wait(2):
+                raise RuntimeError('spawn fixture was not released')
+            return real_spawn(*args, **kwargs)
+        def cancel():
+            cancelling.set()
+            supervisor.cancel()
+            finished.set()
+        with patch('repo_batch.subprocess.Popen', side_effect=launch):
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+                running = pool.submit(supervisor.batch, [job])
+                try:
+                    self.assertTrue(entered.wait(2))
+                    cancellation = pool.submit(cancel)
+                    self.assertTrue(cancelling.wait(2))
+                    self.assertFalse(finished.wait(.05))
+                finally:
+                    resume.set()
+                    supervisor.cancel()
+                cancellation.result(timeout=2)
+                result = running.result(timeout=3)[0]
+        self.assertEqual(result.code, 130, result.log.read_text())
+
     def test_sigterm_resistant_worker_is_killed(self):
         job = self.job("resistant", "import signal,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); time.sleep(20)")
         start = time.monotonic()

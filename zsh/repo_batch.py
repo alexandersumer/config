@@ -54,7 +54,8 @@ class Supervisor:
         process.wait()
 
     def cancel(self):
-        self.cancelled.set()
+        with self.guard:
+            self.cancelled.set()
 
     def run(self, index, job):
         started = time.monotonic()
@@ -76,16 +77,20 @@ class Supervisor:
                         output.write("Repository is busy in another batch invocation.\n")
                         return Result(job.name, 75, 0, time.monotonic() - started, log)
                     while attempts < self.attempts and not self.cancelled.is_set():
-                        attempts += 1
-                        self.progress(job, attempts, "RUNNING")
-                        output.write(f"Attempt {attempts}/{self.attempts}\n")
-                        output.flush()
-                        offset = output.tell()
-                        process = subprocess.Popen(
-                            job.command, cwd=job.cwd, env=self.env, stdin=subprocess.DEVNULL,
-                            stdout=output, stderr=subprocess.STDOUT, start_new_session=True,
-                            pass_fds=(lock.fileno(),),
-                        )
+                        self.progress(job, attempts + 1, "RUNNING")
+                        # Cancellation and launch have a single ordering point.
+                        with self.guard:
+                            if self.cancelled.is_set():
+                                break
+                            attempts += 1
+                            output.write(f"Attempt {attempts}/{self.attempts}\n")
+                            output.flush()
+                            offset = output.tell()
+                            process = subprocess.Popen(
+                                job.command, cwd=job.cwd, env=self.env, stdin=subprocess.DEVNULL,
+                                stdout=output, stderr=subprocess.STDOUT, start_new_session=True,
+                                pass_fds=(lock.fileno(),),
+                            )
                         deadline = time.monotonic() + self.timeout
                         try:
                             while process.poll() is None:
