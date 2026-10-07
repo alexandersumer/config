@@ -260,17 +260,17 @@ The executable-file check should print only:
 
 `home_reset_to_origin` processes canonical repositories with four supervised workers, preserving linked worktrees and local branches. Use `--list` to inspect discovery without resetting anything. Fetch failures stop that repository before reset.
 
-For remote branch names that differ only by case on a case-insensitive filesystem, use:
+Safe recovery of remote branch case collisions is automatic for every repository. Run:
 
 ```bash
-home_reset_to_origin --root ~/atlassian/convo-ai --resolve-case-conflicts
+home_reset_to_origin
 ```
 
-Recovery changes only the checkout's Git configuration and remote-tracking references. It keeps the remote default branch, an explicitly requested target, local branch names, and local upstream dependencies. It refuses recovery when multiple colliding branches are protected or the fetch mapping is customized. Otherwise it keeps the lowercase spelling when available and excludes the other spellings with exact negative fetch refspecs. Existing tracking tips are saved under `refs/home-reset-backups/case-conflicts/` before removal. Remote branches and linked worktree contents are untouched. Recovery is unnecessary on case-sensitive filesystems or with reftable storage; tag collisions still require manual repair.
+A normal fetch runs first. Git errors and the fetched branch list are checked for case collisions; recovery allows one repeat fetch. Healthy repositories need no extra network probe. Use `--no-resolve-case-conflicts` to disable recovery. Recovery changes only the checkout's Git configuration and remote-tracking references. It keeps the remote default branch, an explicitly requested target, local branch names, and local upstream dependencies. It refuses recovery when multiple colliding branches are protected or the fetch mapping is customized. Otherwise it keeps the lowercase spelling when available and excludes the other spellings with exact negative fetch refspecs. Existing tracking tips are saved under `refs/home-reset-backups/case-conflicts/` before removal. Remote branches and linked worktree contents are untouched. Recovery is unnecessary on case-sensitive filesystems or with reftable storage; tag collisions still require manual repair.
 
 Exclusions persist for ordinary future fetches. Every run reports them as warnings and records them in `results.json`; the final status distinguishes completion with fetch exclusions from unrestricted completion. To undo one exclusion after its remote collision is resolved:
 
 ```bash
-git -C ~/atlassian/convo-ai config --local --fixed-value --unset-all remote.origin.fetch '^refs/heads/EXCLUDED_BRANCH'
-git -C ~/atlassian/convo-ai fetch --prune origin
+git -C /path/to/repository config --local --fixed-value --unset-all remote.origin.fetch '^refs/heads/EXCLUDED_BRANCH'
+git -C /path/to/repository fetch --prune origin
 ```

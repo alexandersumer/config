@@ -143,8 +143,11 @@ def failure_reason(result):
     latest = re.split(r"(?m)^Attempt \d+/\d+\n", log)[-1]
     lines = [display(line, multiline=True).strip() for line in latest.splitlines() if line.strip()]
     meaningful = [line for line in lines if not line.startswith("error: fetch failed")]
+    policy_errors = [line for line in meaningful if any(message in line for message in ("multiple protected branches", "Protected branch already excluded", "custom mappings were left unchanged", "Cannot protect the default branch"))]
+    if policy_errors:
+        return re.sub(r"^error:\s*", "", policy_errors[-1])
     if any("case-insensitive filesystem" in line for line in meaningful):
-        return "Remote refs differ only by case on this case-insensitive filesystem. Fetch failed; reset was not performed. Use --resolve-case-conflicts to exclude unused colliding branches locally."
+        return "Remote refs differ only by case on this case-insensitive filesystem. Fetch failed; reset was not performed. Automatic recovery could not resolve this collision; protected branches or tags may require manual repair."
     if any("You may not have access to this repository or it no longer exists" in line for line in meaningful):
         return "Fetch failed: Bitbucket repository unavailable or access denied. Check the origin URL and your repository access. Reset was not performed."
     errors = [line for line in meaningful if re.search(r"fatal:|error:|Error:|denied|cannot lock|Worker failure|Repository is busy", line, re.I)]
@@ -196,7 +199,8 @@ def main(argv=None):
     parser.add_argument("--all-home", action="store_true")
     parser.add_argument("--include-nested", action="store_true")
     parser.add_argument("--list", action="store_true")
-    parser.add_argument("--resolve-case-conflicts", action="store_true", help="persist local fetch exclusions for colliding branches not needed by local work; never changes remote branches")
+    parser.add_argument("--resolve-case-conflicts", action="store_true", default=True, help=argparse.SUPPRESS)
+    parser.add_argument("--no-resolve-case-conflicts", dest="resolve_case_conflicts", action="store_false", help="disable automatic local recovery of unused branch case collisions")
     parser.add_argument("--verbose", action="store_true", help="print full Git logs after each workspace")
     if "--" in argv:
         split = argv.index("--")

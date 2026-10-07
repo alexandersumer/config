@@ -205,13 +205,16 @@ function _reset_to_remote_default_single() {
     local -a fetch_cmd=(git fetch)
     if [[ "${HOME_RESET_SUPERVISED:-}" == 1 ]]; then
         fetch_cmd=(git -c maintenance.auto=false -c gc.auto=0 fetch)
-        command python3 "$_HOME_RESET_HELPER_DIR/fetch_policy.py" "$remote" "$branch" || return $?
     fi
 
     if (( sync_fetch )); then
         # ── Synchronous full fetch ────────────────────────────────────
         # Fetch errors propagate unchanged; bulk callers decide whether to retry.
-        _fetch_checked "${fetch_cmd[@]}" --prune "$remote" || return $?
+        if [[ "${HOME_RESET_SUPERVISED:-}" == 1 ]]; then
+            _fetch_checked command python3 "$_HOME_RESET_HELPER_DIR/fetch_policy.py" --fetch "$remote" "$branch" || return $?
+        else
+            _fetch_checked "${fetch_cmd[@]}" --prune "$remote" || return $?
+        fi
 
         # ── Resolve target branch from full fetch ──────────────────────
         if (( branch_from_arg == 0 )); then
@@ -238,6 +241,9 @@ function _reset_to_remote_default_single() {
         return 1
     fi
 
+    if [[ "${HOME_RESET_SUPERVISED:-}" == 1 ]]; then
+        command python3 "$_HOME_RESET_HELPER_DIR/fetch_policy.py" --check-target "$remote" "$branch" || return $?
+    fi
     if ! git show-ref --verify --quiet "refs/remotes/$remote/$branch"; then
         printf '\033[31merror: remote %s does not have branch %s\033[0m\n' "$remote" "$branch" >&2
         return 1
