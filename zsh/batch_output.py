@@ -18,7 +18,7 @@ def color(text, kind, stream=None):
 
 def duration(seconds):
     if seconds < 60:
-        return f"{seconds:.1f}s"
+        return f"{int(seconds)}s"
     minutes, seconds = divmod(int(seconds), 60)
     hours, minutes = divmod(minutes, 60)
     return f"{hours}h {minutes}m {seconds}s" if hours else f"{minutes}m {seconds}s"
@@ -70,9 +70,13 @@ class BatchOutput:
             self.active.pop(result.name, None)
             self.results[result.name] = result
             if result.code not in (0, 130):
-                self.write("  " + color("failed:", "red", self.stream) + " " + self.name(result.name))
-                for line in textwrap.wrap(self.failure(result), max(30, shutil.get_terminal_size().columns - 10), break_long_words=False, break_on_hyphens=False):
-                    self.write("          " + line)
+                self.write("")
+                self.write("  " + color("Failed:", "red", self.stream) + " " + self.name(result.name))
+                width = max(20, shutil.get_terminal_size().columns - 4)
+                for line in textwrap.wrap(self.failure(result), width, break_long_words=False, break_on_hyphens=False):
+                    self.write("    " + line)
+                self.write(f"    Log: {result.log.name}")
+                self.write("")
 
     def heartbeat(self):
         try:

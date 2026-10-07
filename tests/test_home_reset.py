@@ -286,13 +286,26 @@ class OutputTests(unittest.TestCase):
         stream = io.StringIO()
         with BatchOutput(['first', 'second'], str, lambda r: 'Access denied.', stream) as output:
             output.completed(Result('second', 1, 1, 0, Path('0002.log')))
-            self.assertIn('failed: second', stream.getvalue())
+            self.assertIn('Failed: second', stream.getvalue())
             self.assertIn('Access denied.', stream.getvalue())
             output.completed(Result('first', 0, 3, 0, Path('0001.log')))
         text = stream.getvalue()
         self.assertIn('2/2 complete, 1 failed', text)
         self.assertNotIn('first', text)
-        self.assertNotIn('Log:', text)
+        self.assertIn('Log: 0002.log', text)
+
+    def test_failure_block_wraps_at_narrow_terminal_width(self):
+        stream = io.StringIO()
+        reason = 'Fetch failed: repository unavailable or access denied. Reset was not performed.'
+        with patch('batch_output.shutil.get_terminal_size', return_value=os.terminal_size((40, 24))):
+            with BatchOutput(['repo'], str, lambda r: reason, stream) as output:
+                output.completed(Result('repo', 128, 1, 0, Path('0001.log')))
+        text = stream.getvalue()
+        block = text.split('  Failed: repo\n', 1)[1].split('\n\n', 1)[0]
+        self.assertTrue(all(len(line) <= 40 for line in block.splitlines()))
+        self.assertIn('    Log: 0001.log', block)
+        self.assertIn('Reset was not performed.', ' '.join(line.strip() for line in block.splitlines()))
+        self.assertNotIn('\r', text)
 
     def test_pipeline_does_not_repeat_unchanged_progress(self):
         stream = io.StringIO()
@@ -322,9 +335,9 @@ class OutputTests(unittest.TestCase):
                 self.assertTrue(stream.getvalue().endswith('\n'))
                 output.completed(Result('first', 0, 1, 0, Path('0001.log')))
         text = stream.getvalue()
-        self.assertIn('failed: second', text)
+        self.assertIn('Failed: second', text)
         self.assertIn('2/2 complete, 1 failed', text)
-        self.assertEqual(text.count('\n'), 3)
+        self.assertIn('\n  Failed: second\n    Access denied.\n    Log: 0002.log\n\n', text)
         self.assertNotIn('\r', text)
         self.assertNotIn('\x1b', text)
 

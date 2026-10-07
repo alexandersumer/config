@@ -129,7 +129,7 @@ def short_path(path, root=None):
 
 def failure_reason(result):
     if result.code == 124:
-        return "Timed out."
+        return f"Timed out after {quantity(result.attempts, 'attempt')}. See the log for the operation that exceeded its deadline."
     log = result.log.read_text(errors="replace")
     latest = re.split(r"(?m)^Attempt \d+/\d+\n", log)[-1]
     lines = [display(line, multiline=True).strip() for line in latest.splitlines() if line.strip()]
@@ -137,7 +137,7 @@ def failure_reason(result):
     if any("case-insensitive filesystem" in line for line in meaningful):
         return "Remote refs differ only by case on this case-insensitive filesystem. Fetch failed; reset was not performed."
     if any("You may not have access to this repository or it no longer exists" in line for line in meaningful):
-        return "Bitbucket: repository unavailable or access denied. Check the origin URL and repository permissions."
+        return "Fetch failed: Bitbucket repository unavailable or access denied. Check the origin URL and your repository access. Reset was not performed."
     errors = [line for line in meaningful if re.search(r"fatal:|error:|Error:|denied|cannot lock|Worker failure|Repository is busy", line, re.I)]
     reason = (errors or meaningful or lines or [f"Command failed (exit {result.code})."])[0]
     if "would discard local changes" in reason or "Tracked changes or a dirty submodule" in reason:
@@ -271,7 +271,8 @@ def main(argv=None):
             counts.append(color(f"{failed} failed", "red"))
         if cancelled:
             counts.append(color(f"{cancelled} cancelled", "yellow"))
-        print(f"\nFinished in {duration(time.monotonic() - started)}: {', '.join(counts)}.")
+        outcome = "Interrupted" if cancelled else "Completed with failures" if failed else "Completed"
+        print(f"\n{outcome} in {duration(time.monotonic() - started)}: {', '.join(counts)}.")
         if recovered:
             print(f"{recovered} recovered after retry.")
         print(f"Logs: {log_dir}")
