@@ -22,7 +22,9 @@ HOME_PRUNE = {"Library", ".Trash", ".cache", "Downloads", "Applications", "Deskt
 
 
 def git(path, *args):
-    return subprocess.check_output(["git", "-C", str(path), *args], stderr=subprocess.PIPE, timeout=15)
+    # Supervised workers share the attempt deadline; discovery stays bounded.
+    timeout = None if os.environ.get("HOME_RESET_SUPERVISED") == "1" else 15
+    return subprocess.check_output(["git", "-C", str(path), *args], stderr=subprocess.PIPE, timeout=timeout)
 
 
 def discover(root, recursive, nested, excluded=None):

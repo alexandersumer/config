@@ -551,6 +551,30 @@ os.execv({real_git!r},[{real_git!r},*sys.argv[1:]])
         self.assertIn("exit=124", result.stdout)
         self.assertEqual(self.git(self.repo, "rev-parse", "HEAD"), self.old)
 
+    def test_supervised_slow_safety_scan_uses_attempt_deadline(self):
+        directory = self.root / 'slow-scan-bin'
+        directory.mkdir()
+        real_git = shutil.which('git')
+        (directory / 'git').write_text('#!/bin/sh\ncase "$*" in\n  *"ls-files --others"*) sleep .15 ;;\nesac\nexec ' + shlex.quote(real_git) + ' "$@"\n')
+        (directory / 'git').chmod(0o755)
+        script = f'''import runpy,subprocess,sys
+sys.path.insert(0, {str(ROOT / 'zsh')!r})
+real_check_output = subprocess.check_output
+def shorter_probe_budget(*args, **kwargs):
+    if kwargs.get('timeout') is not None:
+        kwargs['timeout'] = .1
+    return real_check_output(*args, **kwargs)
+subprocess.check_output = shorter_probe_budget
+sys.argv = ['home_reset.py', '--check-tree', 'origin/main']
+runpy.run_path({str(ROOT / 'zsh/home_reset.py')!r}, run_name='__main__')
+'''
+        env = dict(self.env, PATH=str(directory) + os.pathsep + os.environ['PATH'])
+        for supervised, code in [('0', 124), ('1', 0)]:
+            with self.subTest(supervised=supervised):
+                result = subprocess.run([sys.executable, '-c', script], cwd=self.repo, env=dict(env, HOME_RESET_SUPERVISED=supervised), text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=5)
+                self.assertEqual(result.returncode, code, result.stdout)
+        self.assertEqual(self.git(self.repo, 'rev-parse', 'HEAD'), self.old)
+
     def test_public_command_sigint_reaps_fetch(self):
         env = self.shim("hang")
         marker = self.root / "started"
