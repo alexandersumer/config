@@ -213,15 +213,7 @@ fn test_mutating_skill_write_boundaries() -> Result<()> {
             ],
         ),
         (
-            "strengthen-tests-solo",
-            &[
-                "explicitly scoped existing behavior",
-                "safe fail-then-pass proof under `prove-check`",
-                "do not claim the test catches the bug",
-            ],
-        ),
-        (
-            "strengthen-tests-deep",
+            "strengthen-tests",
             &[
                 "explicitly scoped existing behavior",
                 "safe fail-then-pass proof under `prove-check`",
@@ -258,7 +250,6 @@ fn test_deep_review_skills_require_portable_managed_reviewer_contract() -> Resul
         "architecture-review-deep",
         "design-review-deep",
         "review-deep",
-        "strengthen-tests-deep",
     ] {
         let skill_path = skills_root.join(skill_name).join("SKILL.md");
         let text = fs::read_to_string(&skill_path).map_err(|err| {
@@ -321,10 +312,6 @@ fn test_deep_review_skills_require_portable_managed_reviewer_contract() -> Resul
         (
             "design-review-deep",
             &["No existing implementation; review as a standalone design"],
-        ),
-        (
-            "strengthen-tests-deep",
-            &["{DIFF_OR_SCOPE}", "a precise explicit behavior scope"],
         ),
     ];
     for (skill_name, expected_fragments) in skill_specific_contracts {

@@ -1,15 +1,15 @@
 ---
-name: strengthen-tests-solo
-description: Direct test review and edit workflow without subagents. Use for ordinary or explicitly single-agent test and regression-coverage improvements, including scoped existing behavior without a matching diff. Use strengthen-tests-deep only when the user asks for deep, thorough, multi-agent, high-confidence, or heavyweight test strengthening.
+name: strengthen-tests
+description: Strengthen regression coverage by reviewing production behavior, validating test gaps, editing tests, and proving realistic bugs are caught. Supports diff-derived changes and explicitly scoped existing behavior.
 ---
 
-# Strengthen Tests Solo
+# Strengthen Tests
 
 ## Proof policy
 
 Reuse proof only when it is visible, same-scope, after the last relevant edit, and not invalidated by touched files, config, dependencies, fixtures, generated output, runtime state, or environment. Otherwise run the narrowest check that proves the claim, artifact, or behavior; broaden only when risk or policy requires it. Final reports must separate reused proof, new commands, and checks not run.
 
-Review and strengthen tests directly in this session. This is not review-only: after validation, make the justified test-code improvements in the workspace instead of merely recommending them. Valid improvements may add, strengthen, consolidate, or delete tests. Do not invoke subagents. Preserve the same quality bar as `strengthen-tests-deep` by identifying the target behavior first, finding the real test seam, and making only changes that improve regression signal for named realistic bugs.
+Review and strengthen tests directly in this session. This is not review-only: after validation, make the justified test-code improvements in the workspace instead of merely recommending them. Valid improvements may add, strengthen, consolidate, or delete tests. Work directly by default: identify the target behavior first, find the real test seam, and make only changes that improve regression signal for named realistic bugs.
 
 1. **Get the effective diff and behavior surface automatically.** Do not require a PR, explicit scope, or committed branch changes. Use the requested base or target PR destination as `<comparison-ref>`; otherwise use a valid `origin/HEAD` or the sole existing `origin/main`/`origin/master` fallback. If no unambiguous base exists, report that gap and review the working-tree portion. For the default branch/worktree review, discover affected paths across committed, staged, unstaged, and untracked changes. Set `<base>` to `git merge-base <comparison-ref> HEAD` when available, otherwise `HEAD`. Use `git diff <base>` for the final tracked working-tree changes and include untracked files from `git ls-files --others --exclude-standard` as new-file diffs. Use committed, staged, and unstaged component diffs to understand intermediate changes, not as independent final changes; changes that cancel out are absent from the final diff. If the user explicitly requests staged-only or commit-specific review, use that diff and its corresponding index or commit state instead of the combined working-tree scope. If `focus_area` or `$ARGUMENTS` names a behavior, contract, test, file, module, or subsystem, use it as an explicit test-strengthening scope without requiring a matching diff. Call the resulting target behavior either diff-derived behavior or explicitly scoped existing behavior. Otherwise, if the effective diff is empty, generated-only, formatter-only, version-bump-only, or has no behavior/test relevance, stop with `no test changes justified` and one short reason.
 
@@ -35,4 +35,10 @@ Review and strengthen tests directly in this session. This is not review-only: a
 
    If no validated improvement exists, output `no test changes justified` and one short sentence naming the reviewed behavior surface. If the review surface is too large to validate directly, say `Review limited` and name the residual risk.
 
-Never add or retain touched tests that only lock in implementation details. Never weaken, skip, delete, or baseline existing checks to get green. Do not use subagents.
+Never add or retain touched tests that only lock in implementation details. Never weaken, skip, delete, or baseline existing checks to get green.
+
+## Optional independent test review
+
+When the user explicitly requests a broad coverage audit or independent reviewers, use focused fresh-context reviewers to challenge assumptions about production behavior and missing regression signals. Choose roles and scope based on the actual risk; a fixed reviewer count is not required. For an explicitly single-agent request, keep all work in this session.
+
+Use the harness's native managed subagents with only the explicit behavior scope, relevant production and test excerpts, harness details, and scoped conventions. Do not pass inherited session history or prior conclusions. Treat reviewer output as candidates; validate each candidate directly before editing. This agent owns edits, checks, and final judgment. If an independent pass is unavailable or incomplete, report that limitation and continue useful direct work without claiming the requested audit is complete.
