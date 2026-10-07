@@ -299,3 +299,5 @@ case ":$PATH:" in
   *) export PATH="$BUN_INSTALL/bin:$PATH" ;;
 esac
 # <<< relay pinned bun <<<
+
+if [ -f "$HOME/.afm-bin-path-manager.zsh" ]; then source "$HOME/.afm-bin-path-manager.zsh"; fi
