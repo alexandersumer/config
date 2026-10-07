@@ -102,6 +102,7 @@ def prepare(remote, target=None, recover=False, previous_tips=None):
             if spec not in specs:
                 git('config', '--local', '--add', f'remote.{remote}.fetch', spec)
                 specs.append(spec)
+                print("Added case-conflict exclusion: refs/heads/" + branch, flush=True)
             if tip:
                 git('update-ref', '-d', ref, tip)
     for spec in specs:
@@ -132,6 +133,7 @@ def fetch(remote, target=None):
             print('error: case-insensitive filesystem branch collision; automatic recovery is disabled.', flush=True)
             return code or 1
         prepare(remote, target, recover=True, previous_tips=previous_tips)
+        print("Retrying fetch after case-conflict recovery.", flush=True)
         code, _ = attempt()
         if not code and fetched_case_collision():
             print('error: case-insensitive filesystem branch collision remains after recovery; reset was not performed.', flush=True)

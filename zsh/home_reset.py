@@ -131,16 +131,15 @@ def fetch_exclusions(result):
     return sorted(set(re.findall(r"(?m)^Fetch exclusion: (.+)$", result.log.read_text(errors="replace"))))
 
 
-def exclusion_notice(result):
-    excluded = fetch_exclusions(result)
-    return "Fetch excludes " + ", ".join(display(ref) for ref in excluded) + "." if excluded else ""
+def added_case_exclusions(result):
+    return sorted(set(re.findall(r"(?m)^Added case-conflict exclusion: (.+)$", result.log.read_text(errors="replace"))))
 
 
 def failure_reason(result):
     if result.code == 124:
         return f"Timed out after {quantity(result.attempts, 'attempt')}. See the log for the operation that exceeded its deadline."
     log = result.log.read_text(errors="replace")
-    latest = re.split(r"(?m)^Attempt \d+/\d+\n", log)[-1]
+    latest = re.split(r"(?m)^(?:Attempt \d+/\d+|Retrying fetch after case-conflict recovery\.)\n", log)[-1]
     lines = [display(line, multiline=True).strip() for line in latest.splitlines() if line.strip()]
     meaningful = [line for line in lines if not line.startswith("error: fetch failed")]
     policy_errors = [line for line in meaningful if any(message in line for message in ("multiple protected branches", "Protected branch already excluded", "custom mappings were left unchanged", "Cannot protect the default branch"))]
@@ -265,7 +264,7 @@ def main(argv=None):
                 continue
             print(f"\n{short_path(root)} ({quantity(len(entries), 'repository', 'repositories')})", flush=True)
             jobs = [Job(str(path), path, ("zsh", "-f", "-c", 'source "$1"; shift; _reset_to_remote_default_single "$@" --sync --no-prune', "home-reset", str(source), *forwarded), common) for path, common in entries]
-            with BatchOutput([job.name for job in jobs], lambda name: short_path(name, root), failure_reason, on_error=supervisor.cancel, notice=exclusion_notice) as output:
+            with BatchOutput([job.name for job in jobs], lambda name: short_path(name, root), failure_reason, on_error=supervisor.cancel) as output:
                 supervisor.progress = output.progress
                 results = supervisor.batch(jobs, output.completed)
             all_results.extend(results)
@@ -273,7 +272,7 @@ def main(argv=None):
                 for result in results:
                     print(f"\n--- {display(result.name)} | exit={result.code} | log={result.log} ---")
                     print(display(result.log.read_text(errors="replace"), multiline=True), end="", flush=True)
-        record = [dict(name=r.name, code=r.code, attempts=r.attempts, seconds=r.seconds, log=str(r.log), fetch_exclusions=fetch_exclusions(r)) for r in all_results]
+        record = [dict(name=r.name, code=r.code, attempts=r.attempts, seconds=r.seconds, log=str(r.log), fetch_exclusions=fetch_exclusions(r), added_case_exclusions=added_case_exclusions(r)) for r in all_results]
         (log_dir / "results.json").write_text(json.dumps(record, indent=2))
         (log_dir / "excluded-worktrees.json").write_text(json.dumps([str(p) for p in sorted(excluded)], indent=2))
         ok = sum(r.code == 0 for r in all_results)
@@ -287,9 +286,12 @@ def main(argv=None):
             counts.append(color(f"{cancelled} cancelled", "yellow"))
         excluded_repos = sum(bool(fetch_exclusions(r)) for r in all_results)
         if excluded_repos:
-            counts.append(color(quantity(excluded_repos, "repository with fetch exclusions", "repositories with fetch exclusions"), "yellow"))
-        outcome = "Interrupted" if cancelled else "Completed with failures" if failed else "Completed with fetch exclusions" if excluded_repos else "Completed"
+            counts.append(quantity(excluded_repos, "repository using saved fetch exclusions", "repositories using saved fetch exclusions"))
+        outcome = "Interrupted" if cancelled else "Completed with failures" if failed else "Completed"
         print(f"\n{outcome} in {duration(time.monotonic() - started)}: {', '.join(counts)}.")
+        case_recovered = sum(r.code == 0 and bool(added_case_exclusions(r)) for r in all_results)
+        if case_recovered:
+            print(f"Automatically resolved branch-name collisions in {quantity(case_recovered, 'repository', 'repositories')}.")
         if recovered:
             print(f"{recovered} recovered after retry.")
         print(f"Logs: {log_dir}")
