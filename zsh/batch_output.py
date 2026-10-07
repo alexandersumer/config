@@ -1,4 +1,4 @@
-"""Workspace progress and immediate failures, with plain output for pipelines."""
+"""Line-oriented workspace progress and immediate failures."""
 
 import os
 import shutil
@@ -29,13 +29,14 @@ def quantity(count, singular, plural=None):
 
 
 class BatchOutput:
-    def __init__(self, names, name, failure, stream=None, interval=15):
+    def __init__(self, names, name, failure, stream=None, interval=15, on_error=None):
         self.names = names
         self.name = name
         self.failure = failure
         self.stream = stream if stream is not None else sys.stdout
         self.interval = interval
-        self.terminal = self.stream.isatty()
+        self.on_error = on_error or (lambda: None)
+        self.error = None
         self.guard = threading.Lock()
         self.stopped = threading.Event()
         self.results = {}
@@ -43,15 +44,8 @@ class BatchOutput:
         self.started = self.last_update = time.monotonic()
         self.last_count = 0
         self.reported_waits = set()
-        self.rendered = 0
-
-    def clear_progress(self):
-        if self.rendered:
-            self.stream.write("\r" + " " * self.rendered + "\r")
-            self.rendered = 0
 
     def write(self, line):
-        self.clear_progress()
         print(line, file=self.stream, flush=True)
 
     def status(self):
@@ -62,14 +56,8 @@ class BatchOutput:
             counts.append(f"{failed} failed")
         if cancelled:
             counts.append(f"{cancelled} cancelled")
-        counts.append(duration(time.monotonic() - self.started))
+        counts.append("elapsed " + duration(time.monotonic() - self.started))
         return "  " + ", ".join(counts)
-
-    def render(self):
-        line = self.status()[:max(1, shutil.get_terminal_size().columns - 1)]
-        self.stream.write("\r" + line + " " * max(0, self.rendered - len(line)) + "\r")
-        self.stream.flush()
-        self.rendered = len(line)
 
     def progress(self, job, attempt, message):
         with self.guard:
@@ -77,22 +65,27 @@ class BatchOutput:
 
     def completed(self, result):
         with self.guard:
+            if self.error is not None:
+                raise self.error
             self.active.pop(result.name, None)
             self.results[result.name] = result
             if result.code not in (0, 130):
                 self.write("  " + color("failed:", "red", self.stream) + " " + self.name(result.name))
                 for line in textwrap.wrap(self.failure(result), max(30, shutil.get_terminal_size().columns - 10), break_long_words=False, break_on_hyphens=False):
                     self.write("          " + line)
-            if self.terminal:
-                self.render()
 
     def heartbeat(self):
+        try:
+            self.update_progress()
+        except Exception as error:
+            self.error = error
+            self.on_error()
+
+    def update_progress(self):
         while not self.stopped.wait(min(1, self.interval)):
             with self.guard:
                 now = time.monotonic()
-                if self.terminal:
-                    self.render()
-                elif now - self.last_update >= self.interval:
+                if now - self.last_update >= self.interval:
                     if len(self.results) != self.last_count:
                         self.write(self.status())
                         self.last_count = len(self.results)
@@ -104,8 +97,6 @@ class BatchOutput:
                     self.last_update = now
 
     def __enter__(self):
-        if self.terminal:
-            self.render()
         self.thread = threading.Thread(target=self.heartbeat, daemon=True)
         self.thread.start()
         return self
@@ -114,10 +105,10 @@ class BatchOutput:
         self.stopped.set()
         self.thread.join()
         if error[0] is None:
+            if self.error is not None:
+                raise self.error
             failed = any(r.code not in (0, 130) for r in self.results.values())
             cancelled = any(r.code == 130 for r in self.results.values())
             kind = "red" if failed else "yellow" if cancelled else "green"
             self.write(color(self.status(), kind, self.stream))
-        else:
-            self.clear_progress()
         self.stream.flush()

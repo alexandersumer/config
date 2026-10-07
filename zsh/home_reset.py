@@ -132,6 +132,8 @@ def failure_reason(result):
     latest = re.split(r"(?m)^Attempt \d+/\d+\n", log)[-1]
     lines = [display(line, multiline=True).strip() for line in latest.splitlines() if line.strip()]
     meaningful = [line for line in lines if not line.startswith("error: fetch failed")]
+    if any("case-insensitive filesystem" in line for line in meaningful):
+        return "Remote refs differ only by case on this case-insensitive filesystem. Fetch failed; reset was not performed."
     if any("You may not have access to this repository or it no longer exists" in line for line in meaningful):
         return "Bitbucket: repository unavailable or access denied. Check the origin URL and repository permissions."
     errors = [line for line in meaningful if re.search(r"fatal:|error:|Error:|denied|cannot lock|Worker failure|Repository is busy", line, re.I)]
@@ -247,7 +249,7 @@ def main(argv=None):
                 continue
             print(f"\n{short_path(root)} ({quantity(len(entries), 'repository', 'repositories')})", flush=True)
             jobs = [Job(str(path), path, ("zsh", "-f", "-c", 'source "$1"; shift; _reset_to_remote_default_single "$@" --sync --no-prune', "home-reset", str(source), *forwarded), common) for path, common in entries]
-            with BatchOutput([job.name for job in jobs], lambda name: short_path(name, root), failure_reason) as output:
+            with BatchOutput([job.name for job in jobs], lambda name: short_path(name, root), failure_reason, on_error=supervisor.cancel) as output:
                 supervisor.progress = output.progress
                 results = supervisor.batch(jobs, output.completed)
             all_results.extend(results)

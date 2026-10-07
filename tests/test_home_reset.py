@@ -127,7 +127,7 @@ class BatchTests(unittest.TestCase):
         start = time.monotonic()
         result = supervisor.batch([job])[0]
         timer.join()
-        self.assertEqual(result.code, 130)
+        self.assertEqual(result.code, 130, result.log.read_text())
         self.assertLess(time.monotonic() - start, 3)
 
     def test_sigterm_resistant_worker_is_killed(self):
@@ -173,6 +173,21 @@ class BatchTests(unittest.TestCase):
             supervisor.batch(jobs, broken_output)
         self.assertTrue(supervisor.cancelled.is_set())
         self.assertLess(time.monotonic() - start, 3)
+
+    def test_heartbeat_output_failure_cancels_running_workers(self):
+        class BrokenStream(io.StringIO):
+            def write(self, value):
+                raise BrokenPipeError('closed output')
+        supervisor = self.supervisor(jobs=2)
+        jobs = [self.job(str(i), 'import time; time.sleep(20)') for i in range(4)]
+        start = time.monotonic()
+        with self.assertRaises(BrokenPipeError):
+            with BatchOutput([job.name for job in jobs], str, str, BrokenStream(), interval=.03, on_error=supervisor.cancel) as output:
+                supervisor.progress = output.progress
+                supervisor.batch(jobs, output.completed)
+        self.assertTrue(supervisor.cancelled.is_set())
+        self.assertLess(time.monotonic() - start, 3)
+        self.assertEqual(len(list(self.logs.glob('*.log'))), 4)
 
     def test_retry_classifier(self):
         for log in ("HTTP/2 429", "error: requested URL returned error: 503", "early EOF", "Could not resolve hostname"):
@@ -258,7 +273,7 @@ class OutputTests(unittest.TestCase):
         time.sleep(.05)
         self.assertEqual(stream.getvalue(), before)
 
-    def test_terminal_uses_one_progress_line_and_keeps_failure(self):
+    def test_terminal_uses_complete_lines_and_keeps_failure(self):
         class Terminal(io.StringIO):
             def isatty(self):
                 return True
@@ -266,12 +281,36 @@ class OutputTests(unittest.TestCase):
         with patch.dict(os.environ, {'NO_COLOR': '1'}):
             with BatchOutput(['first', 'second'], str, lambda r: 'Access denied.', stream) as output:
                 output.completed(Result('second', 1, 1, 0, Path('0002.log')))
+                self.assertTrue(stream.getvalue().endswith('\n'))
                 output.completed(Result('first', 0, 1, 0, Path('0001.log')))
         text = stream.getvalue()
         self.assertIn('failed: second', text)
         self.assertIn('2/2 complete, 1 failed', text)
         self.assertEqual(text.count('\n'), 3)
+        self.assertNotIn('\r', text)
         self.assertNotIn('\x1b', text)
+
+    def test_terminal_heartbeat_is_throttled_and_newline_terminated(self):
+        class Terminal(io.StringIO):
+            def isatty(self):
+                return True
+        stream = Terminal()
+        with patch.dict(os.environ, {'NO_COLOR': '1'}):
+            with BatchOutput(['first', 'second'], str, str, stream, interval=.03) as output:
+                output.progress(Job('second', Path('.'), (), Path('.')), 1, 'RUNNING')
+                output.completed(Result('first', 0, 1, 0, Path('0001.log')))
+                deadline = time.monotonic() + 2
+                while 'Waiting for second' not in stream.getvalue() and time.monotonic() < deadline:
+                    time.sleep(.01)
+                time.sleep(.1)
+                text = stream.getvalue()
+                self.assertEqual(text.count('1/2 complete'), 1)
+                self.assertEqual(text.count('Waiting for second'), 1)
+                self.assertTrue(text.endswith('\n'))
+                self.assertNotIn('\r', text)
+                output.completed(Result('second', 0, 1, 0, Path('0002.log')))
+        self.assertIn('2/2 complete', stream.getvalue())
+        self.assertNotIn('\r', stream.getvalue())
 
     def test_color_respects_terminal_no_color_and_dumb(self):
         class Terminal(io.StringIO):
@@ -298,6 +337,14 @@ class OutputTests(unittest.TestCase):
             log = Path(root) / '0001.log'
             log.write_text('Attempt 1/2\nConnection reset\nAttempt 2/2\n\033[31mPermission denied (publickey)\033[0m\nerror: fetch failed (exit 1); reset was not performed\n')
             self.assertEqual(failure_reason(Result('repo', 1, 2, 0, log)), 'Permission denied (publickey)')
+
+    def test_case_conflict_reason_explains_failed_fetch_and_preserved_checkout(self):
+        with tempfile.TemporaryDirectory() as root:
+            log = Path(root) / '0001.log'
+            log.write_text("Attempt 1/1\nerror: You're on a case-insensitive filesystem, and the remote you are\ntrying to fetch from has references that only differ in casing.\nerror: fetch failed (exit 1); reset was not performed\n")
+            result = Result('repo', 1, 1, 0, log)
+            self.assertEqual(failure_reason(result), 'Remote refs differ only by case on this case-insensitive filesystem. Fetch failed; reset was not performed.')
+            self.assertFalse(retryable(log.read_text()))
 
 
 class GitTests(unittest.TestCase):
