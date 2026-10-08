@@ -344,7 +344,9 @@ fn run_inner(options: &Options, selection: Selection) -> Result<u8, String> {
         )
         .map_err(|e| e.to_string())?;
     }
-    writeln!(stdout, "Logs: {}", display(&logs)).map_err(|e| e.to_string())?;
+    if options.keep_logs {
+        writeln!(stdout, "Logs: {}", display(&logs)).map_err(|e| e.to_string())?;
+    }
     let resources: HashMap<PathBuf, Arc<Mutex<()>>> = selection
         .repos
         .iter()
@@ -535,6 +537,17 @@ fn run_inner(options: &Options, selection: Selection) -> Result<u8, String> {
     .map_err(|e| e.to_string())?;
     let ok = records.iter().filter(|r| r.code == 0).count();
     let interrupted = records.iter().filter(|r| r.code == 130).count();
+    let exit_code = if cancelled() || interrupted > 0 {
+        130
+    } else {
+        u8::from(ok != total)
+    };
+    if exit_code == 0 && !options.keep_logs {
+        fs::remove_dir_all(&logs)
+            .map_err(|e| format!("could not remove temporary logs at {}: {e}", display(&logs)))?;
+    } else if !options.keep_logs {
+        writeln!(stdout, "Logs: {}", display(&logs)).map_err(|e| e.to_string())?;
+    }
     let outcome = if interrupted > 0 {
         "Interrupted"
     } else if ok != total {
@@ -585,16 +598,12 @@ fn run_inner(options: &Options, selection: Selection) -> Result<u8, String> {
     if total > 1 && backed_up > 0 {
         writeln!(
             stdout,
-            "Previous tips saved for {}; recovery commands are in the logs.",
+            "Previous tips saved for {} under refs/home-reset-backups/.",
             output::quantity(backed_up, "repository")
         )
         .map_err(|e| e.to_string())?;
     }
-    Ok(if cancelled() || interrupted > 0 {
-        130
-    } else {
-        u8::from(ok != total)
-    })
+    Ok(exit_code)
 }
 
 #[cfg(test)]

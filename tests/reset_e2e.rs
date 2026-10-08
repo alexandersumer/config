@@ -120,7 +120,7 @@ impl Runtime {
     }
     fn reset(&self, path: &Path, args: &[&str], code: i32) -> Output {
         let mut cmd = self.command(path, &self.binary);
-        cmd.args(args);
+        cmd.arg("--keep-logs").args(args);
         let out = self.run(cmd);
         assert_eq!(out.status.code(), Some(code), "{}", text(&out));
         out

@@ -55,6 +55,7 @@ impl Fixture {
         let repo = workspace.join("a repo");
         fs::create_dir(&seed).unwrap();
         fs::create_dir(&workspace).unwrap();
+        fs::create_dir(temp.path().join("runtime")).unwrap();
         git(&seed, &["init", "-b", "main"]);
         fs::write(seed.join("file"), "initial\n").unwrap();
         git(&seed, &["add", "."]);
@@ -86,7 +87,9 @@ impl Fixture {
     fn cli(&self, path: &Path, args: &[&OsStr]) -> Command {
         let mut cmd = Command::new(BIN);
         env(&mut cmd);
+        cmd.env("TMPDIR", self.temp.path().join("runtime"));
         cmd.arg("reset-to-origin")
+            .arg("--keep-logs")
             .arg("--attempts")
             .arg("1")
             .args(args)
@@ -1393,4 +1396,64 @@ fi
         "updated\n"
     );
     assert!(!f.repo.join(".git/refresh-hook-fired").exists());
+}
+
+#[test]
+fn successful_default_runs_remove_logs_and_preserve_recovery_refs() {
+    for count in [1, 2] {
+        let f = Fixture::new();
+        let mut repos = vec![f.repo.clone()];
+        if count == 2 {
+            repos.push(f.clone("second"));
+        }
+        // Every checkout needs a reset, so cleanup must preserve real recovery refs.
+        for repo in &repos {
+            git(repo, &["reset", "--hard", &f.old]);
+        }
+        let out = env(Command::new(BIN).current_dir(&f.workspace))
+            .args(["reset-to-origin", "--attempts", "1"])
+            .env("TMPDIR", f.temp.path().join("runtime"))
+            .output()
+            .unwrap();
+        success(&out);
+        assert!(!text(&out).contains("Logs:"), "{}", text(&out));
+        assert!(!text(&out).contains("in the logs"), "{}", text(&out));
+        assert_eq!(
+            fs::read_dir(f.temp.path().join("runtime")).unwrap().count(),
+            0
+        );
+        for repo in &repos {
+            assert_eq!(git(repo, &["rev-parse", "HEAD"]), f.new);
+            assert_eq!(
+                git(
+                    repo,
+                    &[
+                        "for-each-ref",
+                        "--format=%(objectname)",
+                        "refs/home-reset-backups/"
+                    ]
+                ),
+                f.old
+            );
+        }
+    }
+}
+
+#[test]
+fn failed_default_runs_retain_diagnostics_and_show_their_location() {
+    let f = Fixture::new();
+    fs::write(f.repo.join("file"), "local work\n").unwrap();
+    let out = env(Command::new(BIN).current_dir(&f.repo))
+        .args(["reset-to-origin", "--attempts", "1"])
+        .env("TMPDIR", f.temp.path().join("runtime"))
+        .output()
+        .unwrap();
+    failure(&out, "Tracked changes");
+    let dir = logs(&out);
+    assert!(dir.join("0001.log").is_file());
+    assert!(dir.join("results.json").is_file());
+    assert_eq!(
+        fs::read_to_string(f.repo.join("file")).unwrap(),
+        "local work\n"
+    );
 }

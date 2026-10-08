@@ -22,6 +22,7 @@ pub(super) struct Options {
     pub timeout: Duration,
     pub list: bool,
     pub verbose: bool,
+    pub keep_logs: bool,
 }
 
 /// Clap owns syntax, help, version, suggestions, and typed value validation.
@@ -58,6 +59,9 @@ struct Cli {
     /// Print complete logs in discovery order
     #[arg(short, long)]
     verbose: bool,
+    /// Retain successful-run diagnostics in the system temporary directory
+    #[arg(long)]
+    keep_logs: bool,
 }
 
 fn git_name(value: &str) -> Result<String, String> {
@@ -79,6 +83,7 @@ fn parse(args: Vec<OsString>) -> Result<Options, clap::Error> {
         timeout: Duration::from_secs(cli.timeout.into()),
         list: cli.list,
         verbose: cli.verbose,
+        keep_logs: cli.keep_logs,
     })
 }
 

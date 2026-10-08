@@ -72,7 +72,10 @@ edits are preserved and reported as a failure.
 Single-repository output names the fetched target and recovery ref. Batches show
 scope counts, restrained progress, immediate wrapped failures, and a final summary;
 successful repositories do not emit individual rows. `--verbose` prints sanitized
-full logs in discovery order. Terminal colors respect `NO_COLOR` and `TERM=dumb`;
+full logs in discovery order. Successful runs delete their temporary diagnostics
+and omit log paths. Failed or interrupted runs retain diagnostics and show their
+location; `--keep-logs` also retains successful-run diagnostics. Recovery refs
+remain in each repository regardless of log cleanup. Terminal colors respect `NO_COLOR` and `TERM=dumb`;
 redirected output is plain text. A private temporary log directory contains each
 attempt log, atomic worker status records, `results.json`, and `excluded-worktrees.json`.
 Worker progress and results come from structured records; Git and hook text stays
