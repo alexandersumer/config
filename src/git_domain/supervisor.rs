@@ -422,7 +422,7 @@ fn run_inner(options: &Options, selection: Selection) -> Result<u8, String> {
         if !options.keep_logs {
             writeln!(io::stderr(), "Logs: {}", display(&logs)).map_err(|e| e.to_string())?;
         }
-        diagnostics.directory.take().unwrap().keep();
+        drop(diagnostics.directory.take().unwrap().keep());
     }
     let outcome = if code == 130 {
         "Interrupted"
