@@ -83,6 +83,7 @@ pub(crate) fn install_command(args: &[String]) -> Result<()> {
     })?;
     apply_skill_links(claude_skill_plan)?;
     install_config_tools_binary(&home_dir)?;
+    install_reset_binary(&home_dir)?;
 
     println!();
     println!(
@@ -506,6 +507,7 @@ fn legacy_relay_config_errors(home_dir: &Path) -> Result<Vec<String>> {
 fn managed_binary_errors(home_dir: &Path) -> Result<Vec<String>> {
     let mut errors = Vec::new();
     errors.extend(config_tools_binary_errors(home_dir)?);
+    errors.extend(reset_binary_errors(home_dir)?);
     errors.sort();
     Ok(errors)
 }
@@ -549,6 +551,61 @@ fn config_tools_binary_errors(home_dir: &Path) -> Result<Vec<String>> {
             target.display()
         )),
     }
+}
+
+fn reset_binary_errors(home_dir: &Path) -> Result<Vec<String>> {
+    let target = home_dir.join(".local/bin/reset_to_origin");
+    let source = env::current_exe().map_err(|err| err.to_string())?;
+    match fs::symlink_metadata(&target) {
+        Ok(metadata) if metadata.is_file() && is_executable_file(&metadata) => {
+            let expected = fs::read(source).map_err(|err| err.to_string())?;
+            let actual = fs::read(&target).map_err(|err| err.to_string())?;
+            if expected == actual {
+                Ok(Vec::new())
+            } else {
+                Ok(vec![format!(
+                    "{} differs from the managed Rust executable; reinstall",
+                    target.display()
+                )])
+            }
+        }
+        Ok(_) => Ok(vec![format!(
+            "{} must be a managed executable file",
+            target.display()
+        )]),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            Ok(vec![format!("{} is missing", target.display())])
+        }
+        Err(err) => Err(format!("{}: {err}", target.display())),
+    }
+}
+
+fn install_reset_binary(home_dir: &Path) -> Result<()> {
+    use std::io::Write;
+    let source = env::current_exe().map_err(|err| err.to_string())?;
+    let target = home_dir.join(".local/bin/reset_to_origin");
+    if source == target {
+        return Ok(());
+    }
+    // The multicall binary is managed by the same ownership check as config-tools.
+    verify_config_tools_binary_target(&source, &target)?;
+    let bytes = fs::read(&source).map_err(|err| err.to_string())?;
+    let mut staged =
+        tempfile::NamedTempFile::new_in(target.parent().unwrap()).map_err(|err| err.to_string())?;
+    staged.write_all(&bytes).map_err(|err| err.to_string())?;
+    staged
+        .as_file()
+        .set_permissions(
+            fs::metadata(&source)
+                .map_err(|err| err.to_string())?
+                .permissions(),
+        )
+        .map_err(|err| err.to_string())?;
+    staged
+        .persist(&target)
+        .map_err(|err| format!("cannot install {}: {err}", target.display()))?;
+    println!("Installed reset_to_origin binary -> {}", target.display());
+    Ok(())
 }
 
 fn validate_config_skills(config_root: &Path) -> Result<()> {
@@ -1087,38 +1144,6 @@ fn normalize_path(path: &Path) -> PathBuf {
     normalized
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{remove_disallowed_codex_feature_flags, skill_allows_implicit_invocation};
-    use std::fs;
-    use tempfile::tempdir;
-
-    #[test]
-    fn codex_config_repair_removes_deprecated_and_disabled_feature_flags() {
-        let input = "model = \"gpt-5.5\"\n\n[features]\n  codex_hooks = true\n  hooks = true\n  apps = false\n\n[plugins.foo]\nenabled = true\n";
-        let expected =
-            "model = \"gpt-5.5\"\n\n[features]\n  hooks = true\n\n[plugins.foo]\nenabled = true\n";
-
-        assert_eq!(remove_disallowed_codex_feature_flags(input), expected);
-    }
-
-    #[test]
-    fn codex_prompt_check_honors_explicit_only_skill_metadata() {
-        let skill = tempdir().expect("temporary skill directory");
-        assert!(skill_allows_implicit_invocation(skill.path()).expect("missing metadata defaults"));
-
-        let agents_dir = skill.path().join("agents");
-        fs::create_dir(&agents_dir).expect("agents directory");
-        fs::write(
-            agents_dir.join("openai.yaml"),
-            "policy:\n  allow_implicit_invocation: false\n",
-        )
-        .expect("skill metadata");
-
-        assert!(!skill_allows_implicit_invocation(skill.path()).expect("explicit-only metadata"));
-    }
-}
-
 fn discover_custom_skills(skills_dir: &Path) -> Result<Vec<PathBuf>> {
     let mut skill_dirs = Vec::new();
     for entry in fs::read_dir(skills_dir).map_err(|err| {
@@ -1292,4 +1317,36 @@ fn parse_home_arg(args: &[String]) -> Result<PathBuf> {
         Some(path) => path,
         None => PathBuf::from(env::var("HOME").map_err(|_| "HOME is not set".to_string())?),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{remove_disallowed_codex_feature_flags, skill_allows_implicit_invocation};
+    use std::fs;
+    use tempfile::tempdir;
+
+    #[test]
+    fn codex_config_repair_removes_deprecated_and_disabled_feature_flags() {
+        let input = "model = \"gpt-5.5\"\n\n[features]\n  codex_hooks = true\n  hooks = true\n  apps = false\n\n[plugins.foo]\nenabled = true\n";
+        let expected =
+            "model = \"gpt-5.5\"\n\n[features]\n  hooks = true\n\n[plugins.foo]\nenabled = true\n";
+
+        assert_eq!(remove_disallowed_codex_feature_flags(input), expected);
+    }
+
+    #[test]
+    fn codex_prompt_check_honors_explicit_only_skill_metadata() {
+        let skill = tempdir().expect("temporary skill directory");
+        assert!(skill_allows_implicit_invocation(skill.path()).expect("missing metadata defaults"));
+
+        let agents_dir = skill.path().join("agents");
+        fs::create_dir(&agents_dir).expect("agents directory");
+        fs::write(
+            agents_dir.join("openai.yaml"),
+            "policy:\n  allow_implicit_invocation: false\n",
+        )
+        .expect("skill metadata");
+
+        assert!(!skill_allows_implicit_invocation(skill.path()).expect("explicit-only metadata"));
+    }
 }

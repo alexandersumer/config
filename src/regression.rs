@@ -58,7 +58,7 @@ pub(crate) fn run_regression_tests() -> Result<()> {
     test_command_failures()?;
     test_git_fetch_ref_cleanup()?;
     test_get_default_branch_refreshes_stale_remote_head()?;
-    test_home_reset_to_origin()?;
+    test_reset_executable()?;
     test_axiom_alias_zsh_wiring()?;
     test_pure_prompt_syncs_git_branch_after_cd()?;
     test_relay_axiom_config()?;
@@ -654,6 +654,15 @@ pub(crate) fn test_install_command() -> Result<()> {
         installed_binary.to_string_lossy().as_ref(),
         &["--help"],
     )?;
+    let reset_binary = home.path().join(".local/bin/reset_to_origin");
+    let help = run_command_output(
+        home.path(),
+        reset_binary.to_string_lossy().as_ref(),
+        &["--help"],
+    )?;
+    if !help.contains("Usage: reset_to_origin") {
+        return Err("installed reset executable does not dispatch independently".into());
+    }
     if home.path().join(".codex/skills/.system").is_symlink() {
         return Err("install replaced Codex-owned .system with a symlink".to_string());
     }
@@ -1182,17 +1191,27 @@ remote_head=$(git symbolic-ref refs/remotes/origin/HEAD) || exit $?
     Ok(())
 }
 
-fn test_home_reset_to_origin() -> Result<()> {
-    let config_root = std::env::current_dir()
-        .map_err(|err| format!("cannot determine config root for zsh alias test: {err}"))?;
+fn test_reset_executable() -> Result<()> {
+    let config_root = std::env::current_dir().map_err(|err| err.to_string())?;
     let script = format!(
         r#"source "{}"
-functions home_reset_to_origin >/dev/null
+for name in reset_to_origin home_reset_to_origin reset_all_to_origin reset_to_remote_default reset_all_to_remote_default; do
+  (( $+functions[$name] == 0 )) || exit 1
+done
 "#,
         config_root.join("zsh/git-functions.zsh").display()
     );
-    run_command(&config_root, "zsh", &["-c", &script])?;
-    run_command(&config_root, "python3", &["tests/test_home_reset.py"])
+    run_command(&config_root, "zsh", &["-f", "-c", &script])?;
+    let executable = std::env::current_exe().map_err(|err| err.to_string())?;
+    let output = run_command_output(
+        &config_root,
+        executable.to_string_lossy().as_ref(),
+        &["reset-to-origin", "--help"],
+    )?;
+    if !output.contains("Usage: reset_to_origin") {
+        return Err("Rust reset command is not reachable".into());
+    }
+    Ok(())
 }
 
 fn test_axiom_alias_zsh_wiring() -> Result<()> {

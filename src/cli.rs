@@ -50,7 +50,7 @@ fn print_help() {
 }
 
 fn help_text() -> &'static str {
-    "Usage: config-tools <command> [options]\n\nCommands:\n  validate [--config-root PATH]\n  test-validate\n  check [--config-root PATH]\n  prepare [--config-root PATH]\n  pre-commit [--config-root PATH]\n  install-git-hooks [--config-root PATH]\n  check-codex-skills [--config-root PATH] [--home PATH]\n  check-claude-skills [--config-root PATH] [--home PATH]\n  check-install [--config-root PATH] [--home PATH]\n  repair-codex-config [--home PATH]\n  install [--config-root PATH] [--home PATH]\n"
+    "Usage: config-tools <command> [options]\n\nCommands:\n  reset-to-origin [options] [paths...]\n  validate [--config-root PATH]\n  test-validate\n  check [--config-root PATH]\n  prepare [--config-root PATH]\n  pre-commit [--config-root PATH]\n  install-git-hooks [--config-root PATH]\n  check-codex-skills [--config-root PATH] [--home PATH]\n  check-claude-skills [--config-root PATH] [--home PATH]\n  check-install [--config-root PATH] [--home PATH]\n  repair-codex-config [--home PATH]\n  install [--config-root PATH] [--home PATH]\n"
 }
 
 pub(crate) fn parse_config_args(args: &[String], allow_check: bool) -> Result<(PathBuf, bool)> {

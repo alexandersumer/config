@@ -1,0 +1,36 @@
+name: Reset CLI E2E
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reset-e2e:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    env:
+      RESET_E2E_ARTIFACT_DIR: ${{ github.workspace }}/target/reset-e2e-artifacts
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Set up Rust
+        run: rustup toolchain install stable --profile minimal
+      - name: Run required Git protocol E2E
+        run: cargo +stable test --locked --test reset_e2e -- --nocapture
+      - name: Preserve runtime evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: reset-e2e-${{ matrix.os }}
+          path: target/reset-e2e-artifacts/
+          include-hidden-files: true
+          if-no-files-found: warn

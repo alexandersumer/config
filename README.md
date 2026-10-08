@@ -2,87 +2,119 @@
 
 Personal configuration and agent-skill registry.
 
-## Parallel home reset
+## Reset repositories
 
-```zsh
-home_reset_to_origin --list
-home_reset_to_origin --jobs 4 --timeout 300 --retries 3
-home_reset_to_origin --root ~/oss --jobs 2
-```
-
-Requires Python 3 and zsh on macOS or Linux. The shell entry point delegates to
-`zsh/home_reset.py`; `zsh/repo_batch.py` handles bounded workers, locks, deadlines,
-and retries without knowing Git reset policy.
-
-The default roots are `~/atlassian`, `~/oss`, `~/src`, and `~/stable`.
-`HOME_RESET_TO_ORIGIN_ROOTS` can supply a shell-quoted list of roots. Discovery
-walks folders in sorted order, skips build/cache directories and directory
-symlinks, and stops at repositories unless `--include-nested` is set. Linked
-worktrees are excluded before fetching: each primary checkout is reset once,
-while linked branches and files are left alone. A separate Git directory does
-not make a primary checkout a linked worktree. `--list`
-uses the same discovery as execution. `--all-home` expands discovery to the home
-directory while excluding personal/system folders. Roots run in order, with up
-to four concurrent repositories inside each root. Jobs sharing a Git common
-directory serialize; overlapping batch invocations refuse a busy repository.
-
-The default output shows one live progress line per workspace in a terminal,
-with failures reported immediately using workspace-relative names. Successful
-repositories do not generate individual rows. Green marks success, red marks
-failure, and yellow marks skipped worktrees or cancellation; `NO_COLOR`,
-`TERM=dumb`, and redirected output disable colors. Redirected output uses plain
-progress lines only when the completed count changes, plus one wait notice per
-slow active repository. `--verbose` prints full Git logs in traversal order
-after each workspace. All attempts are retained in each repository log,
-with a final summary, `results.json`, and `excluded-worktrees.json`
-in the printed temporary log directory. Logs may contain private remote URLs;
-the directory is private to the current user and remains until cleaned up.
-
-`--retries` retains its legacy meaning of total attempts, with zero treated as
-one, and a maximum of ten. Only recognized temporary network failures and
-timeouts retry. Authentication errors, dirty files, and Git lock errors fail
-promptly. Retry delays double with jitter and cap near 30 seconds. `--timeout`
-is a deadline for the entire attempt, including hooks and Git subprocesses.
-Timeouts and Ctrl-C kill each worker's process group before releasing its
-repository lock. This is a hard stop, so interrupted Git writes can leave locks
-that the runner reports rather than deleting. Genuine signal permission errors
-remain failures. Any failed repository yields exit 1; cancellation yields 130.
-
-Home reset now always fetches synchronously and preserves local branches and
-linked worktrees instead of pruning them. It refuses dirty tracked files,
-unfinished Git operations, and untracked/ignored paths that would be overwritten
-by either the local default branch or the fetched target. It disables recursive
-submodule checkout/reset and checks again after switching branches. Before
-replacing an existing default-branch tip, it saves a ref under
-`refs/home-reset-backups/<timestamp>/<branch>`. Recover a saved tip with
-`git branch recovered-work <printed-backup-ref>`.
-
-This still deliberately switches to the remote default branch and resets its
-tracked tree. It is not an atomic transaction across repositories. The lock
-coordinates this batch runner, not editors or unrelated Git commands; run it
-while repositories are otherwise idle. A forced kill or machine failure can
-interrupt Git and leave a lock requiring investigation; the runner never deletes
-Git locks automatically. The shared reset helper now propagates failed fetches
-without ref/lock repair or hidden background fetches. Branch pruning preserves
-every branch checked out in a worktree, including the canonical checkout, and
-only deletes eligible unused branches. Single-repository reset still prunes
-unused branches unless `--no-prune` is supplied. All bulk retry paths use the
-same network-failure classifier.
-
-Checks and a reproducible benchmark use disposable local repositories:
+`reset_to_origin` is a standalone Rust executable backed by the installed Git.
+Install it with `cargo run -- install`; production execution needs neither Python
+nor zsh. The same compiled multicall binary provides `config-tools` and
+`reset_to_origin`, with one reset implementation in `src/reset/`.
 
 ```sh
-python3 tests/test_home_reset.py
-python3 tests/benchmark_home_reset.py
-cargo run -- test-validate
+reset_to_origin
+reset_to_origin ~/atlassian ~/oss ~/src ~/stable
+reset_to_origin --list .
+reset_to_origin --jobs 4 --attempts 3 --timeout 300 /path/to/workspace
+reset_to_origin --remote upstream --branch release /path/to/repository
 ```
 
-The benchmark compares the original script at the recorded pre-change revision
-with one, two, and four supervised workers on twelve clones. It waits for the original
-script's detached fetches, uses a controlled 250 ms delay per fetch, verifies
-every final HEAD, and writes three samples per configuration to
-`tests/home-reset-benchmark.json`. It measures controlled latency; live remote
-performance depends on network and server limits.
+The CLI uses Clap's derive API for generated help, version information, typed
+option validation, and typo suggestions. Use `-h` for concise help, `--help` for
+the full contract and examples, and `-V` or `--version` for the package version.
+Options accept either `--jobs 4` or `--jobs=4`; `-j` and `-v` are available for
+jobs and verbose output. Use `--` before paths that begin with a dash. Repeated
+options use the last value. Invalid options fail before discovery or mutation.
+
+No paths means `.`. Positional arguments are filesystem paths, never remote or
+branch names. A repository root or a directory inside it selects that primary
+checkout. A container recursively selects primary checkouts beneath it. There
+are no predefined roots, branch-name guesses, or build/cache exclusion lists.
+Discovery stops at repositories, skips Git metadata, and does not follow directory
+symlinks encountered during traversal. An explicitly supplied symlink is resolved
+normally. Linked worktrees found in containers are reported and skipped; selecting
+one explicitly fails. Overlapping inputs run each checkout once. All inputs and
+discovery must succeed before any reset starts.
+
+The runner inherits the supervised parallel model of `home_reset_to_origin`:
+four workers across all supplied roots, common-directory locks, per-attempt
+deadlines, bounded transient retries, preserved local branches/worktrees, and
+recoverable target-branch tips. One repository uses the same runner and safety
+checks as a batch. `--attempts` means total attempts, default three; `--timeout`
+is seconds for the entire attempt, default 300. Limits are 32 workers, 10 attempts,
+and 86400 seconds per attempt. Network retries use capped exponential backoff with jitter.
+Authentication, Git locks, and safety refusals are not retried.
+
+The operation refuses tracked/index changes, dirty submodules, unfinished Git
+operations, tracked paths marked assume-unchanged or skip-worktree, and untracked
+or ignored paths that collide with the fetched target or existing local target branch. Fetch is synchronous; the advertised remote
+HEAD supplies the default branch. Existing fetch mappings are respected, and the
+target must map unambiguously into remote-tracking refs and match the fetched
+tip. Fetch mappings that could replace local branches are refused. It switches to
+the target branch, checks files, branch identity, and branch-tip changes again
+after checkout hooks, and resets to that verified commit. Switch/reset do not recursively update submodules.
+Other local branches and noncolliding untracked/ignored files are preserved.
+Replaced target-branch tips are saved under `refs/home-reset-backups/`; logs show
+`git branch recovered-work <backup-ref>`. Detached-HEAD commits receive no
+additional backup.
+
+This is not a transaction across repositories. Fetches, backups, a branch switch,
+or upstream changes may persist after a later failure. Logs record stages and
+partial progress. Common-directory locks coordinate this runner, not unrelated
+Git commands or editors; run while repositories are otherwise idle. Timeouts and
+SIGINT/SIGTERM kill worker process groups before releasing repository locks.
+Interrupted Git writes may leave locks that require investigation; this tool
+never deletes them. The lock descriptor is inherited by workers and descendants
+so a forcibly terminated supervisor cannot release it while they still hold it.
+
+Single-repository output names the fetched target and recovery ref. Batches show
+scope counts, restrained progress, immediate wrapped failures, and a final summary;
+successful repositories do not emit individual rows. `--verbose` prints sanitized
+full logs in discovery order. Terminal colors respect `NO_COLOR` and `TERM=dumb`;
+redirected output is plain text. A private temporary log directory contains each
+attempt log, atomic worker status records, `results.json`, and `excluded-worktrees.json`.
+Worker progress and results come from structured records; Git and hook text stays
+in diagnostic logs. Incomplete worker exits fail explicitly. Exit codes are 0 for success
+(including empty discovery), 1 for operational failures, 2 for invalid usage,
+and 130 for interruption.
+
+The old shell reset commands and Python runners have been removed. Use a new
+shell after installation so stale function definitions cannot shadow the binary.
+Replace `home_reset_to_origin` with explicit paths, replace positional remote/branch
+arguments with `--remote`/`--branch`, and replace `--retries` with `--attempts`.
+There are no single/multi modes, branch-pruning options, or implicit fetch-config
+repairs. Automatic case-conflict repair is intentionally excluded: conflicting
+refs fail without adding exclusions or deleting tracking refs. Existing exclusions
+remain in effect and may cause a target refusal.
+
+Checks and benchmarks only reset disposable local repositories:
+
+```sh
+cargo test --test reset_cli
+cargo run -- check
+cargo build --release
+cargo run --release --example reset_benchmark -- \
+  --binary target/release/config-tools \
+  --baseline /path/to/old/zsh \
+  --output /path/to/benchmark.json
+```
+
+The required network E2E lane is `cargo test --locked --test reset_e2e -- --nocapture`.
+It starts a real loopback Git daemon, drives the standalone CLI name, and verifies
+remote commits, recovery refs, preservation, and dirty-repository refusal in a
+multi-root batch. It also runs automatically under `cargo test`, `check`, and
+staged pre-commit checks. `.github/workflows/reset-e2e.yml` runs the same lane on
+Linux and macOS for pushes and pull requests. Missing Git, unavailable loopback
+networking, or failed daemon readiness fail the lane; there is no skip mode.
+Set `RESET_E2E_ARTIFACT_DIR` to preserve command transcripts, daemon logs, and
+CLI result logs. Otherwise a failing test retains its temporary workspace and
+prints its path. The daemon is stopped on success and assertion failure; successful
+runs remove their repositories. Existing `reset_cli` tests cover process timeout,
+cancellation, and transient-failure classification separately.
+
+The benchmark compares the old **supervised parallel** home runner with Rust using
+one and four workers on twelve clones, three rotated trials, a controlled 250 ms
+fetch delay, and verified final HEADs. It also measures Rust help startup and
+repository discovery. This measures controlled local latency, not live remote
+performance. Keep an isolated baseline copy before removing the old runner.
 
 ## Tooling
 
@@ -110,7 +142,7 @@ Command roles:
 - `repair-codex-config`: removes deprecated/disabled Codex feature flags from `~/.codex/config.toml`.
 - `prepare`: runs the same verification as `check`.
 - `pre-commit`: validates an isolated snapshot of the Git index, so unstaged and untracked work cannot affect the commit checks. Outside Git, runs `prepare` on the supplied checkout. No home installation is required.
-- `install`: intentional home-directory mutation for `~/.agents`, custom `~/.codex/skills` and `~/.claude/skills` symlinks, Codex config flag repair, `~/.local/bin/config-tools`. Codex itself is installed and updated through its official distribution; this installer does not create a Codex launcher.
+- `install`: intentional home-directory mutation for `~/.agents`, custom `~/.codex/skills` and `~/.claude/skills` symlinks, Codex config flag repair, `~/.local/bin/config-tools` and `~/.local/bin/reset_to_origin`. Codex itself is installed and updated through its official distribution; this installer does not create a Codex launcher.
 - `install-git-hooks`: intentional local Git config mutation for `core.hooksPath`.
 
 ## Custom skills
@@ -229,7 +261,7 @@ Expected symlink behavior:
 - `~/.config/ghostty/config` links to this config checkout's `ghostty/config` file.
 - `~/Library/Application Support/com.mitchellh.ghostty/config` is absent so Ghostty loads the managed config only once.
 - `~/.config/relay/config.toml` links to this config checkout's `relay/config.toml` file.
-- `~/.local/bin/config-tools` is a runnable copy of the config helper.
+- `~/.local/bin/config-tools` and `~/.local/bin/reset_to_origin` are runnable copies of the Rust multicall executable.
 - Codex runs directly from the official Homebrew installation. The shell prefers `/opt/homebrew/bin` over older `/usr/local/bin` tools; no config-repair wrapper is installed.
 - `~/.codex/skills/.system` remains a Codex-owned directory with Codex system skills.
 - Each custom top-level `.agents/skills/<name>/SKILL.md` directory links into `~/.codex/skills/<name>` and `~/.claude/skills/<name>`.
@@ -255,22 +287,3 @@ The executable-file check should print only:
 ```
 
 `.githooks/pre-commit` delegates to Rust and should contain no config-tool logic beyond `cargo run -- pre-commit`.
-
-## Resetting workspace repositories
-
-`home_reset_to_origin` processes canonical repositories with four supervised workers, preserving linked worktrees and local branches. Use `--list` to inspect discovery without resetting anything. Fetch failures stop that repository before reset.
-
-Safe recovery of remote branch case collisions is automatic for every repository. Run:
-
-```bash
-home_reset_to_origin
-```
-
-A normal fetch runs first. Git errors and the fetched branch list are checked for case collisions; recovery allows one repeat fetch. Healthy repositories need no extra network probe. Use `--no-resolve-case-conflicts` to disable recovery. Recovery changes only the checkout's Git configuration and remote-tracking references. It keeps the remote default branch, an explicitly requested target, local branch names, and local upstream dependencies. It refuses recovery when multiple colliding branches are protected or the fetch mapping is customized. Otherwise it keeps the lowercase spelling when available and excludes the other spellings with exact negative fetch refspecs. Existing tracking tips are saved under `refs/home-reset-backups/case-conflicts/` before removal. Remote branches and linked worktree contents are untouched. Recovery is unnecessary on case-sensitive filesystems or with reftable storage; tag collisions still require manual repair.
-
-Exclusions persist for ordinary future fetches. Routine runs show only a count of repositories using saved exclusions in the completion summary. Newly resolved case collisions get one brief summary notice; failures still appear immediately. Exact exclusions and newly added case-conflict exclusions are recorded in `results.json` and the repository logs, available with `--verbose`. To undo one exclusion after its remote collision is resolved:
-
-```bash
-git -C /path/to/repository config --local --fixed-value --unset-all remote.origin.fetch '^refs/heads/EXCLUDED_BRANCH'
-git -C /path/to/repository fetch --prune origin
-```
