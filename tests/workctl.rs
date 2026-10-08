@@ -468,11 +468,16 @@ fn atomic_install_migrates_owned_files_preserves_foreign_files_and_works_in_fres
         fs::copy(env!("CARGO_BIN_EXE_config-tools"), bin.join(n)).unwrap();
     }
     let install = || {
-        Command::new(env!("CARGO_BIN_EXE_config-tools"))
-            .args(["install-workctl", "--home"])
-            .arg(home.path())
-            .output()
-            .unwrap()
+        use std::os::unix::process::CommandExt;
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_config-tools"));
+        cmd.args(["install-workctl", "--home"]).arg(home.path());
+        unsafe {
+            cmd.pre_exec(|| {
+                libc::umask(0o002);
+                Ok(())
+            });
+        }
+        cmd.output().unwrap()
     };
     let out = install();
     assert!(out.status.success(), "{}", text(&out));
@@ -481,6 +486,21 @@ fn atomic_install_migrates_owned_files_preserves_foreign_files_and_works_in_fres
         .path()
         .join(".local/share/zsh/site-functions/_workctl")
         .exists());
+    for name in [
+        ".local/share",
+        ".local/share/zsh",
+        ".local/share/zsh/site-functions",
+    ] {
+        assert_eq!(
+            fs::metadata(home.path().join(name))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o022,
+            0,
+            "{name} must not be group or world writable"
+        );
+    }
     for shell in ["sh", "zsh"] {
         let out = Command::new(shell)
             .args([
@@ -498,7 +518,7 @@ fn atomic_install_migrates_owned_files_preserves_foreign_files_and_works_in_fres
         assert!(text(&out).contains("workctl"));
     }
     let out = Command::new("zsh")
-        .args(["-f", "-c", "fpath=(\"$HOME/.local/share/zsh/site-functions\" $fpath); autoload -Uz compinit; compinit -D; rehash; [[ ${_comps[workctl]} == _workctl ]] && autoload +X _workctl && ! whence reset_to_origin && workctl doctor --json"])
+        .args(["-f", "-c", "fpath=(\"$HOME/.local/share/zsh/site-functions\" $fpath); autoload -Uz compinit compaudit; compaudit || exit 1; compinit -D; rehash; [[ ${_comps[workctl]} == _workctl ]] && autoload +X _workctl && ! whence reset_to_origin && workctl doctor --json"])
         .env("HOME", home.path())
         .env("PATH", format!("{}:{}", bin.display(), "/usr/bin:/bin"))
         .output().unwrap();

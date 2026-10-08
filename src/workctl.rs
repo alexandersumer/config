@@ -142,7 +142,7 @@ fn doctor(json: bool) -> u8 {
                 .nth(2)
                 .is_some_and(|v| {
                     let n: Vec<_> = v.split('.').filter_map(|s| s.parse::<u32>().ok()).collect();
-                    n.len() >= 2 && (n[0] > 2 || n[0] == 2 && n[1] >= 31)
+                    n.len() >= 2 && (n[0] > 2 || n[0] == 2 && n[1] >= 36)
                 })
     });
     let executable = std::env::current_exe().ok();
@@ -170,7 +170,7 @@ fn doctor(json: bool) -> u8 {
         "Failed"
     };
     if json { let write = crate::presentation::json(&serde_json::json!({"schema_version":1,"operation":"doctor","status":if code==130 {"interrupted"} else if code==0 {"completed"} else {"failed"},"checks":checks})); if write != 0 { return write; } }
-    else if writeln!(std::io::stdout(), "Workstation doctor\n\nScope          Local installation\nExecutable     {}\nGit            {} (requires 2.31+)\nTemporary dir  {}\nProcess groups {}\nRepo locks     {}\n\n{}",
+    else if writeln!(std::io::stdout(), "Workstation doctor\n\nScope          Local installation\nExecutable     {}\nGit            {} (requires 2.36+)\nTemporary dir  {}\nProcess groups {}\nRepo locks     {}\n\n{}",
         executable.map(|p|crate::presentation::safe_text(&p.to_string_lossy())).unwrap_or("unavailable".into()),
         checks["git"].as_str().unwrap_or("unavailable"), if temp.is_ok() {"available"} else {"unavailable"}, if groups {"available"} else {"unavailable"}, if locking {"available"} else {"unavailable"}, crate::presentation::status(outcome,code!=0,false)).is_err() { return 1; }
     code

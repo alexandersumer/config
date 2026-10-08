@@ -629,6 +629,16 @@ fn atomic_copy(source: &Path, target: &Path) -> Result<()> {
     staged.persist(target).map_err(|e| e.to_string())?;
     Ok(())
 }
+fn create_managed_directory(path: &Path) -> Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+    // Apply a safe mode to newly created parents too, even under a group-writable umask.
+    // Existing directories retain their permissions and ownership.
+    fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o755)
+        .create(path)
+        .map_err(|e| format!("{}: cannot create managed directory: {e}", path.display()))
+}
 fn install_workctl(home: &Path) -> Result<()> {
     use std::io::Write;
     let source = env::current_exe().map_err(|e| e.to_string())?;
@@ -655,8 +665,8 @@ fn install_workctl(home: &Path) -> Result<()> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => return Err(e.to_string()),
     }
-    fs::create_dir_all(target.parent().unwrap()).map_err(|e| e.to_string())?;
-    fs::create_dir_all(completion.parent().unwrap()).map_err(|e| e.to_string())?;
+    create_managed_directory(target.parent().unwrap())?;
+    create_managed_directory(completion.parent().unwrap())?;
     let mut staged =
         tempfile::NamedTempFile::new_in(completion.parent().unwrap()).map_err(|e| e.to_string())?;
     let generated = crate::workctl::completions(clap_complete::Shell::Zsh);

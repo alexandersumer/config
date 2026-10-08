@@ -18,7 +18,8 @@ workctl completions zsh
 
 Build with `cargo build --locked --release`. Install only the workstation CLI with
 `cargo run --release -- install-workctl`; use `--home PATH` for an isolated home.
-The full configuration installer also installs it. Both update the internal managed
+The full configuration installer also installs it. New completion directories use permissions accepted by zsh’s security checks,
+including when the shell has a group-writable umask. Both update the internal managed
 `config-tools` installer and install the compiled binary
 atomically at `~/.local/bin/workctl` and generated zsh completion at
 `~/.local/share/zsh/site-functions/_workctl`. The tracked zsh configuration adds
@@ -139,7 +140,7 @@ recovery refs, attempts, and retained diagnostics. Cleanup reports protected pri
 checkouts, discard decisions, and publication/local-data evidence for eligible targets.
 Per-target `path` is a display string; `path_bytes` is the exact Unix path as an array
 of byte values, preserving non-UTF-8 filenames. Help, version, and usage errors follow
-Clap conventions even when `--json` is present. Doctor checks Git 2.31+, the executable,
+Clap conventions even when `--json` is present. Doctor checks Git 2.36+, the executable,
 temporary storage, and relevant process/lock capabilities without repairs.
 
 ### Architecture and verification
