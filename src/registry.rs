@@ -38,6 +38,7 @@ const REQUIRED_CUSTOM_SKILL_NAMES: &[&str] = &[
     "architecture-review-solo",
     "feature-flag-clean-up",
     "clear-merge-blockers",
+    "comment-on-pull-request",
     "create-chat-plan",
     "create-plan",
     "branch-description",
