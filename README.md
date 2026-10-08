@@ -133,11 +133,20 @@ diagnostics on failure/interruption or `--keep-logs`, including `results.json` a
 publication repositories and captures are removed automatically.
 
 `--json` works before or after a subcommand and produces one undecorated JSON document
-on stdout. Schema version 1 has `schema_version`, `operation`, and `status`; operational
+on stdout. Reset and doctor use schema version 1; cleanup uses version 2. Each has `schema_version`, `operation`, and `status`; operational
 errors have `error`. Reset and cleanup include scope, per-target `results`, and summary
 counts with `elapsed_seconds`. Reset additionally reports excluded worktrees,
 recovery refs, attempts, and retained diagnostics. Cleanup reports protected primary
 checkouts, discard decisions, and publication/local-data evidence for eligible targets.
+Cleanup version 2 reserves `blocked` for pre-removal refusals. After removal starts,
+`removed` requires verified absence of both the path and registration; `failed` means
+one remains; `unverified` means the final state could not be checked. Inspected evidence
+is retained for these outcomes. A verified removal following a Git error still counts
+as removed, carries a reason, and exits unsuccessfully. Summary `failed` and `unverified`
+count those outcomes; `errors` also includes verified removals with Git errors. These
+errors produce operation status `failed` and exit 1 (SIGINT remains exit 130).
+Consumers of cleanup version 1 must handle these statuses and summary fields before
+accepting version 2. No failed deletion is retried.
 Per-target `path` is a display string; `path_bytes` is the exact Unix path as an array
 of byte values, preserving non-UTF-8 filenames. Help, version, and usage errors follow
 Clap conventions even when `--json` is present. Doctor checks Git 2.36+, the executable,

@@ -135,7 +135,7 @@ impl Runtime {
             "JSON must not contain terminal decoration"
         );
         let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-        assert_eq!(result["schema_version"], 1);
+        assert_eq!(result["schema_version"], 2);
         result
     }
     fn serve(&mut self, origin: &Path) -> String {

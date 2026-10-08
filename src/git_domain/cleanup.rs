@@ -472,7 +472,26 @@ fn local_data(status: &[u8], flags: &[u8]) -> String {
         .count();
     format!("{tracked} tracked changes, {untracked} untracked entries, {ignored} ignored entries, {masked} masked tracked paths")
 }
-fn execute(args: &Args, candidate: &Candidate, discard: bool) -> Result<Snapshot, String> {
+struct Failure {
+    status: &'static str,
+    reason: String,
+    evidence: Option<Snapshot>,
+}
+impl From<String> for Failure {
+    fn from(reason: String) -> Self {
+        Self {
+            status: "blocked",
+            reason,
+            evidence: None,
+        }
+    }
+}
+impl From<&str> for Failure {
+    fn from(reason: &str) -> Self {
+        reason.to_owned().into()
+    }
+}
+fn execute(args: &Args, candidate: &Candidate, discard: bool) -> Result<Snapshot, Failure> {
     if runtime::cancelled() {
         return Err("Interrupted before inspection".into());
     }
@@ -505,15 +524,38 @@ fn execute(args: &Args, candidate: &Candidate, discard: bool) -> Result<Snapshot
         }
         remove.push(OsStr::new("--"));
         remove.push(path.as_os_str());
-        session.call(&candidate.primary, &remove)?;
-        if git::exists(path)?
-            || session
-                .list(&candidate.primary)?
-                .iter()
-                .any(|r| r.path == *path)
-        {
-            return Err("removal did not verify: path or Git registration remains".into());
-        }
+        let removal = session.call(&candidate.primary, &remove);
+        let verification = git::exists(path).and_then(|exists| {
+            session
+                .list(&candidate.primary)
+                .map(|registrations| !exists && !registrations.iter().any(|r| r.path == *path))
+        });
+        let (status, reason) = match (removal, verification) {
+            (Ok(_), Ok(true)) => return Ok(first),
+            (Err(e), Ok(true)) => (
+                "removed",
+                format!("removal verified despite Git error: {e}"),
+            ),
+            (result, Ok(false)) => (
+                "failed",
+                format!(
+                    "removal did not verify: path or Git registration remains{}",
+                    result.err().map(|e| format!("; {e}")).unwrap_or_default()
+                ),
+            ),
+            (result, Err(e)) => (
+                "unverified",
+                format!(
+                    "removal outcome could not be verified: {e}{}",
+                    result.err().map(|e| format!("; {e}")).unwrap_or_default()
+                ),
+            ),
+        };
+        return Err(Failure {
+            status,
+            reason,
+            evidence: Some(first),
+        });
     }
     Ok(first)
 }
@@ -533,7 +575,7 @@ pub(crate) fn run(args: Args, json: bool) -> u8 {
             let code = if runtime::interrupted() { 130 } else { 1 };
             if json {
                 let _ = presentation::json(
-                    &serde_json::json!({"schema_version":1,"operation":"git.worktree.clean","status":if code==130 {"interrupted"}else{"failed"},"error":e}),
+                    &serde_json::json!({"schema_version":2,"operation":"git.worktree.clean","status":if code==130 {"interrupted"}else{"failed"},"error":e}),
                 );
             }
             code
@@ -579,7 +621,7 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
     let mut results = Vec::new();
     for candidate in &selected.candidates {
         let path = &candidate.registration.path;
-        let action = std::thread::scope(|scope| -> Result<Snapshot, String> {
+        let action = std::thread::scope(|scope| -> Result<Snapshot, Failure> {
             let (tx, rx) = std::sync::mpsc::channel();
             let discard = discard.contains(path);
             scope.spawn(move || {
@@ -588,19 +630,27 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
             loop {
                 if let Err(e) = progress.update(results.len(), 1) {
                     runtime::cancel();
-                    return Err(e);
+                    return Err(Failure {
+                        status: "unverified",
+                        reason: e,
+                        evidence: None,
+                    });
                 }
                 match rx.recv_timeout(Duration::from_millis(100)) {
                     Ok(result) => return result,
                     Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
                     Err(e) => {
                         runtime::cancel();
-                        return Err(format!("cleanup worker reporting failed: {e}"));
+                        return Err(Failure {
+                            status: "unverified",
+                            reason: format!("cleanup worker reporting failed: {e}"),
+                            evidence: None,
+                        });
                     }
                 }
             }
         });
-        let metadata=action.as_ref().ok().map(|snapshot| serde_json::json!({"head":snapshot.head,"local_data":local_data(&snapshot.status,&snapshot.flags),"remote":args.remote}));
+        let metadata=action.as_ref().map(Some).unwrap_or_else(|e| e.evidence.as_ref()).map(|snapshot| serde_json::json!({"head":snapshot.head,"local_data":local_data(&snapshot.status,&snapshot.flags),"remote":args.remote}));
         let (status, reason) = match action {
             Ok(_) => (
                 if args.apply {
@@ -611,12 +661,12 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
                 None,
             ),
             Err(e) => (
-                if runtime::cancelled() {
+                if runtime::cancelled() && e.status == "blocked" {
                     "interrupted"
                 } else {
-                    "blocked"
+                    e.status
                 },
-                Some(e),
+                Some(e.reason),
             ),
         };
         let detail = format!(
@@ -649,13 +699,27 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
         .iter()
         .filter(|r| r["status"] == "interrupted")
         .count();
+    let failed = results.iter().filter(|r| r["status"] == "failed").count();
+    let unverified = results
+        .iter()
+        .filter(|r| r["status"] == "unverified")
+        .count();
+    let errors = results
+        .iter()
+        .filter(|r| {
+            matches!(r["status"].as_str(), Some("failed" | "unverified"))
+                || (r["status"] == "removed" && !r["reason"].is_null())
+        })
+        .count();
     let code = if runtime::interrupted() {
         130
     } else {
-        u8::from(blocked > 0)
+        u8::from(blocked > 0 || errors > 0 || interrupted > 0)
     };
     let status = if code == 130 {
         "interrupted"
+    } else if errors > 0 {
+        "failed"
     } else if code != 0 {
         "blocked"
     } else if args.apply {
@@ -665,7 +729,7 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
     };
     if json {
         if presentation::json(
-            &serde_json::json!({"schema_version":1,"operation":"git.worktree.clean","status":status,"apply":args.apply,"scope":presentation::paths(&args.paths),"protected":presentation::paths(&selected.protected),"results":results,"summary":{"removed":removed,"would_remove":would_remove,"blocked":blocked,"interrupted":interrupted,"elapsed_seconds":started.elapsed().as_secs_f64()}}),
+            &serde_json::json!({"schema_version":2,"operation":"git.worktree.clean","status":status,"apply":args.apply,"scope":presentation::paths(&args.paths),"protected":presentation::paths(&selected.protected),"results":results,"summary":{"removed":removed,"would_remove":would_remove,"blocked":blocked,"failed":failed,"unverified":unverified,"errors":errors,"interrupted":interrupted,"elapsed_seconds":started.elapsed().as_secs_f64()}}),
         ) != 0
         {
             return Ok(1);
@@ -673,6 +737,8 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
     } else {
         let outcome = if code == 130 {
             "Interrupted"
+        } else if errors > 0 {
+            "Completed with errors"
         } else if code != 0 {
             "Completed with blockers"
         } else if args.apply {
@@ -693,6 +759,13 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
             }
         )
         .map_err(|e| e.to_string())?;
+        if errors > 0 {
+            writeln!(
+                out,
+                "  {failed} failed\n  {unverified} unverified\n  {errors} errors"
+            )
+            .map_err(|e| e.to_string())?;
+        }
         if interrupted > 0 {
             writeln!(out, "  {interrupted} interrupted").map_err(|e| e.to_string())?;
         }

@@ -851,3 +851,92 @@ fn failed_publication_redacts_url_credentials_in_human_and_json_diagnostics() {
         f.unchanged();
     }
 }
+
+#[test]
+fn cleanup_reports_post_removal_errors_from_verified_state() {
+    let real_git = Command::new("sh")
+        .args(["-c", "command -v git"])
+        .output()
+        .unwrap();
+    let real_git = String::from_utf8(real_git.stdout).unwrap();
+    for (mode, expected, removed) in [
+        ("after", "removed", true),
+        ("before", "failed", false),
+        ("verify", "unverified", true),
+    ] {
+        for json in [true, false] {
+            let f = Fixture::new();
+            let bin = f.temp.path().join("bin");
+            fs::create_dir(&bin).unwrap();
+            let wrapper = bin.join("git");
+            fs::write(&wrapper, r#"#!/bin/sh
+case "$*" in
+  *"worktree remove"*)
+    echo attempted >> "$PROBE_ATTEMPTS"
+    if [ "$PROBE_MODE" = before ]; then echo injected refusal >&2; exit 1; fi
+    "$REAL_GIT" "$@" || exit $?
+    touch "$PROBE_STAMP"
+    if [ "$PROBE_MODE" = after ]; then echo injected reporting failure >&2; exit 1; fi
+    exit 0;;
+  *"worktree list"*)
+    if [ "$PROBE_MODE" = verify ] && [ -f "$PROBE_STAMP" ]; then echo injected verification failure >&2; exit 1; fi;;
+esac
+exec "$REAL_GIT" "$@"
+"#).unwrap();
+            fs::set_permissions(&wrapper, fs::Permissions::from_mode(0o755)).unwrap();
+            let attempts = f.temp.path().join("attempts");
+            let canonical_path = f.worktree.canonicalize().unwrap();
+            let mut command = Command::new(BIN);
+            env(&mut command).args(["git", "worktree", "clean", "--apply"]);
+            if json {
+                command.arg("--json");
+            }
+            let out = command
+                .arg(&f.worktree)
+                .env(
+                    "PATH",
+                    format!("{}:{}", bin.display(), std::env::var("PATH").unwrap()),
+                )
+                .env("REAL_GIT", real_git.trim())
+                .env("PROBE_MODE", mode)
+                .env("PROBE_STAMP", f.temp.path().join("stamp"))
+                .env("PROBE_ATTEMPTS", &attempts)
+                .output()
+                .unwrap();
+            assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+            if json {
+                let r: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+                assert_eq!(r["results"][0]["status"], expected, "{mode}: {r}");
+                assert_eq!(r["schema_version"], 2);
+                assert_eq!(r["status"], "failed");
+                assert_eq!(r["summary"]["blocked"], 0);
+                assert_eq!(r["summary"]["errors"], 1);
+                assert_eq!(r["summary"]["removed"], usize::from(expected == "removed"));
+                assert_eq!(r["summary"]["failed"], usize::from(expected == "failed"));
+                assert_eq!(
+                    r["summary"]["unverified"],
+                    usize::from(expected == "unverified")
+                );
+                assert!(r["results"][0]["evidence"]["head"].is_string());
+                assert!(r["results"][0]["reason"].is_string());
+                assert!(!out.stdout.contains(&0x1b));
+            } else {
+                let output = String::from_utf8(out.stdout).unwrap();
+                assert!(
+                    output.contains(&format!("{expected}: {}", canonical_path.display())),
+                    "{output}"
+                );
+                assert!(output.contains("Completed with errors"));
+                assert!(output.contains("0 blocked"));
+            }
+            assert_eq!(f.worktree.exists(), !removed);
+            let registrations = git(&f.repo, &["worktree", "list", "--porcelain"]);
+            assert_eq!(
+                registrations.contains(f.worktree.to_str().unwrap()),
+                !removed
+            );
+            assert_eq!(fs::read_to_string(attempts).unwrap(), "attempted\n");
+            assert!(f.repo.exists());
+        }
+    }
+}
