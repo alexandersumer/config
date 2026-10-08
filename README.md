@@ -35,13 +35,26 @@ one explicitly fails. Overlapping inputs run each checkout once. All inputs and
 discovery must succeed before any reset starts.
 
 The runner inherits the supervised parallel model of `home_reset_to_origin`:
-four workers across all supplied roots, common-directory locks, per-attempt
+up to 32 workers across all supplied roots (limited by repository count),
+common-directory locks, per-attempt
 deadlines, bounded transient retries, preserved local branches/worktrees, and
 recoverable target-branch tips. One repository uses the same runner and safety
 checks as a batch. `--attempts` means total attempts, default three; `--timeout`
 is seconds for the entire attempt, default 300. Limits are 32 workers, 10 attempts,
 and 86400 seconds per attempt. Network retries use capped exponential backoff with jitter.
 Authentication, Git locks, and safety refusals are not retried.
+Use `--jobs N` to override the measured default, for example when sharing bandwidth
+or using a remote with stricter connection limits.
+
+The default was selected from two passes in opposing order against real Git
+remotes, using disposable repositories and existing objects as read-only alternates.
+For 40 size-bounded working checkouts, median complete-reset times were 54.1s
+with 4 workers, 18.3s with 16, 16.6s with 24, and 11.9s with 32. All attempts
+succeeded without retries; final commits, upstreams, clean tracked files, and
+recovery refs were verified. A separate 44-repository advertisement/fetch comparison
+also favored 32 workers. These are observed results for that workload, not a
+guarantee for every remote or machine; large cold downloads and Git LFS transfers
+were outside the controlled working-checkout comparison.
 
 The operation refuses tracked/index changes, dirty submodules, unfinished Git
 operations, tracked paths marked assume-unchanged or skip-worktree, and untracked
@@ -122,11 +135,19 @@ prints its path. The daemon is stopped on success and assertion failure; success
 runs remove their repositories. Existing `reset_cli` tests cover process timeout,
 cancellation, and transient-failure classification separately.
 
-The benchmark compares the old **supervised parallel** home runner with Rust using
-one and four workers on twelve clones, three rotated trials, a controlled 250 ms
-fetch delay, and verified final HEADs. It also measures Rust help startup and
-repository discovery. This measures controlled local latency, not live remote
-performance. Keep an isolated baseline copy before removing the old runner.
+A reproducible local benchmark compares configurable worker counts without any
+legacy runner dependency. It uses disposable repositories, rotated trials,
+controlled fetch latency, and verified final tips, upstreams, tracked state, and
+recovery refs. This measures controlled local latency, not live remote performance.
+
+```sh
+cargo +stable build --locked --release
+cargo +stable run --locked --release --example reset_benchmark -- \
+  --binary target/release/config-tools --output /tmp/reset-worker-benchmark.json
+```
+
+Use its generated `--help` to adjust worker counts, repository count, trials, or
+fetch delay. Temporary checkouts and diagnostics are removed automatically.
 
 ## Tooling
 

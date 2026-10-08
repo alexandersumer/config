@@ -45,7 +45,7 @@ struct Cli {
     #[arg(long, value_name = "NAME", value_parser = git_name)]
     branch: Option<String>,
     /// Concurrent repositories (1-32)
-    #[arg(short = 'j', long, default_value_t = 4, value_name = "N", value_parser = clap::value_parser!(u32).range(1..=32))]
+    #[arg(short = 'j', long, default_value_t = 32, value_name = "N", value_parser = clap::value_parser!(u32).range(1..=32))]
     jobs: u32,
     /// Total attempts per repository (1-10)
     #[arg(long, default_value_t = 3, value_name = "N", value_parser = clap::value_parser!(u32).range(1..=10))]

@@ -1,10 +1,41 @@
-//! Controlled local benchmark. All reset operations target disposable clones.
+//! Reproducible worker-count comparison using only disposable Git checkouts.
+use clap::Parser;
+use std::collections::BTreeMap;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::Instant;
 
+#[derive(Parser)]
+#[command(about = "Compare reset worker counts on disposable local repositories")]
+struct Args {
+    /// Compiled config-tools or reset_to_origin executable
+    #[arg(long)]
+    binary: PathBuf,
+    /// JSON result destination
+    #[arg(long)]
+    output: PathBuf,
+    /// Worker counts to compare
+    #[arg(long, value_delimiter = ',', default_value = "1,4,8,16,24,32", value_parser = clap::value_parser!(u32).range(1..=32))]
+    jobs: Vec<u32>,
+    /// Number of disposable repositories
+    #[arg(long, default_value_t = 64, value_parser = clap::value_parser!(u32).range(1..=512))]
+    repositories: u32,
+    /// Trials per worker count, with rotated execution order
+    #[arg(long, default_value_t = 3, value_parser = clap::value_parser!(u32).range(1..=10))]
+    runs: u32,
+    /// Controlled latency added to each local fetch, in seconds
+    #[arg(long, default_value = "0.25", value_parser = delay)]
+    fetch_delay: f64,
+}
+fn delay(value: &str) -> Result<f64, String> {
+    value
+        .parse::<f64>()
+        .ok()
+        .filter(|n| n.is_finite() && (0.0..=60.0).contains(n))
+        .ok_or_else(|| "expected a finite delay from 0 to 60 seconds".into())
+}
 fn configured(cmd: &mut Command) -> &mut Command {
     cmd.env("GIT_CONFIG_NOSYSTEM", "1")
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
@@ -12,7 +43,6 @@ fn configured(cmd: &mut Command) -> &mut Command {
         .env("GIT_AUTHOR_EMAIL", "benchmark@example.com")
         .env("GIT_COMMITTER_NAME", "Benchmark")
         .env("GIT_COMMITTER_EMAIL", "benchmark@example.com")
-        .env("PYTHONDONTWRITEBYTECODE", "1")
 }
 fn checked(cmd: &mut Command) -> Output {
     let output = configured(cmd).output().expect("launch command");
@@ -30,33 +60,20 @@ fn git(cwd: &Path, args: &[&str]) -> String {
         .trim()
         .into()
 }
-fn median(mut samples: Vec<f64>) -> f64 {
-    samples.sort_by(f64::total_cmp);
-    samples[samples.len() / 2]
+fn median(mut values: Vec<f64>) -> f64 {
+    values.sort_by(f64::total_cmp);
+    let middle = values.len() / 2;
+    if values.len().is_multiple_of(2) {
+        (values[middle - 1] + values[middle]) / 2.0
+    } else {
+        values[middle]
+    }
 }
 fn main() {
-    let mut args = std::env::args().skip(1);
-    let mut binary = None;
-    let mut baseline = None;
-    let mut output = None;
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "--binary" => binary = args.next().map(PathBuf::from),
-            "--baseline" => baseline = args.next().map(PathBuf::from),
-            "--output" => output = args.next().map(PathBuf::from),
-            _ => panic!("unknown option {arg}"),
-        }
-    }
-    let binary = binary
-        .expect("--binary COMPILED_CONFIG_TOOLS")
-        .canonicalize()
-        .unwrap();
-    let baseline = baseline
-        .expect("--baseline OLD_RUNNER_DIRECTORY")
-        .canonicalize()
-        .unwrap();
-    let destination = output.expect("--output RESULT_JSON");
+    let args = Args::parse();
     let root = tempfile::tempdir().unwrap();
+    let binary = root.path().join("reset_to_origin");
+    fs::copy(args.binary, &binary).expect("copy standalone executable");
     let seed = root.path().join("seed");
     let remote = root.path().join("origin.git");
     let workspace = root.path().join("workspace");
@@ -83,8 +100,8 @@ fn main() {
     );
     let old = git(&seed, &["rev-parse", "HEAD"]);
     let mut repos = vec![];
-    for n in 0..12 {
-        let repo = workspace.join(format!("repo-{n:02}"));
+    for n in 0..args.repositories {
+        let repo = workspace.join(format!("repo-{n:03}"));
         git(
             &workspace,
             &["clone", remote.to_str().unwrap(), repo.to_str().unwrap()],
@@ -103,68 +120,62 @@ fn main() {
             .stdout,
     )
     .unwrap();
-    fs::write(shim.join("git"),format!("#!/bin/sh\nfor arg in \"$@\"; do if [ \"$arg\" = fetch ]; then sleep 0.25; fi; done\nexec '{}' \"$@\"\n",real_git.trim())).unwrap();
+    let escaped = real_git.trim().replace('\'', "'\\''");
+    fs::write(shim.join("git"), format!("#!/bin/sh\nfor arg in \"$@\"; do if [ \"$arg\" = fetch ]; then sleep {}; fi; done\nexec '{}' \"$@\"\n", args.fetch_delay, escaped)).unwrap();
     fs::set_permissions(shim.join("git"), fs::Permissions::from_mode(0o755)).unwrap();
     let path = format!("{}:{}", shim.display(), std::env::var("PATH").unwrap());
-    let mut samples = std::collections::BTreeMap::<String, Vec<f64>>::new();
-    for order in [
-        ["home-4", "rust-1", "rust-4"],
-        ["rust-4", "home-4", "rust-1"],
-        ["rust-1", "rust-4", "home-4"],
-    ] {
-        for mode in order {
+    let mut samples = BTreeMap::<u32, Vec<f64>>::new();
+    for trial in 0..args.runs as usize {
+        for offset in 0..args.jobs.len() {
+            let jobs = args.jobs[(trial + offset) % args.jobs.len()];
             for repo in &repos {
                 git(repo, &["reset", "--hard", &old]);
             }
-            let mut command = if mode == "home-4" {
-                let mut c = Command::new("python3");
-                c.arg(baseline.join("home_reset.py")).args([
-                    "--root",
-                    workspace.to_str().unwrap(),
-                    "--jobs",
-                    "4",
-                    "--retries",
-                    "1",
-                    "--no-resolve-case-conflicts",
-                ]);
-                c
-            } else {
-                let mut c = Command::new(&binary);
-                c.args([
-                    "reset-to-origin",
-                    "--jobs",
-                    if mode == "rust-1" { "1" } else { "4" },
-                    "--attempts",
-                    "1",
-                    workspace.to_str().unwrap(),
-                ]);
-                c
-            };
-            command.env("PATH", &path);
+            let mut command = Command::new(&binary);
+            command
+                .args(["--jobs", &jobs.to_string(), "--attempts", "1"])
+                .arg(&workspace)
+                .env("PATH", &path)
+                .env("TMPDIR", root.path());
             let started = Instant::now();
             checked(&mut command);
             let seconds = started.elapsed().as_secs_f64();
             for repo in &repos {
                 assert_eq!(git(repo, &["rev-parse", "HEAD"]), new);
+                assert_eq!(git(repo, &["rev-parse", "@{upstream}"]), new);
+                assert!(git(
+                    repo,
+                    &[
+                        "--no-optional-locks",
+                        "status",
+                        "--porcelain",
+                        "--untracked-files=no"
+                    ]
+                )
+                .is_empty());
+                let backups = git(
+                    repo,
+                    &[
+                        "for-each-ref",
+                        "--format=%(objectname)",
+                        "refs/home-reset-backups/",
+                    ],
+                );
+                assert!(!backups.is_empty());
+                assert!(backups.lines().all(|oid| oid == old));
             }
-            println!("{mode}: {seconds:.3}s; all 12 HEADs verified");
-            samples.entry(mode.into()).or_default().push(seconds);
+            println!(
+                "{jobs} workers: {seconds:.3}s; all {} checkouts verified",
+                repos.len()
+            );
+            samples.entry(jobs).or_default().push(seconds);
         }
     }
-    let mut startup = vec![];
-    for _ in 0..10 {
-        let start = Instant::now();
-        checked(Command::new(&binary).args(["reset-to-origin", "--help"]));
-        startup.push(start.elapsed().as_secs_f64());
-    }
-    let start = Instant::now();
-    checked(Command::new(&binary).args(["reset-to-origin", "--list", workspace.to_str().unwrap()]));
-    let discovery = start.elapsed().as_secs_f64();
-    let medians: std::collections::BTreeMap<_, _> = samples
+    let medians: BTreeMap<_, _> = samples
         .iter()
-        .map(|(name, samples)| (name.clone(), median(samples.clone())))
+        .map(|(jobs, samples)| (*jobs, median(samples.clone())))
         .collect();
-    let result = serde_json::json!({"repositories":12,"fetch_delay_seconds":0.25,"baseline":"supervised home_reset_to_origin, case recovery disabled","samples":samples,"median_seconds":medians,"speedup_rust4_vs_home4":medians["home-4"]/medians["rust-4"],"speedup_rust4_vs_rust1":medians["rust-1"]/medians["rust-4"],"rust_help_median_seconds":median(startup),"rust_discovery_seconds":discovery});
-    fs::write(destination, serde_json::to_vec_pretty(&result).unwrap()).unwrap();
+    let result = serde_json::json!({"repositories":args.repositories,"fetch_delay_seconds":args.fetch_delay,"samples":samples,"median_seconds":medians,"scope":"controlled local latency; not live remote performance","verified":"HEAD, upstream, tracked state and recovery tips"});
+    fs::write(args.output, serde_json::to_vec_pretty(&result).unwrap()).unwrap();
     println!("{}", serde_json::to_string_pretty(&result).unwrap());
 }

@@ -1476,3 +1476,72 @@ fn failed_default_runs_retain_diagnostics_and_show_their_location() {
         "local work\n"
     );
 }
+
+#[test]
+fn optimized_default_pool_is_bounded_and_preserves_each_checkout() {
+    let f = Fixture::new();
+    let mut repos = vec![f.repo.clone()];
+    for n in 1..33 {
+        let repo = f.clone(&format!("repo-{n:02}"));
+        git(&repo, &["reset", "--hard", &f.old]);
+        repos.push(repo);
+    }
+    let trace = f.temp.path().join("default-worker-trace");
+    let shim = f.shim(&format!(
+        "for arg in \"$@\"; do if [ \"$arg\" = fetch ]; then printf 'start\\n' >> '{}'; sleep 2; printf 'end\\n' >> '{}'; fi; done",
+        trace.display(), trace.display()
+    ));
+    let mut cmd = Command::new(BIN);
+    env(&mut cmd);
+    cmd.args(["reset-to-origin", "--keep-logs", "--attempts=1"])
+        .env("TMPDIR", f.temp.path().join("runtime"))
+        .current_dir(&f.workspace);
+    f.with_shim(&mut cmd, &shim);
+    let out = cmd.output().unwrap();
+    success(&out);
+    let mut active = 0;
+    let mut peak = 0;
+    for event in fs::read_to_string(trace).unwrap().lines() {
+        if event == "start" {
+            active += 1;
+        } else {
+            active -= 1;
+        }
+        peak = peak.max(active);
+        assert!(active <= 32);
+    }
+    assert_eq!(active, 0);
+    assert!(
+        peak > 4,
+        "the default still serializes work into four slots"
+    );
+    assert!(text(&out).contains("Resetting 33 repositories with 32 workers..."));
+    let results: serde_json::Value =
+        serde_json::from_slice(&fs::read(logs(&out).join("results.json")).unwrap()).unwrap();
+    assert_eq!(results.as_array().unwrap().len(), 33);
+    for repo in repos {
+        assert_eq!(git(&repo, &["rev-parse", "HEAD"]), f.new);
+        assert_eq!(git(&repo, &["rev-parse", "@{upstream}"]), f.new);
+        assert!(git(
+            &repo,
+            &[
+                "--no-optional-locks",
+                "status",
+                "--porcelain",
+                "--untracked-files=no"
+            ]
+        )
+        .is_empty());
+        assert_eq!(
+            git(
+                &repo,
+                &[
+                    "for-each-ref",
+                    "--format=%(objectname)",
+                    "refs/home-reset-backups/"
+                ]
+            ),
+            f.old
+        );
+    }
+}
