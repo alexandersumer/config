@@ -461,19 +461,53 @@ fn git_program() -> String {
 }
 #[test]
 fn removal_success_requires_filesystem_and_registration_verification() {
-    let f = Fixture::new();
-    let bin = f.shim("case \"$*\" in *'worktree remove'*) exit 0;; esac");
-    let mut cmd = f.command(&["--apply"]);
-    cmd.arg(&f.worktree);
-    with_shim(&mut cmd, &bin);
-    let out = cmd.output().unwrap();
-    assert_eq!(out.status.code(), Some(1), "{}", text(&out));
-    let r: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert!(r["results"][0]["reason"]
-        .as_str()
-        .unwrap()
-        .contains("did not verify"));
-    f.unchanged();
+    for state in ["both", "path", "registration"] {
+        let f = Fixture::new();
+        let head = git(&f.worktree, &["rev-parse", "HEAD"]);
+        let bin = f.shim(
+            r#"case "$*" in
+  *'worktree remove'*)
+    echo attempted >> "$PROBE_ATTEMPTS"
+    case "$PROBE_STATE" in
+      path) "$REAL_GIT" "$@" || exit $?; mkdir "$PROBE_PATH";;
+      registration) rm -rf "$PROBE_PATH";;
+    esac
+    exit 0;;
+esac"#,
+        );
+        let attempts = f.temp.path().join("attempts");
+        let mut cmd = f.command(&["--apply"]);
+        cmd.arg(&f.worktree)
+            .env("PROBE_STATE", state)
+            .env("PROBE_PATH", &f.worktree)
+            .env("PROBE_ATTEMPTS", &attempts)
+            .env("REAL_GIT", git_program());
+        with_shim(&mut cmd, &bin);
+        let out = cmd.output().unwrap();
+        assert_eq!(out.status.code(), Some(1), "{state}: {}", text(&out));
+        let r: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(r["status"], "failed", "{state}: {r}");
+        assert_eq!(r["results"][0]["status"], "failed");
+        assert_eq!(r["summary"]["removed"], 0);
+        assert_eq!(r["summary"]["blocked"], 0);
+        assert_eq!(r["summary"]["failed"], 1);
+        assert_eq!(r["summary"]["unverified"], 0);
+        assert_eq!(r["summary"]["errors"], 1);
+        assert_eq!(r["results"][0]["evidence"]["head"], head);
+        assert!(r["results"][0]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("did not verify"));
+        assert_eq!(f.worktree.exists(), state != "registration");
+        assert_eq!(
+            git(&f.repo, &["worktree", "list", "--porcelain"])
+                .contains(f.worktree.to_str().unwrap()),
+            state != "path"
+        );
+        assert_eq!(fs::read_to_string(attempts).unwrap(), "attempted\n");
+        assert_eq!(git(&f.repo, &["status", "--porcelain"]), "");
+        assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), head);
+    }
 }
 #[test]
 fn deadline_and_cancellation_terminate_groups_without_retrying_cleanup() {
@@ -939,4 +973,140 @@ exec "$REAL_GIT" "$@"
             assert!(f.repo.exists());
         }
     }
+}
+
+#[test]
+fn revalidation_preserves_local_data_created_during_final_publication() {
+    let f = Fixture::new();
+    let head = git(&f.worktree, &["rev-parse", "HEAD"]);
+    let notes = f.worktree.join("late-notes");
+    let fetches = f.temp.path().join("fetches");
+    let attempted = f.temp.path().join("removal-attempted");
+    let bin = f.shim(
+        r#"for arg in "$@"; do
+  if [ "$arg" = fetch ]; then
+    if [ -f "$PROBE_FETCHES" ]; then printf 'precious\n' > "$PROBE_NOTES"; fi
+    echo fetch >> "$PROBE_FETCHES"
+  fi
+  if [ "$arg" = remove ]; then touch "$PROBE_ATTEMPTED"; fi
+done"#,
+    );
+    let mut cmd = f.command(&["--apply", "--discard-local"]);
+    cmd.arg(&f.worktree)
+        .arg(&f.worktree)
+        .env("PROBE_FETCHES", &fetches)
+        .env("PROBE_NOTES", &notes)
+        .env("PROBE_ATTEMPTED", &attempted);
+    with_shim(&mut cmd, &bin);
+    let out = cmd.output().unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+    let r: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(r["status"], "blocked");
+    assert_eq!(r["results"][0]["status"], "blocked");
+    assert_eq!(r["summary"]["blocked"], 1);
+    assert_eq!(r["summary"]["removed"], 0);
+    assert_eq!(r["summary"]["errors"], 0);
+    assert!(r["results"][0]["reason"]
+        .as_str()
+        .unwrap()
+        .contains("changed"));
+    assert_eq!(fs::read_to_string(fetches).unwrap(), "fetch\nfetch\n");
+    assert!(
+        !attempted.exists(),
+        "changed data must block before removal"
+    );
+    assert_eq!(fs::read_to_string(notes).unwrap(), "precious\n");
+    assert_eq!(git(&f.worktree, &["rev-parse", "HEAD"]), head);
+    assert_eq!(git(&f.repo, &["status", "--porcelain"]), "");
+    f.unchanged();
+}
+
+#[test]
+fn cancellation_after_native_removal_reports_unverified_and_releases_lock() {
+    use std::os::unix::process::CommandExt;
+    let f = Fixture::new();
+    let head = git(&f.worktree, &["rev-parse", "HEAD"]);
+    let started = f.temp.path().join("removed");
+    let release = f.temp.path().join("release");
+    let escaped = f.temp.path().join("escaped");
+    let attempts = f.temp.path().join("attempts");
+    let bin = f.shim(r#"case "$*" in
+  *'worktree remove'*)
+    echo attempted >> "$PROBE_ATTEMPTS"
+    "$REAL_GIT" "$@" || exit $?
+    (touch "$PROBE_STARTED"; while [ ! -f "$PROBE_RELEASE" ]; do sleep 0.05; done; touch "$PROBE_ESCAPED") &
+    sleep 30
+    exit 0;;
+esac"#);
+    let mut cmd = f.command(&["--apply", "--timeout", "30"]);
+    cmd.arg(&f.worktree)
+        .env("REAL_GIT", git_program())
+        .env("PROBE_ATTEMPTS", &attempts)
+        .env("PROBE_STARTED", &started)
+        .env("PROBE_RELEASE", &release)
+        .env("PROBE_ESCAPED", &escaped)
+        .process_group(0);
+    with_shim(&mut cmd, &bin);
+    let mut child = cmd
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !started.exists() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let reached_removal = started.exists();
+    unsafe {
+        libc::kill(child.id() as i32, libc::SIGINT);
+    }
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while child.try_wait().unwrap().is_none() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let timed_out = child.try_wait().unwrap().is_none();
+    if timed_out {
+        unsafe {
+            libc::kill(-(child.id() as i32), libc::SIGKILL);
+        }
+    }
+    let out = child.wait_with_output().unwrap();
+    assert!(
+        reached_removal && !timed_out,
+        "cleanup must stop promptly after native removal: {}",
+        text(&out)
+    );
+    assert_eq!(out.status.code(), Some(130), "{}", text(&out));
+    let r: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(r["status"], "interrupted");
+    assert_eq!(r["results"][0]["status"], "unverified");
+    assert_eq!(r["summary"]["removed"], 0);
+    assert_eq!(r["summary"]["blocked"], 0);
+    assert_eq!(r["summary"]["interrupted"], 0);
+    assert_eq!(r["summary"]["unverified"], 1);
+    assert_eq!(r["summary"]["errors"], 1);
+    assert_eq!(r["results"][0]["evidence"]["head"], head);
+    assert!(r["results"][0]["reason"]
+        .as_str()
+        .unwrap()
+        .contains("Interrupted"));
+    assert!(!f.worktree.exists());
+    assert!(
+        !git(&f.repo, &["worktree", "list", "--porcelain"]).contains(f.worktree.to_str().unwrap())
+    );
+    assert_eq!(fs::read_to_string(attempts).unwrap(), "attempted\n");
+    fs::write(release, "release\n").unwrap();
+    std::thread::sleep(Duration::from_secs(3));
+    assert!(
+        !escaped.exists(),
+        "removal descendants must not survive cancellation"
+    );
+    let next = f.command(&[]).arg(&f.repo).output().unwrap();
+    assert!(
+        next.status.success(),
+        "common-directory lock must be released: {}",
+        text(&next)
+    );
+    assert_eq!(git(&f.repo, &["status", "--porcelain"]), "");
+    assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), head);
 }
