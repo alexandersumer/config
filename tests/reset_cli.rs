@@ -1331,3 +1331,66 @@ done"#,
         .contains("Timed out during switch"));
     assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.new);
 }
+
+#[test]
+fn reset_hooks_cannot_leave_dirty_files_behind_a_success_report() {
+    let f = Fixture::new();
+    let hook = f.repo.join(".git/hooks/post-index-change");
+    fs::write(
+        &hook,
+        r#"#!/bin/sh
+if [ "$1" = 1 ]; then
+    if [ -f .git/reset-hook-armed ]; then
+        printf 'precious reset-hook edits' > file
+    else
+        touch .git/reset-hook-armed
+    fi
+fi
+"#,
+    )
+    .unwrap();
+    fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+    let out = f.run(&f.repo, &[]);
+    failure(&out, "post-reset verification");
+    assert_eq!(
+        fs::read_to_string(f.repo.join("file")).unwrap(),
+        "precious reset-hook edits"
+    );
+    assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.new);
+    let records: serde_json::Value =
+        serde_json::from_slice(&fs::read(logs(&out).join("results.json")).unwrap()).unwrap();
+    assert_eq!(records[0]["code"], 1);
+    assert_eq!(records[0]["attempts"], 1);
+    let backups = records[0]["backups"].as_array().unwrap();
+    assert_eq!(backups.len(), 1);
+    assert_eq!(
+        git(&f.repo, &["rev-parse", backups[0].as_str().unwrap()]),
+        f.old
+    );
+    assert!(!text(&out).contains("1 succeeded"));
+}
+
+#[test]
+fn safety_probes_do_not_trigger_index_refresh_hooks() {
+    let f = Fixture::new();
+    let hook = f.repo.join(".git/hooks/post-index-change");
+    fs::write(
+        &hook,
+        r#"#!/bin/sh
+if [ "$1" = 0 ]; then
+    touch .git/refresh-hook-fired
+    printf 'unexpected probe-hook edits' > file
+fi
+"#,
+    )
+    .unwrap();
+    fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+    let out = f.run(&f.repo, &[]);
+    success(&out);
+    assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.new);
+    assert_eq!(
+        fs::read_to_string(f.repo.join("file")).unwrap(),
+        "updated\n"
+    );
+    assert!(!f.repo.join(".git/refresh-hook-fired").exists());
+}

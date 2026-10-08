@@ -21,6 +21,24 @@ impl Operation {
         println!("Stage: {stage}");
         Ok(())
     }
+    fn verify_head(&self, local_ref: &str, oid: &str) -> Result<(), String> {
+        let actual_ref = self.git.optional(&["symbolic-ref", "--quiet", "HEAD"])?;
+        if !actual_ref.is_some_and(|actual| {
+            actual.strip_suffix(b"\n").unwrap_or(&actual) == local_ref.as_bytes()
+        }) {
+            return Err(
+                "Target branch changed during hook or concurrent operation; refusing reset".into(),
+            );
+        }
+        let actual = self.git.text(&["rev-parse", "HEAD"])?;
+        if actual != oid {
+            return Err(
+                "Target branch tip changed during hook or concurrent operation; refusing reset"
+                    .into(),
+            );
+        }
+        Ok(())
+    }
     fn clean(&self) -> Result<(), String> {
         for entry in self
             .git
@@ -37,7 +55,12 @@ impl Operation {
         }
         if !self
             .git
-            .call(&["status", "--porcelain=v1", "--untracked-files=no"])?
+            .call(&[
+                "--no-optional-locks",
+                "status",
+                "--porcelain=v1",
+                "--untracked-files=no",
+            ])?
             .is_empty()
         {
             return Err("Tracked changes or a dirty submodule: refusing reset".into());
@@ -275,16 +298,7 @@ impl Operation {
         println!("State: switched to {branch}");
         self.stage("post-switch safety check")?;
         self.tree(&oid)?;
-        let actual_ref = self.git.optional(&["symbolic-ref", "--quiet", "HEAD"])?;
-        if !actual_ref.is_some_and(|actual| {
-            actual.strip_suffix(b"\n").unwrap_or(&actual) == local_ref.as_bytes()
-        }) {
-            return Err("Target branch changed during checkout hook or concurrent operation; refusing reset".into());
-        }
-        let actual = self.git.text(&["rev-parse", "HEAD"])?;
-        if actual != old.as_deref().unwrap_or(&oid) {
-            return Err("Target branch tip changed during checkout hook or concurrent operation; refusing reset".into());
-        }
+        self.verify_head(&local_ref, old.as_deref().unwrap_or(&oid))?;
         self.stage("set upstream")?;
         self.git.action(&[
             "branch",
@@ -294,6 +308,9 @@ impl Operation {
         self.stage("reset")?;
         self.git
             .action(&["reset", "--no-recurse-submodules", "--hard", &oid])?;
+        self.stage("post-reset verification")?;
+        self.clean()?;
+        self.verify_head(&local_ref, &oid)?;
         self.status.state = Some(format!("reset completed at {oid}"));
         self.status.write(&self.status_path)?;
         println!("State: reset completed at {oid}");

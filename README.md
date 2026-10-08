@@ -65,6 +65,10 @@ Interrupted Git writes may leave locks that require investigation; this tool
 never deletes them. The lock descriptor is inherited by workers and descendants
 so a forcibly terminated supervisor cannot release it while they still hold it.
 
+Safety probes do not write the index. Success requires the final branch, commit,
+and tracked state to pass verification after Git hooks have run; hook-created
+edits are preserved and reported as a failure.
+
 Single-repository output names the fetched target and recovery ref. Batches show
 scope counts, restrained progress, immediate wrapped failures, and a final summary;
 successful repositories do not emit individual rows. `--verbose` prints sanitized
@@ -104,6 +108,9 @@ multi-root batch. It also runs automatically under `cargo test`, `check`, and
 staged pre-commit checks. `.github/workflows/reset-e2e.yml` runs the same lane on
 Linux and macOS for pushes and pull requests. Missing Git, unavailable loopback
 networking, or failed daemon readiness fail the lane; there is no skip mode.
+The hosted Linux/macOS lane runs the real-Git CLI regression suite alongside
+the Git-protocol E2E check.
+
 Set `RESET_E2E_ARTIFACT_DIR` to preserve command transcripts, daemon logs, and
 CLI result logs. Otherwise a failing test retains its temporary workspace and
 prints its path. The daemon is stopped on success and assertion failure; successful
