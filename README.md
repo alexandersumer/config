@@ -153,6 +153,8 @@ is involved.
 
 ```sh
 cargo test --locked --lib --test reset_cli --test reset_e2e --test workctl
+# Real protocol E2E only (requires Git and loopback networking):
+cargo test --locked --test reset_e2e
 cargo run -- check
 cargo run -- pre-commit
 ```
@@ -164,7 +166,10 @@ failure, and resulting registrations/filesystem state. Presentation checks cover
 narrow/normal terminal widths, redirected progress, JSON, disabled color, and broken
 pipes. Installation tests use temporary homes and fresh sh/zsh shells, verify
 completion files, and preserve unrelated legacy files. The Git protocol E2E starts a
-loopback daemon and checks persisted results. The CI workflow runs the public CLI
+loopback daemon and checks reset backups, cleanup previews and partial application,
+stale remote references, explicit local-data discard, and persisted registrations.
+Missing Git or loopback networking fails the lane instead of skipping it.
+The CI workflow runs the public CLI
 contracts on Linux and macOS; configured CI is distinct from a completed hosted run.
 
 A disposable worker benchmark remains available:

@@ -125,6 +125,19 @@ impl Runtime {
         assert_eq!(out.status.code(), Some(code), "{}", text(&out));
         out
     }
+    fn cleanup(&self, args: &[&str], code: i32) -> serde_json::Value {
+        let mut cmd = self.command(self.root(), &self.binary);
+        cmd.args(["git", "worktree", "clean", "--json"]).args(args);
+        let out = self.run(cmd);
+        assert_eq!(out.status.code(), Some(code), "{}", text(&out));
+        assert!(
+            !out.stdout.contains(&0x1b),
+            "JSON must not contain terminal decoration"
+        );
+        let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(result["schema_version"], 1);
+        result
+    }
     fn serve(&mut self, origin: &Path) -> String {
         let port = TcpListener::bind("127.0.0.1:0")
             .expect("loopback networking required")
@@ -169,6 +182,128 @@ impl Runtime {
             thread::sleep(Duration::from_millis(20));
         }
     }
+}
+
+#[test]
+fn standalone_cleanup_uses_current_git_protocol_evidence_and_explicit_discard() {
+    let mut rt = Runtime::new();
+    let seed = rt.root().join("seed");
+    fs::create_dir(&seed).unwrap();
+    rt.git(&seed, &["init", "-b", "trunk"]);
+    fs::write(seed.join("file"), "published\n").unwrap();
+    rt.git(&seed, &["add", "."]);
+    rt.git(&seed, &["commit", "-m", "published baseline"]);
+    let baseline = rt.git(&seed, &["rev-parse", "HEAD"]);
+    let origin = rt.root().join("origin.git");
+    rt.git(rt.root(), &["clone", "--bare", path(&seed), path(&origin)]);
+    let url = rt.serve(&origin);
+    let primary = rt.root().join("primary checkout");
+    rt.git(rt.root(), &["clone", &url, path(&primary)]);
+    let published = rt.root().join("published linked worktree");
+    let private = rt.root().join("private linked worktree");
+    rt.git(
+        &primary,
+        &["worktree", "add", "-b", "published", path(&published)],
+    );
+    rt.git(
+        &primary,
+        &["worktree", "add", "-b", "private", path(&private)],
+    );
+    fs::write(private.join("private-commit"), "unpublished work\n").unwrap();
+    rt.git(&private, &["add", "."]);
+    rt.git(&private, &["commit", "-m", "private commit"]);
+    let private_head = rt.git(&private, &["rev-parse", "HEAD"]);
+    let registrations = rt.git(&primary, &["worktree", "list", "--porcelain"]);
+
+    let preview = rt.cleanup(&[path(&primary)], 1);
+    assert_eq!(preview["status"], "blocked");
+    assert_eq!(preview["summary"]["would_remove"], 1);
+    assert_eq!(preview["summary"]["blocked"], 1);
+    assert_eq!(
+        rt.git(&primary, &["worktree", "list", "--porcelain"]),
+        registrations
+    );
+    assert!(
+        published.is_dir() && private.is_dir(),
+        "preview must not delete files"
+    );
+
+    let partial = rt.cleanup(&["--apply", path(&primary)], 1);
+    assert_eq!(
+        partial["status"], "blocked",
+        "partial cleanup must not claim success"
+    );
+    assert_eq!(partial["summary"]["removed"], 1);
+    assert_eq!(partial["summary"]["blocked"], 1);
+    assert!(!published.exists() && private.is_dir());
+    assert!(!rt
+        .git(&primary, &["worktree", "list", "--porcelain"])
+        .contains(path(&published)));
+    assert_eq!(rt.git(&private, &["rev-parse", "HEAD"]), private_head);
+
+    // Publish and cache the branch, then delete it remotely. The cached ref must
+    // remain, so a cleanup that trusts it instead of current evidence is caught.
+    rt.git(&private, &["push", path(&origin), "private:private"]);
+    rt.git(&primary, &["fetch", "origin"]);
+    rt.git(&primary, &["push", path(&origin), ":private"]);
+    assert_eq!(
+        rt.git(&primary, &["rev-parse", "origin/private"]),
+        private_head
+    );
+    let fetch_head = fs::read(primary.join(".git/FETCH_HEAD")).unwrap();
+    let cached = rt.cleanup(&["--apply", path(&private)], 1);
+    assert_eq!(cached["summary"]["blocked"], 1);
+    assert!(cached["results"][0]["reason"]
+        .as_str()
+        .unwrap()
+        .contains("unpublished"));
+    assert!(private.is_dir());
+    assert_eq!(rt.git(&private, &["rev-parse", "HEAD"]), private_head);
+    assert_eq!(
+        rt.git(&primary, &["rev-parse", "origin/private"]),
+        private_head
+    );
+    assert_eq!(
+        fs::read(primary.join(".git/FETCH_HEAD")).unwrap(),
+        fetch_head
+    );
+
+    rt.git(&private, &["push", path(&origin), "private:private"]);
+    let local_file = private.join("precious local file");
+    fs::write(&local_file, "preserve without explicit discard\n").unwrap();
+    let local = rt.cleanup(&["--apply", path(&private)], 1);
+    assert_eq!(local["summary"]["blocked"], 1);
+    assert!(local["results"][0]["reason"]
+        .as_str()
+        .unwrap()
+        .contains("--discard-local"));
+    assert_eq!(
+        fs::read_to_string(&local_file).unwrap(),
+        "preserve without explicit discard\n"
+    );
+
+    let removed = rt.cleanup(
+        &["--apply", "--discard-local", path(&private), path(&private)],
+        0,
+    );
+    assert_eq!(removed["status"], "completed");
+    assert_eq!(removed["results"][0]["status"], "removed");
+    assert_eq!(removed["summary"]["removed"], 1);
+    assert!(!private.exists());
+    let remaining = rt.git(&primary, &["worktree", "list", "--porcelain"]);
+    assert_eq!(
+        remaining
+            .lines()
+            .filter(|line| line.starts_with("worktree "))
+            .count(),
+        1
+    );
+    assert!(remaining.contains(path(&primary)));
+    assert_eq!(rt.git(&primary, &["rev-parse", "HEAD"]), baseline);
+    assert!(rt.git(&primary, &["status", "--porcelain"]).is_empty());
+    let repeated = rt.cleanup(&["--apply", path(&primary)], 0);
+    assert_eq!(repeated["status"], "completed");
+    assert_eq!(repeated["summary"]["removed"], 0);
 }
 impl Drop for Runtime {
     fn drop(&mut self) {
