@@ -130,6 +130,15 @@ pub(crate) fn run(args: Vec<OsString>) -> u8 {
             return 1;
         }
     };
+    if !options.list {
+        let mut stdout = std::io::stdout().lock();
+        if let Err(error) =
+            writeln!(stdout, "Discovering repositories...").and_then(|_| stdout.flush())
+        {
+            report(&error.to_string());
+            return 1;
+        }
+    }
     match discover::select(&options.paths) {
         Ok(selection) => {
             if options.list {

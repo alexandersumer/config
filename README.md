@@ -69,8 +69,10 @@ Safety probes do not write the index. Success requires the final branch, commit,
 and tracked state to pass verification after Git hooks have run; hook-created
 edits are preserved and reported as a failure.
 
+Output separates discovery, the repository overview, execution, and the final
+summary. The overview lists scope counts and exclusions before workers start.
 Single-repository output names the fetched target and recovery ref. Batches show
-scope counts, restrained progress, immediate wrapped failures, and a final summary;
+restrained progress and immediate wrapped failures;
 successful repositories do not emit individual rows. `--verbose` prints sanitized
 full logs in discovery order. Successful runs delete their temporary diagnostics
 and omit log paths. Failed or interrupted runs retain diagnostics and show their

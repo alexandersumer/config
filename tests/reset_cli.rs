@@ -771,7 +771,14 @@ fn multiple_roots_use_bounded_parallel_workers_and_quiet_success_output() {
     assert_eq!(active, 0);
     assert!(peak >= 2, "execution was sequential");
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("6 repositories with 3 workers"));
+    assert!(stdout.starts_with("Discovering repositories...\nFound 6 repositories:\n"));
+    let first_scope = stdout.find("(5 repositories)").unwrap();
+    let last_scope = stdout.find("(1 repository)").unwrap();
+    let executing = stdout
+        .find("\n\nResetting 6 repositories with 3 workers...\n")
+        .unwrap();
+    assert!(first_scope < executing && last_scope < executing);
+    assert!(stdout.contains("\n\nCompleted in "));
     assert!(stdout.contains("(5 repositories)"));
     assert!(stdout.contains("(1 repository)"));
     assert!(stdout.contains("6 succeeded"));
@@ -1416,6 +1423,17 @@ fn successful_default_runs_remove_logs_and_preserve_recovery_refs() {
             .output()
             .unwrap();
         success(&out);
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(stdout.starts_with("Discovering repositories...\nFound "));
+        assert!(stdout.contains(&format!(
+            "\n\nResetting {} with {}...\n",
+            if count == 1 {
+                "1 repository"
+            } else {
+                "2 repositories"
+            },
+            if count == 1 { "1 worker" } else { "2 workers" }
+        )));
         assert!(!text(&out).contains("Logs:"), "{}", text(&out));
         assert!(!text(&out).contains("in the logs"), "{}", text(&out));
         assert_eq!(
@@ -1449,6 +1467,7 @@ fn failed_default_runs_retain_diagnostics_and_show_their_location() {
         .output()
         .unwrap();
     failure(&out, "Tracked changes");
+    assert!(!text(&out).contains("\n\n\n"), "{}", text(&out));
     let dir = logs(&out);
     assert!(dir.join("0001.log").is_file());
     assert!(dir.join("results.json").is_file());

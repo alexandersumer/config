@@ -298,6 +298,23 @@ pub(super) fn run(options: &Options, selection: Selection) -> u8 {
 }
 fn run_inner(options: &Options, selection: Selection) -> Result<u8, String> {
     let mut stdout = io::stdout().lock();
+    if !selection.repos.is_empty() {
+        writeln!(
+            stdout,
+            "Found {}:",
+            output::quantity(selection.repos.len(), "repository")
+        )
+        .map_err(|e| e.to_string())?;
+        for scope in &selection.scopes {
+            writeln!(
+                stdout,
+                "  {} ({})",
+                output::short(&scope.path),
+                output::quantity(scope.count, "repository")
+            )
+            .map_err(|e| e.to_string())?;
+        }
+    }
     if !selection.excluded.is_empty() {
         writeln!(
             stdout,
@@ -327,26 +344,18 @@ fn run_inner(options: &Options, selection: Selection) -> Result<u8, String> {
         .tempdir()
         .map_err(|e| e.to_string())?
         .keep();
-    let started = Instant::now();
-    writeln!(
-        stdout,
-        "Resetting {} with {}.",
-        output::quantity(selection.repos.len(), "repository"),
-        output::quantity(options.jobs.min(selection.repos.len()), "worker")
-    )
-    .map_err(|e| e.to_string())?;
-    for scope in &selection.scopes {
-        writeln!(
-            stdout,
-            "  {} ({})",
-            output::short(&scope.path),
-            output::quantity(scope.count, "repository")
-        )
-        .map_err(|e| e.to_string())?;
-    }
     if options.keep_logs {
         writeln!(stdout, "Logs: {}", display(&logs)).map_err(|e| e.to_string())?;
     }
+    writeln!(
+        stdout,
+        "\nResetting {} with {}...",
+        output::quantity(selection.repos.len(), "repository"),
+        output::quantity(options.jobs.min(selection.repos.len()), "worker")
+    )
+    .and_then(|_| stdout.flush())
+    .map_err(|e| e.to_string())?;
+    let started = Instant::now();
     let resources: HashMap<PathBuf, Arc<Mutex<()>>> = selection
         .repos
         .iter()
@@ -432,7 +441,7 @@ fn run_inner(options: &Options, selection: Selection) -> Result<u8, String> {
                         };
                         writeln!(
                             stdout,
-                            "\n  {heading} {}\n{}\n    Log: {}\n",
+                            "\n  {heading} {}\n{}\n    Log: {}",
                             output::label(&selection.repos[index], &selection.scopes),
                             output::wrap(&display(&record.detail)),
                             display(&record.log)
@@ -466,7 +475,7 @@ fn run_inner(options: &Options, selection: Selection) -> Result<u8, String> {
                 if records.len() != last_count {
                     writeln!(
                         stdout,
-                        "  {}/{} complete, elapsed {}s",
+                        "  Progress: {}/{} repositories completed ({}s elapsed).",
                         records.len(),
                         total,
                         started.elapsed().as_secs()
@@ -569,7 +578,7 @@ fn run_inner(options: &Options, selection: Selection) -> Result<u8, String> {
     );
     writeln!(
         stdout,
-        "{}",
+        "\n{}",
         output::color(
             &summary,
             if interrupted > 0 {
