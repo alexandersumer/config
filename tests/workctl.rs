@@ -380,8 +380,11 @@ fn deadline_and_cancellation_terminate_groups_without_retrying_cleanup() {
         let f = Fixture::new();
         let started = f.temp.path().join("started");
         let escaped = f.temp.path().join("escaped");
+        let release = f.temp.path().join("release-descendant");
         let count = f.temp.path().join("count");
-        let bin=f.shim(&format!("for arg in \"$@\"; do if [ \"$arg\" = fetch ]; then echo attempt >> '{}'; touch '{}'; (sleep 3; touch '{}') & sleep 30; fi; done",count.display(),started.display(),escaped.display()));
+        // Release the sentinel only after shutdown; a slow concurrent check must not
+        // make it fire while the subprocess is legitimately still running.
+        let bin=f.shim(&format!("for arg in \"$@\"; do if [ \"$arg\" = fetch ]; then echo attempt >> '{}'; (touch '{}'; while [ ! -e '{}' ]; do sleep 0.05; done; touch '{}') & sleep 30; fi; done",count.display(),started.display(),release.display(),escaped.display()));
         let mut cmd = f.command(&["--apply", "--timeout", if cancel { "30" } else { "1" }]);
         cmd.arg(&f.worktree);
         with_shim(&mut cmd, &bin);
@@ -413,6 +416,8 @@ fn deadline_and_cancellation_terminate_groups_without_retrying_cleanup() {
             text(&out)
         );
         assert_eq!(fs::read_to_string(count).unwrap(), "attempt\n");
+        assert!(!escaped.exists(), "sentinel must wait for explicit release");
+        fs::write(release, "release\n").unwrap();
         std::thread::sleep(Duration::from_secs(3));
         assert!(!escaped.exists());
         f.unchanged();

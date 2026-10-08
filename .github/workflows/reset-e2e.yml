@@ -27,6 +27,9 @@ jobs:
       - name: Install zsh for fresh-shell contracts
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y zsh
+      - name: Secure image-provided zsh completion directories
+        if: runner.os == 'Linux'
+        run: sudo chmod go-w /usr/share/zsh /usr/share/zsh/vendor-completions
       - name: Run real Git CLI regressions and protocol E2E
         run: cargo +stable test --locked --lib --test reset_cli --test reset_e2e --test workctl -- --nocapture
       - name: Preserve runtime evidence
