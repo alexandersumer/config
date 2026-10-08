@@ -7,6 +7,49 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
+pub(super) fn redact(value: impl AsRef<OsStr>) -> String {
+    static URL: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let pattern = URL.get_or_init(|| {
+        regex::Regex::new(r#"[A-Za-z][A-Za-z0-9+.-]*://[^\s"'<>]+"#).expect("static URL pattern")
+    });
+    pattern
+        .replace_all(
+            &value.as_ref().to_string_lossy(),
+            |capture: &regex::Captures<'_>| {
+                let url = &capture[0];
+                let scheme = url.find("://").unwrap() + 3;
+                let authority_end = url[scheme..]
+                    .find(['/', '?', '#'])
+                    .map_or(url.len(), |n| scheme + n);
+                let url = if let Some(at) = url[scheme..authority_end].rfind('@') {
+                    format!("{}[redacted]{}", &url[..scheme], &url[scheme + at..])
+                } else {
+                    url.to_owned()
+                };
+                if let Some((base, query)) = url.split_once('?') {
+                    let query = query
+                        .split('&')
+                        .map(|parameter| {
+                            parameter.split_once('=').map_or_else(
+                                || parameter.to_owned(),
+                                |(key, _)| format!("{key}=[redacted]"),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("&");
+                    format!("{base}?{query}")
+                } else {
+                    url
+                }
+            },
+        )
+        .into_owned()
+}
+
+pub(super) fn diagnostic(value: impl AsRef<OsStr>) -> String {
+    display(redact(value))
+}
+
 pub(super) fn command(path: &Path) -> Command {
     let mut cmd = Command::new("git");
     cmd.current_dir(path)
@@ -50,7 +93,7 @@ pub(super) fn probe(path: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
         Err(format!(
             "{}: {}",
             display(path),
-            display(OsString::from_vec(err))
+            diagnostic(OsString::from_vec(err))
         ))
     }
 }
@@ -72,7 +115,7 @@ impl Git {
             false,
         )?;
         if code != 0 {
-            return Err(String::from_utf8_lossy(&err).into_owned());
+            return Err(redact(OsString::from_vec(err)));
         }
         let directory = path_output(&out)
             .canonicalize()
@@ -84,20 +127,20 @@ impl Git {
         let (code, out, err) = capture(&self.cwd, &args, false)?;
         // Logs contain stderr from successful hooks as well as failed commands.
         if !err.is_empty() {
-            eprint!("{}", String::from_utf8_lossy(&err));
+            eprint!("{}", redact(OsString::from_vec(err.clone())));
         }
         if code != 0 {
             return Err(format!(
                 "git {} failed (exit {code}): {}",
-                args.iter().map(display).collect::<Vec<_>>().join(" "),
-                String::from_utf8_lossy(&err).trim()
+                args.iter().map(diagnostic).collect::<Vec<_>>().join(" "),
+                redact(OsString::from_vec(err)).trim()
             ));
         }
         Ok(out)
     }
     pub fn action(&self, args: &[&str]) -> Result<(), String> {
         let output = self.call(args)?;
-        print!("{}", String::from_utf8_lossy(&output));
+        print!("{}", redact(OsString::from_vec(output)));
         Ok(())
     }
     pub fn optional(&self, args: &[&str]) -> Result<Option<Vec<u8>>, String> {
@@ -108,7 +151,7 @@ impl Git {
             1 => Ok(None),
             _ => Err(format!(
                 "Git probe failed: {}",
-                String::from_utf8_lossy(&err)
+                redact(OsString::from_vec(err))
             )),
         }
     }

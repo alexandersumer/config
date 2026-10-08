@@ -48,13 +48,19 @@ struct Fixture {
 }
 impl Fixture {
     fn new() -> Self {
+        Self::with_object_format("sha1")
+    }
+    fn with_object_format(format: &str) -> Self {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path();
         let repo = root.join("main");
         let remote = root.join("remote.git");
         let worktree = root.join("linked with spaces");
         fs::create_dir(&repo).unwrap();
-        git(&repo, &["init", "-b", "main"]);
+        git(
+            &repo,
+            &["init", &format!("--object-format={format}"), "-b", "main"],
+        );
         fs::write(repo.join("file"), "published\n").unwrap();
         git(&repo, &["add", "."]);
         git(&repo, &["commit", "-m", "initial"]);
@@ -129,6 +135,101 @@ impl Fixture {
         fs::set_permissions(bin.join("git"), fs::Permissions::from_mode(0o755)).unwrap();
         bin
     }
+}
+
+#[test]
+fn cleanup_uses_source_object_format_even_when_init_default_differs() {
+    for (source, default) in [("sha256", "sha1"), ("sha1", "sha256")] {
+        let f = Fixture::with_object_format(source);
+        let out = f
+            .command(&[])
+            .arg(&f.worktree)
+            .env("GIT_DEFAULT_HASH", default)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", text(&out));
+        let plan: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(plan["summary"]["would_remove"], 1);
+        f.unchanged();
+        let out = f
+            .command(&["--apply"])
+            .arg(&f.worktree)
+            .env("GIT_DEFAULT_HASH", default)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", text(&out));
+        assert!(!f.worktree.exists());
+        assert_eq!(
+            git(&f.repo, &["worktree", "list", "--porcelain"])
+                .lines()
+                .filter(|line| line.starts_with("worktree "))
+                .count(),
+            1
+        );
+    }
+}
+
+#[test]
+fn git_diagnostics_redact_query_values_in_results_and_retained_logs() {
+    let f = Fixture::new();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+    git(&f.repo, &["remote", "set-url", "origin", &format!("http://127.0.0.1:{port}/repo.git?access_token=query-secret&signature=signed-secret")]);
+    let runtime = f.temp.path().join("runtime");
+    fs::create_dir(&runtime).unwrap();
+    for args in [
+        vec!["git", "reset", "--attempts", "1", "--json", "--verbose"],
+        vec!["git", "worktree", "clean", "--apply", "--json", "--verbose"],
+    ] {
+        let out = env(&mut Command::new(BIN))
+            .args(args)
+            .arg(&f.repo)
+            .env("TMPDIR", &runtime)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+        assert!(text(&out).contains("[redacted]"), "{}", text(&out));
+        assert!(
+            !text(&out).contains("query-secret") && !text(&out).contains("signed-secret"),
+            "{}",
+            text(&out)
+        );
+        for entry in walkdir::WalkDir::new(&runtime) {
+            let entry = entry.unwrap();
+            if entry.file_type().is_file() {
+                let bytes = fs::read(entry.path()).unwrap();
+                let content = String::from_utf8_lossy(&bytes);
+                assert!(
+                    !content.contains("query-secret") && !content.contains("signed-secret"),
+                    "{}: {content}",
+                    entry.path().display()
+                );
+            }
+        }
+        f.unchanged();
+    }
+}
+
+#[test]
+fn reset_startup_output_failure_removes_empty_diagnostics() {
+    let f = Fixture::new();
+    let runtime = f.temp.path().join("runtime");
+    fs::create_dir(&runtime).unwrap();
+    let mut child = env(&mut Command::new(BIN))
+        .args(["git", "reset"])
+        .arg(&f.repo)
+        .env("TMPDIR", &runtime)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    drop(child.stderr.take());
+    let out = child.wait_with_output().unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("Git checkout reset"));
+    assert_eq!(fs::read_dir(runtime).unwrap().count(), 0);
+    f.unchanged();
 }
 fn with_shim(cmd: &mut Command, bin: &Path) {
     cmd.env(

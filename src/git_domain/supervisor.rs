@@ -38,6 +38,23 @@ impl Drop for CancelOnDrop {
     }
 }
 
+struct Diagnostics {
+    directory: Option<tempfile::TempDir>,
+    reported: bool,
+}
+impl Drop for Diagnostics {
+    fn drop(&mut self) {
+        if let Some(directory) = self.directory.take() {
+            if fs::read_dir(directory.path()).map_or(true, |mut entries| entries.next().is_some()) {
+                let path = directory.keep();
+                if !self.reported {
+                    let _ = writeln!(io::stderr(), "Logs: {}", display(path));
+                }
+            }
+        }
+    }
+}
+
 enum Event {
     Started(usize),
     Finished(usize, ResultRecord),
@@ -252,13 +269,18 @@ fn run_inner(options: &Options, selection: Selection) -> Result<u8, String> {
         .map_err(|e| e.to_string())?;
         return Ok(0);
     }
-    let logs = tempfile::Builder::new()
+    let directory = tempfile::Builder::new()
         .prefix("workctl-reset-")
         .tempdir()
-        .map_err(|e| e.to_string())?
-        .keep();
+        .map_err(|e| e.to_string())?;
+    let logs = directory.path().to_owned();
+    let mut diagnostics = Diagnostics {
+        directory: Some(directory),
+        reported: false,
+    };
     if options.keep_logs {
         writeln!(io::stderr(), "Logs: {}", display(&logs)).map_err(|e| e.to_string())?;
+        diagnostics.reported = true;
     }
     writeln!(io::stderr(), "Resetting checkouts…").map_err(|e| e.to_string())?;
     let resources: HashMap<PathBuf, Arc<Mutex<()>>> = selection
@@ -395,8 +417,12 @@ fn run_inner(options: &Options, selection: Selection) -> Result<u8, String> {
     if !retain {
         fs::remove_dir_all(&logs)
             .map_err(|e| format!("could not remove temporary logs at {}: {e}", display(&logs)))?;
-    } else if !options.keep_logs {
-        writeln!(io::stderr(), "Logs: {}", display(&logs)).map_err(|e| e.to_string())?;
+        diagnostics.directory.take();
+    } else {
+        if !options.keep_logs {
+            writeln!(io::stderr(), "Logs: {}", display(&logs)).map_err(|e| e.to_string())?;
+        }
+        diagnostics.directory.take().unwrap().keep();
     }
     let outcome = if code == 130 {
         "Interrupted"

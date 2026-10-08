@@ -3,6 +3,7 @@ use crate::runtime as supervisor;
 use std::collections::{BTreeSet, HashSet};
 use std::ffi::OsStr;
 use std::fs;
+use std::os::unix::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug)]
@@ -38,7 +39,7 @@ pub(super) fn repository(path: &Path) -> Result<Option<(Repo, bool)>, String> {
             return Err(format!(
                 "{}: corrupt or inaccessible repository: {}",
                 display(path),
-                String::from_utf8_lossy(&err).trim()
+                git::redact(std::ffi::OsString::from_vec(err)).trim()
             ));
         }
         // Do not classify arbitrary Git/auth/config failures as an empty folder.
@@ -46,7 +47,7 @@ pub(super) fn repository(path: &Path) -> Result<Option<(Repo, bool)>, String> {
             return Err(format!(
                 "{}: {}",
                 display(path),
-                String::from_utf8_lossy(&err).trim()
+                git::redact(std::ffi::OsString::from_vec(err)).trim()
             ));
         }
         return Ok(None);

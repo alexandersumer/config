@@ -1,5 +1,5 @@
 //! Conservative linked-worktree policy. Preview never removes files or registrations.
-use super::{discover, display, git, lock};
+use super::{discover, display, git, git::diagnostic, lock};
 use crate::{presentation, runtime};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::{OsStr, OsString};
@@ -172,18 +172,6 @@ fn select(paths: &[PathBuf]) -> Result<Selection, String> {
         protected,
     })
 }
-// Git may echo a transport URL; never put embedded credentials in terminal or JSON diagnostics.
-fn diagnostic(value: impl AsRef<OsStr>) -> String {
-    static USERINFO: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    let pattern = USERINFO.get_or_init(|| {
-        regex::Regex::new(r"([A-Za-z][A-Za-z0-9+.-]*://)[^/\s]+@").expect("static URL pattern")
-    });
-    display(
-        pattern
-            .replace_all(&value.as_ref().to_string_lossy(), "${1}[redacted]@")
-            .as_ref(),
-    )
-}
 struct Session<'a> {
     args: &'a Args,
     deadline: Instant,
@@ -250,7 +238,16 @@ impl Session<'_> {
             .prefix("workctl-publication-")
             .tempdir()
             .map_err(|e| e.to_string())?;
-        self.probe(evidence.path(), &["init", "--bare", "--quiet"])?;
+        let format = self.text(&c.primary, &["rev-parse", "--show-object-format"])?;
+        self.probe(
+            evidence.path(),
+            &[
+                "init",
+                "--bare",
+                "--quiet",
+                &format!("--object-format={format}"),
+            ],
+        )?;
         // Objects are read from the source only; no refs/FETCH_HEAD are written there.
         let objects = c.common.join("objects");
         if objects.as_os_str().as_encoded_bytes().contains(&b'\n') {

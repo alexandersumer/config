@@ -429,6 +429,7 @@ pub(super) fn worker(args: &[OsString]) -> u8 {
         },
     );
     if let Err(error) = &result {
+        let error = git::redact(error);
         eprintln!("Error [{}]: {error}", op.status.stage);
         op.status.error = Some(format!("Error [{}]: {error}", op.status.stage));
     }
