@@ -10,7 +10,7 @@ use std::time::Instant;
 #[derive(Parser)]
 #[command(about = "Compare reset worker counts on disposable local repositories")]
 struct Args {
-    /// Compiled config-tools or reset_to_origin executable
+    /// Compiled workctl executable
     #[arg(long)]
     binary: PathBuf,
     /// JSON result destination
@@ -72,7 +72,7 @@ fn median(mut values: Vec<f64>) -> f64 {
 fn main() {
     let args = Args::parse();
     let root = tempfile::tempdir().unwrap();
-    let binary = root.path().join("reset_to_origin");
+    let binary = root.path().join("workctl");
     fs::copy(args.binary, &binary).expect("copy standalone executable");
     let seed = root.path().join("seed");
     let remote = root.path().join("origin.git");
@@ -133,7 +133,14 @@ fn main() {
             }
             let mut command = Command::new(&binary);
             command
-                .args(["--jobs", &jobs.to_string(), "--attempts", "1"])
+                .args([
+                    "git",
+                    "reset",
+                    "--jobs",
+                    &jobs.to_string(),
+                    "--attempts",
+                    "1",
+                ])
                 .arg(&workspace)
                 .env("PATH", &path)
                 .env("TMPDIR", root.path());

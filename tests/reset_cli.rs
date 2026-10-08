@@ -11,7 +11,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
-const BIN: &str = env!("CARGO_BIN_EXE_config-tools");
+const BIN: &str = env!("CARGO_BIN_EXE_workctl");
 struct Fixture {
     temp: TempDir,
     seed: PathBuf,
@@ -88,7 +88,7 @@ impl Fixture {
         let mut cmd = Command::new(BIN);
         env(&mut cmd);
         cmd.env("TMPDIR", self.temp.path().join("runtime"));
-        cmd.arg("reset-to-origin")
+        cmd.args(["git", "reset"])
             .arg("--keep-logs")
             .arg("--attempts")
             .arg("1")
@@ -168,7 +168,7 @@ fn failure(out: &Output, fragment: &str) {
 }
 fn logs(out: &Output) -> PathBuf {
     PathBuf::from(
-        String::from_utf8_lossy(&out.stdout)
+        String::from_utf8_lossy(&out.stderr)
             .lines()
             .find_map(|l| l.strip_prefix("Logs: "))
             .unwrap(),
@@ -355,7 +355,7 @@ fn linked_worktrees_are_skipped_and_explicit_worktrees_refused() {
     fs::write(linked.join("notes"), "keep").unwrap();
     let out = f.run(&f.workspace, &[]);
     success(&out);
-    assert!(text(&out).contains("Skipped 1 linked worktree"));
+    assert!(text(&out).contains("Excluded       1 linked worktrees"));
     assert_eq!(fs::read_to_string(linked.join("file")).unwrap(), "precious");
     assert_eq!(git(&linked, &["rev-parse", "HEAD"]), f.old);
     failure(
@@ -708,9 +708,10 @@ fn transient_failures_retry_but_authentication_failures_do_not() {
 #[test]
 fn installed_name_dispatches_without_config_checkout_or_shell() {
     let f = Fixture::new();
-    let executable = f.temp.path().join("reset_to_origin");
+    let executable = f.temp.path().join("workctl");
     fs::copy(BIN, &executable).unwrap();
     let out = env(Command::new(executable).current_dir(&f.repo))
+        .args(["git", "reset"])
         .env("HOME", f.temp.path().join("empty-home"))
         .output()
         .unwrap();
@@ -771,16 +772,10 @@ fn multiple_roots_use_bounded_parallel_workers_and_quiet_success_output() {
     assert_eq!(active, 0);
     assert!(peak >= 2, "execution was sequential");
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.starts_with("Discovering repositories...\nFound 6 repositories:\n"));
-    let first_scope = stdout.find("(5 repositories)").unwrap();
-    let last_scope = stdout.find("(1 repository)").unwrap();
-    let executing = stdout
-        .find("\n\nResetting 6 repositories with 3 workers...\n")
-        .unwrap();
-    assert!(first_scope < executing && last_scope < executing);
-    assert!(stdout.contains("\n\nCompleted in "));
-    assert!(stdout.contains("(5 repositories)"));
-    assert!(stdout.contains("(1 repository)"));
+    assert!(stdout.starts_with("Git checkout reset\n"));
+    assert!(stdout.contains("Checkouts      6"));
+    assert!(stdout.contains("Workers        3"));
+    assert!(stdout.contains("\nCompleted\n"));
     assert!(stdout.contains("6 succeeded"));
     assert!(!stdout.contains("  Reset "));
     assert!(!stdout.contains('\x1b'));
@@ -832,14 +827,14 @@ fn failure_is_reported_before_a_slower_earlier_repository_finishes() {
     let mut cmd = f.cli(&f.workspace, &[]);
     f.with_shim(&mut cmd, &dir);
     let child = cmd
-        .stdout(fs::File::create(&output).unwrap())
-        .stderr(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(fs::File::create(&output).unwrap())
         .spawn()
         .unwrap();
     let until = Instant::now() + Duration::from_secs(10);
     loop {
         let text = fs::read_to_string(&output).unwrap();
-        if text.contains("Failed: zz-dirty") {
+        if text.contains("Failed:") && text.contains("zz-dirty") {
             break;
         }
         assert!(Instant::now() < until);
@@ -948,8 +943,8 @@ fn cancellation_interrupts_retry_backoff_and_cancels_queued_repositories() {
     );
     f.with_shim(&mut cmd, &dir);
     let child = cmd
-        .stdout(fs::File::create(&output).unwrap())
-        .stderr(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(fs::File::create(&output).unwrap())
         .spawn()
         .unwrap();
     let until = Instant::now() + Duration::from_secs(10);
@@ -1059,7 +1054,7 @@ fn output_failure_after_workers_start_cancels_their_process_groups() {
         .spawn()
         .unwrap();
     wait_marker(&marker);
-    drop(child.stdout.take());
+    drop(child.stderr.take());
     let out = wait_child(child);
     assert_eq!(out.status.code(), Some(1));
     thread::sleep(Duration::from_secs(4));
@@ -1103,7 +1098,7 @@ fn clap_help_version_and_invalid_usage_do_not_touch_repositories() {
         let out = f.run(&f.repo, &[arg]);
         success(&out);
         assert!(out.stderr.is_empty());
-        assert!(String::from_utf8_lossy(&out.stdout).contains("reset_to_origin"));
+        assert!(String::from_utf8_lossy(&out.stdout).contains("workctl"));
         if arg == "--help" {
             let help = text(&out);
             for expected in ["Examples:", "--jobs", "--version", "Exit codes:", "--list"] {
@@ -1317,9 +1312,11 @@ done"#,
         count.display(),
         count.display()
     ));
+    // Leave room for real Git preflight under the 32-worker fixture load;
+    // the injected 20-second switch hang still necessarily hits this deadline.
     let mut cmd = f.cli(
         &f.repo,
-        &[OsStr::new("--attempts=2"), OsStr::new("--timeout=2")],
+        &[OsStr::new("--attempts=2"), OsStr::new("--timeout=5")],
     );
     f.with_shim(&mut cmd, &dir);
     let out = cmd.output().unwrap();
@@ -1418,22 +1415,15 @@ fn successful_default_runs_remove_logs_and_preserve_recovery_refs() {
             git(repo, &["reset", "--hard", &f.old]);
         }
         let out = env(Command::new(BIN).current_dir(&f.workspace))
-            .args(["reset-to-origin", "--attempts", "1"])
+            .args(["git", "reset", "--attempts", "1"])
             .env("TMPDIR", f.temp.path().join("runtime"))
             .output()
             .unwrap();
         success(&out);
         let stdout = String::from_utf8_lossy(&out.stdout);
-        assert!(stdout.starts_with("Discovering repositories...\nFound "));
-        assert!(stdout.contains(&format!(
-            "\n\nResetting {} with {}...\n",
-            if count == 1 {
-                "1 repository"
-            } else {
-                "2 repositories"
-            },
-            if count == 1 { "1 worker" } else { "2 workers" }
-        )));
+        assert!(stdout.starts_with("Git checkout reset\n"));
+        assert!(stdout.contains(&format!("Checkouts      {count}")));
+        assert!(stdout.contains(&format!("Workers        {count}")));
         assert!(!text(&out).contains("Logs:"), "{}", text(&out));
         assert!(!text(&out).contains("in the logs"), "{}", text(&out));
         assert_eq!(
@@ -1462,7 +1452,7 @@ fn failed_default_runs_retain_diagnostics_and_show_their_location() {
     let f = Fixture::new();
     fs::write(f.repo.join("file"), "local work\n").unwrap();
     let out = env(Command::new(BIN).current_dir(&f.repo))
-        .args(["reset-to-origin", "--attempts", "1"])
+        .args(["git", "reset", "--attempts", "1"])
         .env("TMPDIR", f.temp.path().join("runtime"))
         .output()
         .unwrap();
@@ -1493,7 +1483,7 @@ fn optimized_default_pool_is_bounded_and_preserves_each_checkout() {
     ));
     let mut cmd = Command::new(BIN);
     env(&mut cmd);
-    cmd.args(["reset-to-origin", "--keep-logs", "--attempts=1"])
+    cmd.args(["git", "reset", "--keep-logs", "--attempts=1"])
         .env("TMPDIR", f.temp.path().join("runtime"))
         .current_dir(&f.workspace);
     f.with_shim(&mut cmd, &shim);
@@ -1515,7 +1505,7 @@ fn optimized_default_pool_is_bounded_and_preserves_each_checkout() {
         peak > 4,
         "the default still serializes work into four slots"
     );
-    assert!(text(&out).contains("Resetting 33 repositories with 32 workers..."));
+    assert!(text(&out).contains("Workers        32"));
     let results: serde_json::Value =
         serde_json::from_slice(&fs::read(logs(&out).join("results.json")).unwrap()).unwrap();
     assert_eq!(results.as_array().unwrap().len(), 33);

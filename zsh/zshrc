@@ -39,7 +39,7 @@ command -v pyenv >/dev/null || path=("$PYENV_ROOT/bin" $path)
 ########################################
 # Completion setup
 ########################################
-fpath+=(/opt/homebrew/share/zsh/site-functions)
+fpath=("$HOME/.local/share/zsh/site-functions" $fpath /opt/homebrew/share/zsh/site-functions)
 
 # Drop broken completion stubs (e.g. orphaned Homebrew symlinks)
 typeset -i __zsh_broken_completion_removed=0
@@ -161,6 +161,11 @@ if [[ -r "$HOME/.zsh/git-functions.zsh" ]]; then
 else
   printf '\033[33mwarning: git helper functions file missing: %s\033[0m\n' "$HOME/.zsh/git-functions.zsh" >&2
 fi
+# Retire the old reset command when this configuration is reloaded.
+unfunction reset_to_origin 2>/dev/null || true
+unalias reset_to_origin 2>/dev/null || true
+rehash
+
 ########################################
 # Claude Code (auto-update)
 ########################################

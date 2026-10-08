@@ -1,14 +1,11 @@
 //! The installed Git executable is the authority for repository facts.
-use super::{display, supervisor};
+use super::display;
 use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::io::{Read, Seek};
 use std::os::unix::ffi::OsStringExt;
-use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 pub(super) fn command(path: &Path) -> Command {
     let mut cmd = Command::new("git");
@@ -41,46 +38,7 @@ pub(super) fn capture(
 ) -> Result<(i32, Vec<u8>, Vec<u8>), String> {
     let mut cmd = command(path);
     cmd.args(args).stdin(Stdio::null());
-    // Discovery probes are bounded too, before the repository workers exist.
-    let mut out = tempfile::tempfile().map_err(|e| e.to_string())?;
-    let mut err = tempfile::tempfile().map_err(|e| e.to_string())?;
-    cmd.stdout(out.try_clone().map_err(|e| e.to_string())?)
-        .stderr(err.try_clone().map_err(|e| e.to_string())?);
-    if probe {
-        cmd.process_group(0);
-    }
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("cannot execute Git: {e}"))?;
-    let deadline = Instant::now() + Duration::from_secs(15);
-    let code = if !probe {
-        child.wait().map_err(|e| e.to_string())?.code().unwrap_or(1)
-    } else {
-        loop {
-            match supervisor::exited(&mut child) {
-                Ok(true) => break supervisor::stop_group(&mut child)?.code().unwrap_or(1),
-                Ok(false) => {}
-                Err(error) => {
-                    let _ = supervisor::stop_group(&mut child);
-                    return Err(error);
-                }
-            }
-            if supervisor::cancelled() || Instant::now() >= deadline {
-                supervisor::stop_group(&mut child)?;
-                return Err("Git discovery probe interrupted or timed out".into());
-            }
-            thread::sleep(Duration::from_millis(2));
-        }
-    };
-    let mut stdout = vec![];
-    let mut stderr = vec![];
-    out.rewind()
-        .and_then(|_| out.read_to_end(&mut stdout))
-        .map_err(|e| e.to_string())?;
-    err.rewind()
-        .and_then(|_| err.read_to_end(&mut stderr))
-        .map_err(|e| e.to_string())?;
-    Ok((code, stdout, stderr))
+    crate::runtime::capture(cmd, Duration::from_secs(15), probe)
 }
 
 pub(super) fn probe(path: &Path, args: &[&str]) -> Result<Vec<u8>, String> {

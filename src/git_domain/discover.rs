@@ -1,4 +1,5 @@
-use super::{display, git, supervisor};
+use super::{display, git};
+use crate::runtime as supervisor;
 use std::collections::{BTreeSet, HashSet};
 use std::ffi::OsStr;
 use std::fs;
@@ -9,17 +10,12 @@ pub(super) struct Repo {
     pub path: PathBuf,
     pub common: PathBuf,
 }
-pub(super) struct Scope {
-    pub path: PathBuf,
-    pub count: usize,
-}
 pub(super) struct Selection {
-    pub scopes: Vec<Scope>,
     pub repos: Vec<Repo>,
     pub excluded: BTreeSet<PathBuf>,
 }
 
-fn repository(path: &Path) -> Result<Option<(Repo, bool)>, String> {
+pub(super) fn repository(path: &Path) -> Result<Option<(Repo, bool)>, String> {
     // A failed probe is only "not a repo" if no .git marker occurs in ancestors.
     let mut marker = false;
     for ancestor in path.ancestors() {
@@ -72,9 +68,7 @@ fn repository(path: &Path) -> Result<Option<(Repo, bool)>, String> {
 }
 
 pub(super) fn select(paths: &[PathBuf]) -> Result<Selection, String> {
-    let mut scope_roots = BTreeSet::new();
     let mut result = Selection {
-        scopes: vec![],
         repos: vec![],
         excluded: BTreeSet::new(),
     };
@@ -96,12 +90,10 @@ pub(super) fn select(paths: &[PathBuf]) -> Result<Selection, String> {
                     display(&root)
                 ));
             }
-            scope_roots.insert(repo.path.clone());
             if seen.insert(repo.path.clone()) {
                 result.repos.push(repo);
             }
         } else {
-            scope_roots.insert(root.clone());
             roots.push(root);
         }
     }
@@ -140,23 +132,5 @@ pub(super) fn select(paths: &[PathBuf]) -> Result<Selection, String> {
     }
     // Stable ordering independent of duplicated or overlapping argument order.
     result.repos.sort_by(|a, b| a.path.cmp(&b.path));
-    for root in &scope_roots {
-        let count = result
-            .repos
-            .iter()
-            .filter(|repo| {
-                repo.path.starts_with(root)
-                    && !scope_roots
-                        .iter()
-                        .any(|other| other != root && root.starts_with(other))
-            })
-            .count();
-        if count > 0 {
-            result.scopes.push(Scope {
-                path: root.clone(),
-                count,
-            });
-        }
-    }
     Ok(result)
 }

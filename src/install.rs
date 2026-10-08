@@ -82,8 +82,7 @@ pub(crate) fn install_command(args: &[String]) -> Result<()> {
         )
     })?;
     apply_skill_links(claude_skill_plan)?;
-    install_config_tools_binary(&home_dir)?;
-    install_reset_binary(&home_dir)?;
+    install_workctl(&home_dir)?;
 
     println!();
     println!(
@@ -507,7 +506,7 @@ fn legacy_relay_config_errors(home_dir: &Path) -> Result<Vec<String>> {
 fn managed_binary_errors(home_dir: &Path) -> Result<Vec<String>> {
     let mut errors = Vec::new();
     errors.extend(config_tools_binary_errors(home_dir)?);
-    errors.extend(reset_binary_errors(home_dir)?);
+    errors.extend(workctl_binary_errors(home_dir)?);
     errors.sort();
     Ok(errors)
 }
@@ -553,8 +552,8 @@ fn config_tools_binary_errors(home_dir: &Path) -> Result<Vec<String>> {
     }
 }
 
-fn reset_binary_errors(home_dir: &Path) -> Result<Vec<String>> {
-    let target = home_dir.join(".local/bin/reset_to_origin");
+fn workctl_binary_errors(home_dir: &Path) -> Result<Vec<String>> {
+    let target = home_dir.join(".local/bin/workctl");
     let source = env::current_exe().map_err(|err| err.to_string())?;
     match fs::symlink_metadata(&target) {
         Ok(metadata) if metadata.is_file() && is_executable_file(&metadata) => {
@@ -580,31 +579,115 @@ fn reset_binary_errors(home_dir: &Path) -> Result<Vec<String>> {
     }
 }
 
-fn install_reset_binary(home_dir: &Path) -> Result<()> {
-    use std::io::Write;
-    let source = env::current_exe().map_err(|err| err.to_string())?;
-    let target = home_dir.join(".local/bin/reset_to_origin");
-    if source == target {
-        return Ok(());
+pub(crate) fn install_workctl_command(args: &[String]) -> Result<()> {
+    let home = parse_home_arg(args)?;
+    install_workctl(&home)
+}
+fn owned_legacy(home: &Path, source: &Path) -> Result<Option<(PathBuf, Vec<u8>)>> {
+    let target = home.join(".local/bin/reset_to_origin");
+    let metadata = match fs::symlink_metadata(&target) {
+        Ok(m) => m,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e.to_string()),
+    };
+    if !metadata.is_file() || !is_executable_file(&metadata) {
+        return Err(format!(
+            "{}: legacy entry is not an owned executable; preserve it and resolve manually",
+            target.display()
+        ));
     }
-    // The multicall binary is managed by the same ownership check as config-tools.
-    verify_config_tools_binary_target(&source, &target)?;
-    let bytes = fs::read(&source).map_err(|err| err.to_string())?;
+    let bytes = fs::read(&target).map_err(|e| e.to_string())?;
+    let source_bytes = fs::read(source).map_err(|e| e.to_string())?;
+    let old = home.join(".local/bin/config-tools");
+    let matches_old = fs::symlink_metadata(&old)
+        .is_ok_and(|m| m.is_file() && is_executable_file(&m))
+        && fs::read(&old).is_ok_and(|b| b == bytes && is_probably_config_tools_binary(&b));
+    if bytes != source_bytes && !matches_old {
+        return Err(format!(
+            "{}: cannot prove legacy ownership; preserve it and resolve manually",
+            target.display()
+        ));
+    }
+    Ok(Some((target, bytes)))
+}
+fn atomic_copy(source: &Path, target: &Path) -> Result<()> {
+    use std::io::Write;
     let mut staged =
-        tempfile::NamedTempFile::new_in(target.parent().unwrap()).map_err(|err| err.to_string())?;
-    staged.write_all(&bytes).map_err(|err| err.to_string())?;
+        tempfile::NamedTempFile::new_in(target.parent().unwrap()).map_err(|e| e.to_string())?;
+    staged
+        .write_all(&fs::read(source).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
     staged
         .as_file()
         .set_permissions(
-            fs::metadata(&source)
-                .map_err(|err| err.to_string())?
+            fs::metadata(source)
+                .map_err(|e| e.to_string())?
                 .permissions(),
         )
-        .map_err(|err| err.to_string())?;
+        .map_err(|e| e.to_string())?;
+    staged.as_file().sync_all().map_err(|e| e.to_string())?;
+    staged.persist(target).map_err(|e| e.to_string())?;
+    Ok(())
+}
+fn install_workctl(home: &Path) -> Result<()> {
+    use std::io::Write;
+    let source = env::current_exe().map_err(|e| e.to_string())?;
+    let target = home.join(".local/bin/workctl");
+    // Do every ownership check before installing or deleting any entry point.
+    verify_config_tools_binary_target(&source, &target)?;
+    let internal = home.join(".local/bin/config-tools");
+    verify_config_tools_binary_target(&source, &internal)?;
+    let legacy = owned_legacy(home, &source)?;
+    let completion = home.join(".local/share/zsh/site-functions/_workctl");
+    match fs::symlink_metadata(&completion) {
+        Ok(m)
+            if m.is_file()
+                && fs::read(&completion).is_ok_and(|b| {
+                    b.starts_with(b"# workctl managed completion\n")
+                        || b.starts_with(b"#compdef workctl\n# workctl managed completion\n")
+                }) => {}
+        Ok(_) => {
+            return Err(format!(
+                "{}: unrelated completion file; preserve it",
+                completion.display()
+            ))
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e.to_string()),
+    }
+    fs::create_dir_all(target.parent().unwrap()).map_err(|e| e.to_string())?;
+    fs::create_dir_all(completion.parent().unwrap()).map_err(|e| e.to_string())?;
+    let mut staged =
+        tempfile::NamedTempFile::new_in(completion.parent().unwrap()).map_err(|e| e.to_string())?;
+    let generated = crate::workctl::completions(clap_complete::Shell::Zsh);
+    let header = b"#compdef workctl\n";
+    let body = generated
+        .strip_prefix(header)
+        .ok_or("generated zsh completion is missing its compdef header")?;
     staged
-        .persist(&target)
-        .map_err(|err| format!("cannot install {}: {err}", target.display()))?;
-    println!("Installed reset_to_origin binary -> {}", target.display());
+        .write_all(header)
+        .and_then(|_| staged.write_all(b"# workctl managed completion\n"))
+        .and_then(|_| staged.write_all(body))
+        .map_err(|e| e.to_string())?;
+    staged.as_file().sync_all().map_err(|e| e.to_string())?;
+    atomic_copy(&source, &target)?;
+    staged.persist(&completion).map_err(|e| e.to_string())?;
+    // Update the managed installer too, so its old reset dispatch cannot survive cutover.
+    install_config_tools_binary(home)?;
+    // Only remove a byte-verified predecessor after the new binary is installed.
+    if let Some((legacy, expected)) = legacy {
+        let metadata = fs::symlink_metadata(&legacy).map_err(|e| e.to_string())?;
+        if !metadata.is_file() || fs::read(&legacy).map_err(|e| e.to_string())? != expected {
+            return Err(format!(
+                "{}: legacy entry changed during installation; preserve it",
+                legacy.display()
+            ));
+        }
+        fs::remove_file(&legacy).map_err(|e| e.to_string())?;
+        println!("Removed owned legacy entry -> {}", legacy.display());
+    }
+    println!("Installed workctl -> {}", target.display());
+    println!("Installed zsh completion -> {}", completion.display());
     Ok(())
 }
 
@@ -652,7 +735,7 @@ fn install_config_tools_binary(home_dir: &Path) -> Result<()> {
     }
 
     verify_config_tools_binary_target(&source, &target)?;
-    fs::copy(&source, &target).map_err(|err| {
+    atomic_copy(&source, &target).map_err(|err| {
         format!(
             "cannot install config-tools binary from {} to {}: {err}",
             source.display(),
@@ -724,9 +807,18 @@ fn is_executable_file(_metadata: &fs::Metadata) -> bool {
 }
 
 fn is_probably_config_tools_binary(bytes: &[u8]) -> bool {
-    bytes
-        .windows(b"config-tools".len())
-        .any(|window| window == b"config-tools")
+    let native = bytes.starts_with(b"\x7fELF")
+        || [
+            b"\xcf\xfa\xed\xfe".as_slice(),
+            b"\xfe\xed\xfa\xcf".as_slice(),
+            b"\xca\xfe\xba\xbe".as_slice(),
+        ]
+        .iter()
+        .any(|magic| bytes.starts_with(magic));
+    native
+        && bytes
+            .windows(b"config-tools".len())
+            .any(|w| w == b"config-tools")
 }
 
 struct SkillLinkPlan {

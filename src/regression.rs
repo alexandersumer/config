@@ -654,13 +654,13 @@ pub(crate) fn test_install_command() -> Result<()> {
         installed_binary.to_string_lossy().as_ref(),
         &["--help"],
     )?;
-    let reset_binary = home.path().join(".local/bin/reset_to_origin");
+    let reset_binary = home.path().join(".local/bin/workctl");
     let help = run_command_output(
         home.path(),
         reset_binary.to_string_lossy().as_ref(),
         &["--help"],
     )?;
-    if !help.contains("Usage: reset_to_origin") {
+    if !help.contains("Usage: workctl") {
         return Err("installed reset executable does not dispatch independently".into());
     }
     if home.path().join(".codex/skills/.system").is_symlink() {
@@ -1203,13 +1203,16 @@ done
     );
     run_command(&config_root, "zsh", &["-f", "-c", &script])?;
     let executable = std::env::current_exe().map_err(|err| err.to_string())?;
+    let temp = tempfile::tempdir().map_err(|e| e.to_string())?;
+    let public = temp.path().join("workctl");
+    fs::copy(executable, &public).map_err(|e| e.to_string())?;
     let output = run_command_output(
         &config_root,
-        executable.to_string_lossy().as_ref(),
-        &["reset-to-origin", "--help"],
+        public.to_string_lossy().as_ref(),
+        &["git", "reset", "--help"],
     )?;
-    if !output.contains("Usage: reset_to_origin") {
-        return Err("Rust reset command is not reachable".into());
+    if !output.contains("Usage: workctl") {
+        return Err("workctl is not reachable".into());
     }
     Ok(())
 }

@@ -18,8 +18,8 @@ struct Runtime {
 impl Runtime {
     fn new() -> Self {
         let temp = tempfile::tempdir().expect("create E2E workspace");
-        let binary = temp.path().join("reset_to_origin");
-        fs::copy(env!("CARGO_BIN_EXE_config-tools"), &binary).expect("copy standalone executable");
+        let binary = temp.path().join("workctl");
+        fs::copy(env!("CARGO_BIN_EXE_workctl"), &binary).expect("copy standalone executable");
         let artifacts = temp.path().join("artifacts");
         fs::create_dir(&artifacts).unwrap();
         Self {
@@ -120,7 +120,7 @@ impl Runtime {
     }
     fn reset(&self, path: &Path, args: &[&str], code: i32) -> Output {
         let mut cmd = self.command(path, &self.binary);
-        cmd.arg("--keep-logs").args(args);
+        cmd.args(["git", "reset", "--keep-logs"]).args(args);
         let out = self.run(cmd);
         assert_eq!(out.status.code(), Some(code), "{}", text(&out));
         out
@@ -254,7 +254,10 @@ fn standalone_cli_resets_over_git_protocol_and_preserves_dirty_batch_member() {
         "listing must not fetch"
     );
     let single_out = rt.reset(&single, &[], 0);
-    assert!(text(&single_out).contains("Reset single to origin/trunk"));
+    assert!(text(&single_out).contains(&format!(
+        "Reset {} to origin/trunk",
+        single.canonicalize().unwrap().display()
+    )));
     assert_eq!(rt.git(&single, &["rev-parse", "HEAD"]), new);
     assert_eq!(
         rt.git(&single, &["symbolic-ref", "--short", "HEAD"]),
@@ -281,8 +284,8 @@ fn standalone_cli_resets_over_git_protocol_and_preserves_dirty_batch_member() {
     fs::write(dirty.join("file"), "unsaved edits\n").unwrap();
     let config = fs::read(dirty.join(".git/config")).unwrap();
     let batch = rt.reset(rt.root(), &["first", "second"], 1);
-    assert!(text(&batch).contains("3 repositories with 3 workers"));
-    assert!(text(&batch).contains("2 succeeded, 1 failed"));
+    assert!(text(&batch).contains("Workers        3"));
+    assert!(text(&batch).contains("2 succeeded\n  1 failed"));
     for repo in [&alpha, &beta] {
         assert_eq!(rt.git(repo, &["rev-parse", "HEAD"]), new);
     }

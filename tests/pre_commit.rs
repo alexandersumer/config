@@ -128,8 +128,9 @@ fn pre_commit_validates_index_and_preserves_local_changes() {
     let result = run("pre-commit", root);
     assert!(
         result.status.success(),
-        "staged checks should ignore local changes: {}",
-        String::from_utf8_lossy(&result.stderr)
+        "staged checks should ignore local changes: {}{}",
+        String::from_utf8_lossy(&result.stderr),
+        String::from_utf8_lossy(&result.stdout)
     );
     assert_eq!(
         fs::read_to_string(&source_file).unwrap(),

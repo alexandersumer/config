@@ -2,6 +2,7 @@
 name = "config-tools"
 version = "0.1.0"
 edition = "2021"
+default-run = "config-tools"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
@@ -11,3 +12,15 @@ serde_json = "1"
 serde_yaml = "0.9"
 tempfile = "3"
 walkdir = "2"
+
+clap_complete = "4"
+console = "0.16"
+indicatif = { version = "0.18", features = ["in_memory"] }
+
+[[bin]]
+name = "workctl"
+path = "src/bin/workctl.rs"
+
+[[bin]]
+name = "config-tools"
+path = "src/main.rs"

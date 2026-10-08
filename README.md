@@ -2,152 +2,176 @@
 
 Personal configuration and agent-skill registry.
 
-## Reset repositories
+## Workstation CLI
 
-`reset_to_origin` is a standalone Rust executable backed by the installed Git.
-Install it with `cargo run -- install`; production execution needs neither Python
-nor zsh. The same compiled multicall binary provides `config-tools` and
-`reset_to_origin`, with one reset implementation in `src/reset/`.
+`workctl` is the public workstation tool. Git maintenance is its first domain;
+configuration installation and CI remain internal `config-tools` commands.
+There are no standalone checkout-reset or worktree-cleanup aliases.
 
 ```sh
-reset_to_origin
-reset_to_origin ~/atlassian ~/oss ~/src ~/stable
-reset_to_origin --list .
-reset_to_origin --jobs 4 --attempts 3 --timeout 300 /path/to/workspace
-reset_to_origin --remote upstream --branch release /path/to/repository
+workctl git reset ~/atlassian ~/oss ~/src ~/stable
+workctl git worktree clean ~/atlassian ~/oss ~/src ~/stable
+workctl git worktree clean --apply ~/atlassian ~/oss ~/src ~/stable
+workctl doctor
+workctl completions zsh
 ```
 
-The CLI uses Clap's derive API for generated help, version information, typed
-option validation, and typo suggestions. Use `-h` for concise help, `--help` for
-the full contract and examples, and `-V` or `--version` for the package version.
-Options accept either `--jobs 4` or `--jobs=4`; `-j` and `-v` are available for
-jobs and verbose output. Use `--` before paths that begin with a dash. Repeated
-options use the last value. Invalid options fail before discovery or mutation.
+Build with `cargo build --locked --release`. Install only the workstation CLI with
+`cargo run --release -- install-workctl`; use `--home PATH` for an isolated home.
+The full configuration installer also installs it. Both update the internal managed
+`config-tools` installer and install the compiled binary
+atomically at `~/.local/bin/workctl` and generated zsh completion at
+`~/.local/share/zsh/site-functions/_workctl`. The tracked zsh configuration adds
+that directory to `fpath` before Oh My Zsh initializes completions. For another
+zsh configuration, add it to `fpath` before `compinit` yourself.
 
-No paths means `.`. Positional arguments are filesystem paths, never remote or
-branch names. A repository root or a directory inside it selects that primary
-checkout. A container recursively selects primary checkouts beneath it. There
-are no predefined roots, branch-name guesses, or build/cache exclusion lists.
-Discovery stops at repositories, skips Git metadata, and does not follow directory
-symlinks encountered during traversal. An explicitly supplied symlink is resolved
-normally. Linked worktrees found in containers are reported and skipped; selecting
-one explicitly fails. Overlapping inputs run each checkout once. All inputs and
-discovery must succeed before any reset starts.
+The migration removes `~/.local/bin/reset_to_origin` only when it is an executable
+regular file byte-identical to the current installer or the previously installed
+managed `config-tools` binary. Unknown files and symlinks block migration and
+remain untouched. No shell startup files are rewritten by `install-workctl`.
+Use a fresh shell or reload your shell configuration after cutover; the tracked zsh
+configuration removes the retired function and alias and refreshes command hashes.
 
-The runner inherits the supervised parallel model of `home_reset_to_origin`:
-up to 32 workers across all supplied roots (limited by repository count),
-common-directory locks, per-attempt
-deadlines, bounded transient retries, preserved local branches/worktrees, and
-recoverable target-branch tips. One repository uses the same runner and safety
-checks as a batch. `--attempts` means total attempts, default three; `--timeout`
-is seconds for the entire attempt, default 300. Limits are 32 workers, 10 attempts,
-and 86400 seconds per attempt. Network retries use capped exponential backoff with jitter.
-Authentication, Git locks, and safety refusals are not retried.
-Use `--jobs N` to override the measured default, for example when sharing bandwidth
-or using a remote with stricter connection limits.
+Every public command has Clap-generated help, version information, and examples.
+Use `--` before paths beginning with a dash. Git options belong to their operation:
+`--jobs` applies to reset, and `--apply` belongs to cleanup. No paths means `.`;
+there are no hardcoded workspace roots. Help and completions require no Git access.
+Exit codes are 0 for success, 1 for operational failure or blocked cleanup,
+2 for invalid usage, and 130 for interruption.
 
-The default was selected from two passes in opposing order against real Git
-remotes, using disposable repositories and existing objects as read-only alternates.
-For 40 size-bounded working checkouts, median complete-reset times were 54.1s
-with 4 workers, 18.3s with 16, 16.6s with 24, and 11.9s with 32. All attempts
-succeeded without retries; final commits, upstreams, clean tracked files, and
-recovery refs were verified. A separate 44-repository advertisement/fetch comparison
-also favored 32 workers. These are observed results for that workload, not a
-guarantee for every remote or machine; large cold downloads and Git LFS transfers
-were outside the controlled working-checkout comparison.
-
-The operation refuses tracked/index changes, dirty submodules, unfinished Git
-operations, tracked paths marked assume-unchanged or skip-worktree, and untracked
-or ignored paths that collide with the fetched target or existing local target branch. Fetch is synchronous; the advertised remote
-HEAD supplies the default branch. Existing fetch mappings are respected, and the
-target must map unambiguously into remote-tracking refs and match the fetched
-tip. Fetch mappings that could replace local branches are refused. It switches to
-the target branch, checks files, branch identity, and branch-tip changes again
-after checkout hooks, and resets to that verified commit. Switch/reset do not recursively update submodules.
-Other local branches and noncolliding untracked/ignored files are preserved.
-Replaced target-branch tips are saved under `refs/home-reset-backups/`; logs show
-`git branch recovered-work <backup-ref>`. Detached-HEAD commits receive no
-additional backup.
-
-This is not a transaction across repositories. Fetches, backups, a branch switch,
-or upstream changes may persist after a later failure. Logs record stages and
-partial progress. Common-directory locks coordinate this runner, not unrelated
-Git commands or editors; run while repositories are otherwise idle. Timeouts and
-SIGINT/SIGTERM kill worker process groups before releasing repository locks.
-Interrupted Git writes may leave locks that require investigation; this tool
-never deletes them. The lock descriptor is inherited by workers and descendants
-so a forcibly terminated supervisor cannot release it while they still hold it.
-
-Safety probes do not write the index. Success requires the final branch, commit,
-and tracked state to pass verification after Git hooks have run; hook-created
-edits are preserved and reported as a failure.
-
-Output separates discovery, the repository overview, execution, and the final
-summary. The overview lists scope counts and exclusions before workers start.
-Single-repository output names the fetched target and recovery ref. Batches show
-restrained progress and immediate wrapped failures;
-successful repositories do not emit individual rows. `--verbose` prints sanitized
-full logs in discovery order. Successful runs delete their temporary diagnostics
-and omit log paths. Failed or interrupted runs retain diagnostics and show their
-location; `--keep-logs` also retains successful-run diagnostics. Recovery refs
-remain in each repository regardless of log cleanup. Terminal colors respect `NO_COLOR` and `TERM=dumb`;
-redirected output is plain text. A private temporary log directory contains each
-attempt log, atomic worker status records, `results.json`, and `excluded-worktrees.json`.
-Worker progress and results come from structured records; Git and hook text stays
-in diagnostic logs. Incomplete worker exits fail explicitly. Exit codes are 0 for success
-(including empty discovery), 1 for operational failures, 2 for invalid usage,
-and 130 for interruption.
-
-The old shell reset commands and Python runners have been removed. Use a new
-shell after installation so stale function definitions cannot shadow the binary.
-Replace `home_reset_to_origin` with explicit paths, replace positional remote/branch
-arguments with `--remote`/`--branch`, and replace `--retries` with `--attempts`.
-There are no single/multi modes, branch-pruning options, or implicit fetch-config
-repairs. Automatic case-conflict repair is intentionally excluded: conflicting
-refs fail without adding exclusions or deleting tracking refs. Existing exclusions
-remain in effect and may cause a target refusal.
-
-Checks and benchmarks only reset disposable local repositories:
+### Checkout reset
 
 ```sh
-cargo test --test reset_cli
+workctl git reset --list .
+workctl git reset --jobs 4 --attempts 3 --timeout 300 /path/to/workspace
+workctl git reset --remote upstream --branch release /path/to/repository
+workctl git reset --json /path/to/workspace
+```
+
+A checkout or directory inside it selects its primary checkout. Containers recursively
+select primary checkouts, stopping at repositories and skipping directory symlinks.
+Overlapping scopes are deduplicated. Linked worktrees encountered in containers are
+excluded; explicit linked-worktree reset targets are refused. Invalid scope prevents
+all resets. `--list` is inspection only and does not fetch.
+
+The existing reset policy is preserved: tracked/index changes, dirty submodules,
+unfinished Git operations, masked tracked paths, and untracked/ignored paths that
+collide with either the fetched target or local target branch cause refusal.
+The remote's advertised HEAD determines the default branch. Fetch mappings must
+resolve it unambiguously, match the fetched tip, and never replace local branches.
+Hooks are followed by branch, commit, and tracked-file verification. Other branches,
+linked worktree files, and noncolliding local files remain intact. Replaced target
+branch tips are retained under `refs/home-reset-backups/`. Detached-HEAD commits
+receive no additional backup.
+
+The measured existing default remains 32 workers, bounded by checkout count;
+this migration introduces no new performance claim. `--jobs` accepts 1–32,
+`--attempts` accepts 1–10 total attempts, and `--timeout` accepts 1–86400 seconds
+per attempt. Transient failures use bounded backoff. Authentication, locks, and
+safety refusals are not retried. There is no transaction or rollback across checkouts:
+fetches, backups, switches, and upstream changes may persist after later failure.
+
+### Linked-worktree cleanup
+
+The default is an exact removal plan. `--apply` executes eligible removals without
+an interactive question. A container scope selects registered linked worktrees
+beneath it. A primary checkout selects all its registered linked worktrees, including
+paths outside the checkout directory; those full paths are shown. An explicit linked
+worktree selects only itself. Primary checkouts always remain protected.
+
+Publication is verified against a fresh fetch of the selected remote's current heads
+and tags into a temporary bare repository. Cached remote-tracking refs are never
+publication proof. Source objects are read through alternates, without changing
+source refs or `FETCH_HEAD`. Every commit reachable from the candidate HEAD must
+be reachable from those current remote refs. Missing remotes, shallow history,
+unpublished/detached commits, and failed remote verification block removal.
+
+Tracked changes, untracked entries, ignored entries, and masked tracked paths
+require a separate exact-path discard decision:
+
+```sh
+workctl git worktree clean --apply \
+  --discard-local /path/to/work/feature /path/to/work
+```
+
+Repeat `--discard-local` for each worktree whose local data may be lost. It never
+authorizes removal of unpublished commits, main checkouts, locks, missing paths,
+nested repositories, submodules, or unverifiable registrations/ownership.
+Normal cleanup uses native `git worktree remove`; `--force` is used only for a
+worktree with an explicit discard decision. Cleanup never retries removal.
+`--timeout` bounds each candidate's inspection, remote verification, removal, and
+final verification together. Discovery Git probes have independent 15-second bounds.
+
+Application checks files, locks, topology, HEAD, registration, and publication again,
+then rechecks local state immediately after remote I/O. Success requires both the
+path and its Git registration to be absent. Outcomes are `would remove`, `removed`,
+`blocked`, or `interrupted`; partial cleanup exits nonzero and reports blockers.
+A removed worktree's local branch is retained. Stale registrations with missing
+filesystem paths remain blockers, rather than being pruned speculatively.
+
+Both operations share process supervision and common-directory locks. These locks
+coordinate workctl and the former reset runner, not editors or unrelated Git commands;
+run while repositories are otherwise idle. Cancellation/deadlines terminate process
+groups before locks are released. Descendants inherit the lock so forced supervisor
+termination cannot release it while they run. Interrupted Git writes may leave native
+locks requiring investigation; workctl never removes those locks.
+
+### Presentation and machine output
+
+Human output names the operation, scope/counts, current activity, and final outcome.
+Indicatif updates an interactive progress row; permanent failures remain visible above
+it. Redirected stderr uses plain progress lines at most once every 15 seconds.
+Full paths remain visible, with terminal wrapping rather than truncation. Durations
+are readable. Status color includes the equivalent words, respects `NO_COLOR`,
+`CLICOLOR=0`, and `TERM=dumb`, and is disabled on redirected streams.
+Stdout contains requested results; stderr contains progress and diagnostics.
+
+Detailed Git logs require `--verbose` or an actionable failure. Reset retains private
+diagnostics on failure/interruption or `--keep-logs`, including `results.json` and
+`excluded-worktrees.json`. Successful default runs remove them. Cleanup's temporary
+publication repositories and captures are removed automatically.
+
+`--json` works before or after a subcommand and produces one undecorated JSON document
+on stdout. Schema version 1 has `schema_version`, `operation`, and `status`; operational
+errors have `error`. Reset and cleanup include scope, per-target `results`, and summary
+counts with `elapsed_seconds`. Reset additionally reports excluded worktrees,
+recovery refs, attempts, and retained diagnostics. Cleanup reports protected primary
+checkouts, discard decisions, and publication/local-data evidence for eligible targets.
+Per-target `path` is a display string; `path_bytes` is the exact Unix path as an array
+of byte values, preserving non-UTF-8 filenames. Help, version, and usage errors follow
+Clap conventions even when `--json` is present. Doctor checks Git 2.31+, the executable,
+temporary storage, and relevant process/lock capabilities without repairs.
+
+### Architecture and verification
+
+`src/workctl.rs` owns the public command hierarchy. `src/runtime.rs` owns process
+capture, deadlines, cancellation, and group lifetime. `src/presentation.rs` owns shared
+rendering and JSON conventions. `src/git_domain/` owns topology, common-directory locks,
+publication, and separate reset/cleanup policies. No plugin registry or command DSL
+is involved.
+
+```sh
+cargo test --locked --lib --test reset_cli --test reset_e2e --test workctl
 cargo run -- check
-cargo build --release
-cargo run --release --example reset_benchmark -- \
-  --binary target/release/config-tools \
-  --baseline /path/to/old/zsh \
-  --output /path/to/benchmark.json
+cargo run -- pre-commit
 ```
 
-The required network E2E lane is `cargo test --locked --test reset_e2e -- --nocapture`.
-It starts a real loopback Git daemon, drives the standalone CLI name, and verifies
-remote commits, recovery refs, preservation, and dirty-repository refusal in a
-multi-root batch. It also runs automatically under `cargo test`, `check`, and
-staged pre-commit checks. `.github/workflows/reset-e2e.yml` runs the same lane on
-Linux and macOS for pushes and pull requests. Missing Git, unavailable loopback
-networking, or failed daemon readiness fail the lane; there is no skip mode.
-The hosted Linux/macOS lane runs the real-Git CLI regression suite alongside
-the Git-protocol E2E check.
+Real-Git tests cover dirty files, hooks, backup refs, custom fetch mappings,
+publication, deleted remote branches, scope protection, discard decisions, nested
+repositories, locks, revalidation, cancellation, deadlines, concurrency, partial
+failure, and resulting registrations/filesystem state. Presentation checks cover
+narrow/normal terminal widths, redirected progress, JSON, disabled color, and broken
+pipes. Installation tests use temporary homes and fresh sh/zsh shells, verify
+completion files, and preserve unrelated legacy files. The Git protocol E2E starts a
+loopback daemon and checks persisted results. The CI workflow runs the public CLI
+contracts on Linux and macOS; configured CI is distinct from a completed hosted run.
 
-Set `RESET_E2E_ARTIFACT_DIR` to preserve command transcripts, daemon logs, and
-CLI result logs. Otherwise a failing test retains its temporary workspace and
-prints its path. The daemon is stopped on success and assertion failure; successful
-runs remove their repositories. Existing `reset_cli` tests cover process timeout,
-cancellation, and transient-failure classification separately.
-
-A reproducible local benchmark compares configurable worker counts without any
-legacy runner dependency. It uses disposable repositories, rotated trials,
-controlled fetch latency, and verified final tips, upstreams, tracked state, and
-recovery refs. This measures controlled local latency, not live remote performance.
+A disposable worker benchmark remains available:
 
 ```sh
-cargo +stable build --locked --release
-cargo +stable run --locked --release --example reset_benchmark -- \
-  --binary target/release/config-tools --output /tmp/reset-worker-benchmark.json
+cargo run --release --example reset_benchmark -- \
+  --binary target/release/workctl --output /tmp/reset-worker-benchmark.json
 ```
-
-Use its generated `--help` to adjust worker counts, repository count, trials, or
-fetch delay. Temporary checkouts and diagnostics are removed automatically.
 
 ## Tooling
 
@@ -175,7 +199,7 @@ Command roles:
 - `repair-codex-config`: removes deprecated/disabled Codex feature flags from `~/.codex/config.toml`.
 - `prepare`: runs the same verification as `check`.
 - `pre-commit`: validates an isolated snapshot of the Git index, so unstaged and untracked work cannot affect the commit checks. Outside Git, runs `prepare` on the supplied checkout. No home installation is required.
-- `install`: intentional home-directory mutation for `~/.agents`, custom `~/.codex/skills` and `~/.claude/skills` symlinks, Codex config flag repair, `~/.local/bin/config-tools` and `~/.local/bin/reset_to_origin`. Codex itself is installed and updated through its official distribution; this installer does not create a Codex launcher.
+- `install`: intentional home-directory mutation for `~/.agents`, custom `~/.codex/skills` and `~/.claude/skills` symlinks, Codex config flag repair, `~/.local/bin/config-tools` and `~/.local/bin/workctl`. Codex itself is installed and updated through its official distribution; this installer does not create a Codex launcher.
 - `install-git-hooks`: intentional local Git config mutation for `core.hooksPath`.
 
 ## Custom skills
@@ -294,7 +318,7 @@ Expected symlink behavior:
 - `~/.config/ghostty/config` links to this config checkout's `ghostty/config` file.
 - `~/Library/Application Support/com.mitchellh.ghostty/config` is absent so Ghostty loads the managed config only once.
 - `~/.config/relay/config.toml` links to this config checkout's `relay/config.toml` file.
-- `~/.local/bin/config-tools` and `~/.local/bin/reset_to_origin` are runnable copies of the Rust multicall executable.
+- `~/.local/bin/config-tools` and `~/.local/bin/workctl` are runnable copies of the Rust multicall executable.
 - Codex runs directly from the official Homebrew installation. The shell prefers `/opt/homebrew/bin` over older `/usr/local/bin` tools; no config-repair wrapper is installed.
 - `~/.codex/skills/.system` remains a Codex-owned directory with Codex system skills.
 - Each custom top-level `.agents/skills/<name>/SKILL.md` directory links into `~/.codex/skills/<name>` and `~/.claude/skills/<name>`.

@@ -6,77 +6,21 @@ use super::{
     Options,
 };
 use regex::Regex;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::{fs::OpenOptionsExt, process::CommandExt};
 use std::path::PathBuf;
-use std::process::{Child, Command, ExitStatus, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::{
-    atomic::{AtomicBool, AtomicUsize, Ordering},
+    atomic::{AtomicUsize, Ordering},
     mpsc, Arc, Mutex, OnceLock,
 };
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-static INTERRUPTED: AtomicBool = AtomicBool::new(false);
-static CANCELLED: AtomicBool = AtomicBool::new(false);
-extern "C" fn stop(_: libc::c_int) {
-    INTERRUPTED.store(true, Ordering::SeqCst);
-    CANCELLED.store(true, Ordering::SeqCst);
-}
-pub(super) fn cancelled() -> bool {
-    CANCELLED.load(Ordering::SeqCst)
-}
-pub(super) struct Signals {
-    old: Vec<(i32, libc::sighandler_t)>,
-}
-impl Signals {
-    pub fn install() -> Result<Self, String> {
-        CANCELLED.store(false, Ordering::SeqCst);
-        INTERRUPTED.store(false, Ordering::SeqCst);
-        let mut signals = Self { old: vec![] };
-        for signal in [libc::SIGINT, libc::SIGTERM] {
-            // Handler only performs an atomic store, no allocation or locking.
-            let old = unsafe { libc::signal(signal, stop as libc::sighandler_t) };
-            if old == libc::SIG_ERR {
-                return Err(io::Error::last_os_error().to_string());
-            }
-            signals.old.push((signal, old));
-        }
-        Ok(signals)
-    }
-}
-impl Drop for Signals {
-    fn drop(&mut self) {
-        for &(signal, old) in &self.old {
-            unsafe {
-                libc::signal(signal, old);
-            }
-        }
-    }
-}
-
-pub(super) fn exited(child: &mut Child) -> Result<bool, String> {
-    // Use the previous home supervisor's ordering on both supported platforms:
-    // observe/reap the leader, then stop its group before releasing the lock.
-    child
-        .try_wait()
-        .map(|status| status.is_some())
-        .map_err(|e| e.to_string())
-}
-
-pub(super) fn stop_group(child: &mut Child) -> Result<ExitStatus, String> {
-    let result = unsafe { libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL) };
-    if result != 0 {
-        let error = io::Error::last_os_error();
-        if error.raw_os_error() != Some(libc::ESRCH) {
-            return Err(format!("cannot terminate worker group: {error}"));
-        }
-    }
-    child.wait().map_err(|e| e.to_string())
-}
+use crate::runtime::{cancel, cancelled, exited, interrupted, stop_group};
 struct OwnedChild(Child, bool);
 impl Drop for OwnedChild {
     fn drop(&mut self) {
@@ -89,7 +33,7 @@ struct CancelOnDrop(bool);
 impl Drop for CancelOnDrop {
     fn drop(&mut self) {
         if self.0 {
-            CANCELLED.store(true, Ordering::SeqCst);
+            cancel();
         }
     }
 }
@@ -137,16 +81,7 @@ fn execute(
         .mode(0o600)
         .open(log)
         .map_err(|e| e.to_string())?;
-    let lock = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .mode(0o600)
-        .open(repo.common.join("repo-batch.lock"))
-        .map_err(|e| e.to_string())?;
-    if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
-        let error = io::Error::last_os_error();
-        return Err(format!("Repository is busy or cannot be locked: {error}"));
-    }
+    let lock = super::lock::acquire(&repo.common)?;
     let status_path = log.with_extension("status.json");
     let mut attempts = 0;
     let mut code = 130;
@@ -160,16 +95,10 @@ fn execute(
         }
         .write(&status_path)?;
         let executable = std::env::current_exe().map_err(|e| e.to_string())?;
-        let standalone = executable
-            .file_name()
-            .is_some_and(|n| n == "reset_to_origin");
         let mut command = Command::new(executable);
-        if !standalone {
-            command.arg("reset-to-origin");
-        }
         command
             .args([
-                "--internal-worker",
+                "--internal-reset-worker",
                 &options.remote,
                 options.branch.as_deref().unwrap_or(""),
             ])
@@ -288,74 +217,50 @@ pub(super) fn run(options: &Options, selection: Selection) -> u8 {
         Ok(code) => code,
         Err(error) => {
             super::report(&error);
-            if INTERRUPTED.load(Ordering::SeqCst) {
-                130
-            } else {
-                1
+            let code = if interrupted() { 130 } else { 1 };
+            if options.json {
+                let _ = crate::presentation::json(
+                    &serde_json::json!({"schema_version":1,"operation":"git.reset","status":if code==130 {"interrupted"}else{"failed"},"error":error}),
+                );
             }
+            code
         }
     }
 }
 fn run_inner(options: &Options, selection: Selection) -> Result<u8, String> {
-    let mut stdout = io::stdout().lock();
-    if !selection.repos.is_empty() {
+    let mut overview: Box<dyn Write> = if options.json {
+        Box::new(io::stderr())
+    } else {
+        Box::new(io::stdout())
+    };
+    writeln!(overview,"Git checkout reset\n\nScope          {}\nCheckouts      {}\nExcluded       {} linked worktrees\nWorkers        {}\n",
+        options.paths.iter().map(|p|output::short(p)).collect::<Vec<_>>().join(" "),selection.repos.len(),selection.excluded.len(),options.jobs.min(selection.repos.len())).map_err(|e|e.to_string())?;
+    overview.flush().map_err(|e| e.to_string())?;
+    drop(overview);
+    let total = selection.repos.len();
+    let started = Instant::now();
+    if total == 0 {
+        if options.json {
+            return Ok(crate::presentation::json(
+                &serde_json::json!({"schema_version":1,"operation":"git.reset","status":"completed","scope":crate::presentation::paths(&options.paths),"results":[],"excluded":crate::presentation::paths(&selection.excluded),"summary":{"succeeded":0,"failed":0,"cancelled":0,"elapsed_seconds":0.0}}),
+            ));
+        }
         writeln!(
-            stdout,
-            "Found {}:",
-            output::quantity(selection.repos.len(), "repository")
+            io::stdout(),
+            "Completed\n  No repositories to reset.\n  0 succeeded\n  0 failed\n  Elapsed 0s"
         )
         .map_err(|e| e.to_string())?;
-        for scope in &selection.scopes {
-            writeln!(
-                stdout,
-                "  {} ({})",
-                output::short(&scope.path),
-                output::quantity(scope.count, "repository")
-            )
-            .map_err(|e| e.to_string())?;
-        }
-    }
-    if !selection.excluded.is_empty() {
-        writeln!(
-            stdout,
-            "{}",
-            output::color(
-                &format!(
-                    "Skipped {}.",
-                    output::quantity(selection.excluded.len(), "linked worktree")
-                ),
-                33
-            )
-        )
-        .map_err(|e| e.to_string())?;
-        if options.verbose {
-            for path in &selection.excluded {
-                writeln!(stdout, "  Skipped: {}", output::short(path))
-                    .map_err(|e| e.to_string())?;
-            }
-        }
-    }
-    if selection.repos.is_empty() {
-        writeln!(stdout, "No repositories to reset.").map_err(|e| e.to_string())?;
         return Ok(0);
     }
     let logs = tempfile::Builder::new()
-        .prefix("reset-to-origin-")
+        .prefix("workctl-reset-")
         .tempdir()
         .map_err(|e| e.to_string())?
         .keep();
     if options.keep_logs {
-        writeln!(stdout, "Logs: {}", display(&logs)).map_err(|e| e.to_string())?;
+        writeln!(io::stderr(), "Logs: {}", display(&logs)).map_err(|e| e.to_string())?;
     }
-    writeln!(
-        stdout,
-        "\nResetting {} with {}...",
-        output::quantity(selection.repos.len(), "repository"),
-        output::quantity(options.jobs.min(selection.repos.len()), "worker")
-    )
-    .and_then(|_| stdout.flush())
-    .map_err(|e| e.to_string())?;
-    let started = Instant::now();
+    writeln!(io::stderr(), "Resetting checkouts…").map_err(|e| e.to_string())?;
     let resources: HashMap<PathBuf, Arc<Mutex<()>>> = selection
         .repos
         .iter()
@@ -363,7 +268,7 @@ fn run_inner(options: &Options, selection: Selection) -> Result<u8, String> {
         .collect();
     let next = AtomicUsize::new(0);
     let (tx, rx) = mpsc::channel();
-    let total = selection.repos.len();
+    let mut rendering = crate::presentation::Progress::new(total);
     let records = thread::scope(|scope| -> Result<Vec<ResultRecord>, String> {
         let mut cancel_guard = CancelOnDrop(true);
         for _ in 0..options.jobs.min(total) {
@@ -381,7 +286,7 @@ fn run_inner(options: &Options, selection: Selection) -> Result<u8, String> {
                 let started = Instant::now();
                 let _guard = resources[&repo.common].lock().unwrap();
                 if tx.send(Event::Started(index)).is_err() {
-                    CANCELLED.store(true, Ordering::SeqCst);
+                    cancel();
                     break;
                 }
                 let mut progress = Progress::default();
@@ -390,131 +295,71 @@ fn run_inner(options: &Options, selection: Selection) -> Result<u8, String> {
                 } else {
                     execute(options, repo, &log, &mut progress)
                 };
-                let (code, attempts, detail) = outcome.unwrap_or_else(|error| {
-                    if let Ok(mut log) = OpenOptions::new()
-                        .create(true)
-                        .append(true)
-                        .mode(0o600)
-                        .open(&log)
-                    {
-                        let _ = writeln!(log, "Worker failure: {error}");
-                    }
-                    (1, progress.attempts, error)
-                });
+                let (code, attempts, detail) =
+                    outcome.unwrap_or_else(|e| (1, progress.attempts, e));
                 if !log.exists() {
                     let _ = fs::write(&log, format!("{detail}\n"));
                 }
                 let record = ResultRecord {
-                    target: progress.target,
-                    backups: progress.backups,
                     path: repo.path.clone(),
                     code,
                     attempts,
                     seconds: started.elapsed().as_secs_f64(),
                     log,
                     detail,
+                    target: progress.target,
+                    backups: progress.backups,
                 };
                 if tx.send(Event::Finished(index, record)).is_err() {
-                    CANCELLED.store(true, Ordering::SeqCst);
+                    cancel();
                     break;
                 }
             });
         }
         drop(tx);
         let mut records = Vec::with_capacity(total);
-        let mut heartbeat = Instant::now();
-        let mut active = BTreeMap::new();
-        let mut reported_waits = HashSet::new();
-        let mut last_count = 0;
+        let mut active = HashSet::new();
         while records.len() < total {
             match rx.recv_timeout(Duration::from_millis(100)) {
                 Ok(Event::Started(index)) => {
-                    active.insert(index, Instant::now());
+                    active.insert(index);
                 }
                 Ok(Event::Finished(index, record)) => {
                     active.remove(&index);
                     if record.code != 0 {
-                        let heading = if record.code == 130 {
-                            output::color("Cancelled:", 33)
-                        } else {
-                            output::color("Failed:", 31)
-                        };
-                        writeln!(
-                            stdout,
-                            "\n  {heading} {}\n{}\n    Log: {}",
-                            output::label(&selection.repos[index], &selection.scopes),
+                        rendering.message(&format!(
+                            "\n  {} {}\n{}\n    Log: {}",
+                            crate::presentation::status(
+                                if record.code == 130 {
+                                    "Cancelled:"
+                                } else {
+                                    "Failed:"
+                                },
+                                true,
+                                true
+                            ),
+                            display(&record.path),
                             output::wrap(&display(&record.detail)),
                             display(&record.log)
-                        )
-                        .map_err(|e| e.to_string())?;
-                    } else if total == 1 {
-                        writeln!(
-                            stdout,
-                            "  {} {} to {}",
-                            output::color("Reset", 32),
-                            output::label(&selection.repos[index], &selection.scopes),
-                            display(record.target.as_deref().unwrap_or("remote target"))
-                        )
-                        .map_err(|e| e.to_string())?;
-                        for backup in &record.backups {
-                            writeln!(
-                                stdout,
-                                "  Previous tip: {}\n  Recover: git branch recovered-work {}",
-                                display(backup),
-                                display(backup)
-                            )
-                            .map_err(|e| e.to_string())?;
-                        }
+                        ))?;
                     }
                     records.push((index, record));
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
-                Err(error) => return Err(format!("Worker reporting failed: {error}")),
+                Err(e) => return Err(format!("Worker reporting failed: {e}")),
             }
-            if heartbeat.elapsed() >= Duration::from_secs(15) {
-                if records.len() != last_count {
-                    writeln!(
-                        stdout,
-                        "  Progress: {}/{} repositories completed ({}s elapsed).",
-                        records.len(),
-                        total,
-                        started.elapsed().as_secs()
-                    )
-                    .map_err(|e| e.to_string())?;
-                    last_count = records.len();
-                } else if let Some((&index, since)) = active
-                    .iter()
-                    .find(|(index, _)| !reported_waits.contains(*index))
-                {
-                    let status =
-                        Status::read(&logs.join(format!("{:04}.status.json", index + 1))).ok();
-                    let stage = status
-                        .as_ref()
-                        .map(|s| s.stage.as_str())
-                        .unwrap_or("worker startup");
-                    writeln!(
-                        stdout,
-                        "  Waiting for {} ({}, {}s).",
-                        output::label(&selection.repos[index], &selection.scopes),
-                        display(stage),
-                        since.elapsed().as_secs()
-                    )
-                    .map_err(|e| e.to_string())?;
-                    reported_waits.insert(index);
-                }
-                heartbeat = Instant::now();
-            }
+            rendering.update(records.len(), active.len())?;
         }
-        records.sort_by_key(|(index, _)| *index);
-        // This guard cancels on error; on success workers have already reported.
+        records.sort_by_key(|(i, _)| *i);
         cancel_guard.0 = false;
-        Ok(records.into_iter().map(|(_, record)| record).collect())
+        Ok(records.into_iter().map(|(_, r)| r).collect())
     })?;
+    rendering.finish();
     if options.verbose {
         for record in &records {
             let text = fs::read(&record.log).unwrap_or_default();
             writeln!(
-                stdout,
+                io::stderr(),
                 "--- {} ---\n{}",
                 display(&record.path),
                 String::from_utf8_lossy(&text)
@@ -526,7 +371,16 @@ fn run_inner(options: &Options, selection: Selection) -> Result<u8, String> {
             .map_err(|e| e.to_string())?;
         }
     }
-    let result: Vec<_> = records.iter().map(|r| serde_json::json!({"path":r.path.to_string_lossy(), "code":r.code, "attempts":r.attempts,"seconds":r.seconds,"log":r.log.to_string_lossy(),"detail":r.detail, "target":r.target, "backups":r.backups})).collect();
+    let ok = records.iter().filter(|r| r.code == 0).count();
+    let stopped = records.iter().filter(|r| r.code == 130).count();
+    let code = if cancelled() || stopped > 0 {
+        130
+    } else {
+        u8::from(ok != total)
+    };
+    let retain = code != 0 || options.keep_logs;
+    // Successful-run results never refer to diagnostics that have been deleted.
+    let result:Vec<_>=records.iter().map(|r|serde_json::json!({"path":r.path.to_string_lossy(),"path_bytes":crate::presentation::path_bytes(&r.path),"code":r.code,"status":if r.code==0 {"succeeded"}else if r.code==130 {"cancelled"}else{"failed"},"attempts":r.attempts,"seconds":r.seconds,"log":if retain {Some(r.log.to_string_lossy())}else{None},"detail":r.detail,"target":r.target,"backups":r.backups})).collect();
     fs::write(
         logs.join("results.json"),
         serde_json::to_vec_pretty(&result).map_err(|e| e.to_string())?,
@@ -534,85 +388,70 @@ fn run_inner(options: &Options, selection: Selection) -> Result<u8, String> {
     .map_err(|e| e.to_string())?;
     fs::write(
         logs.join("excluded-worktrees.json"),
-        serde_json::to_vec_pretty(
-            &selection
-                .excluded
-                .iter()
-                .map(|p| p.to_string_lossy())
-                .collect::<Vec<_>>(),
-        )
-        .map_err(|e| e.to_string())?,
+        serde_json::to_vec_pretty(&crate::presentation::paths(&selection.excluded))
+            .map_err(|e| e.to_string())?,
     )
     .map_err(|e| e.to_string())?;
-    let ok = records.iter().filter(|r| r.code == 0).count();
-    let interrupted = records.iter().filter(|r| r.code == 130).count();
-    let exit_code = if cancelled() || interrupted > 0 {
-        130
-    } else {
-        u8::from(ok != total)
-    };
-    if exit_code == 0 && !options.keep_logs {
+    if !retain {
         fs::remove_dir_all(&logs)
             .map_err(|e| format!("could not remove temporary logs at {}: {e}", display(&logs)))?;
     } else if !options.keep_logs {
-        writeln!(stdout, "Logs: {}", display(&logs)).map_err(|e| e.to_string())?;
+        writeln!(io::stderr(), "Logs: {}", display(&logs)).map_err(|e| e.to_string())?;
     }
-    let outcome = if interrupted > 0 {
+    let outcome = if code == 130 {
         "Interrupted"
-    } else if ok != total {
+    } else if code != 0 {
         "Completed with failures"
     } else {
         "Completed"
     };
-    let mut counts = vec![format!("{ok} succeeded")];
-    if total - ok - interrupted > 0 {
-        counts.push(format!("{} failed", total - ok - interrupted));
-    }
-    if interrupted > 0 {
-        counts.push(format!("{interrupted} cancelled"));
-    }
-    let summary = format!(
-        "{outcome} in {:.2}s: {}.",
-        started.elapsed().as_secs_f64(),
-        counts.join(", ")
-    );
-    writeln!(
-        stdout,
-        "\n{}",
-        output::color(
-            &summary,
-            if interrupted > 0 {
-                33
-            } else if ok != total {
-                31
-            } else {
-                32
+    if options.json {
+        if crate::presentation::json(
+            &serde_json::json!({"schema_version":1,"operation":"git.reset","status":if code==0 {"completed"}else if code==130 {"interrupted"}else{"failed"},"scope":crate::presentation::paths(&options.paths),"excluded":crate::presentation::paths(&selection.excluded),"results":result,"diagnostics":if retain {Some(logs.to_string_lossy())}else{None},"summary":{"succeeded":ok,"failed":total-ok-stopped,"cancelled":stopped,"elapsed_seconds":started.elapsed().as_secs_f64()}}),
+        ) != 0
+        {
+            return Ok(1);
+        }
+    } else {
+        let outcome = crate::presentation::status(outcome, code != 0, false);
+        let mut out = io::stdout().lock();
+        writeln!(
+            out,
+            "{outcome}\n  {ok} succeeded\n  {} failed",
+            total - ok - stopped
+        )
+        .map_err(|e| e.to_string())?;
+        if stopped > 0 {
+            writeln!(out, "  {stopped} cancelled").map_err(|e| e.to_string())?;
+        }
+        writeln!(
+            out,
+            "  Elapsed {}",
+            crate::presentation::duration(started.elapsed())
+        )
+        .map_err(|e| e.to_string())?;
+        for record in &records {
+            if total == 1 && record.code == 0 {
+                writeln!(
+                    out,
+                    "  Reset {} to {}",
+                    display(&record.path),
+                    display(record.target.as_deref().unwrap_or("remote target"))
+                )
+                .map_err(|e| e.to_string())?;
             }
-        )
-    )
-    .map_err(|e| e.to_string())?;
-    let recovered = records
-        .iter()
-        .filter(|r| r.code == 0 && r.attempts > 1)
-        .count();
-    if recovered > 0 {
-        writeln!(
-            stdout,
-            "{} recovered after retry.",
-            output::quantity(recovered, "repository")
-        )
-        .map_err(|e| e.to_string())?;
+            for backup in &record.backups {
+                writeln!(
+                    out,
+                    "  Recover {}: git branch recovered-work {}",
+                    display(&record.path),
+                    display(backup)
+                )
+                .map_err(|e| e.to_string())?;
+            }
+        }
     }
-    let backed_up = records.iter().filter(|r| !r.backups.is_empty()).count();
-    if total > 1 && backed_up > 0 {
-        writeln!(
-            stdout,
-            "Previous tips saved for {} under refs/home-reset-backups/.",
-            output::quantity(backed_up, "repository")
-        )
-        .map_err(|e| e.to_string())?;
-    }
-    Ok(exit_code)
+    Ok(code)
 }
 
 #[cfg(test)]

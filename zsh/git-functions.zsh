@@ -528,7 +528,7 @@ function soft_reset_remote_default() {
     git reset --soft "$default_branch"
 }
 
-# Origin-named aliases for non-reset helpers. Reset is a standalone Rust CLI.
+# Origin-named aliases for non-reset helpers. Checkout maintenance uses workctl.
 function rebase_on_origin()             { rebase_on_remote_default "$@"; }
 function restore_from_origin()          { restore_from_remote_default "$@"; }
 function prune_all_except_origin()      { prune_all_except_remote_default "$@"; }
