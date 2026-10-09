@@ -527,6 +527,10 @@ fn late_invalid_scope_and_discard_targets_prevent_all_removals() {
     assert_eq!(out.status.code(), Some(1));
     f.unchanged();
     f.result(&["--apply", "--discard-local", f.repo.to_str().unwrap()], 1);
+    f.result(
+        &["--apply", "--discard-ignored", f.repo.to_str().unwrap()],
+        1,
+    );
     f.unchanged();
 }
 #[test]
@@ -919,7 +923,7 @@ fn terminal_and_redirected_rendering_preserve_paths_and_color_disabled_status_wo
     assert!(!out.stderr.contains(&0x1b));
 }
 #[test]
-fn cleanup_closed_output_and_submodules_never_authorize_removal() {
+fn cleanup_closed_output_and_initialized_submodules_never_authorize_removal() {
     let f = Fixture::new();
     let mut child = f
         .command(&[])
@@ -944,6 +948,8 @@ fn cleanup_closed_output_and_submodules_never_authorize_removal() {
     );
     git(&f.worktree, &["commit", "-m", "submodule"]);
     git(&f.worktree, &["push", "origin", "feature"]);
+    fs::create_dir(f.worktree.join("submodule")).unwrap();
+    git(&f.worktree.join("submodule"), &["init"]);
     let r = f.result(
         &["--apply", "--discard-local", f.worktree.to_str().unwrap()],
         1,
@@ -951,7 +957,9 @@ fn cleanup_closed_output_and_submodules_never_authorize_removal() {
     assert!(r["results"][0]["reason"]
         .as_str()
         .unwrap()
-        .contains("submodules"));
+        .contains("unsupported nested repository"));
+    assert!(f.worktree.join("submodule/.git").is_dir());
+    assert_eq!(r["summary"]["removed"], 0);
     f.unchanged();
 }
 #[test]
@@ -1406,4 +1414,261 @@ fn cancellation_during_discovery_reports_interruption_without_starting_mutation(
         f.unchanged();
         assert_eq!(git(&f.repo, &["status", "--porcelain"]), "");
     }
+}
+
+#[test]
+fn published_empty_gitlinks_are_eligible_without_discarding_submodule_data() {
+    for mapped in [false, true] {
+        let f = Fixture::new();
+        let oid = git(&f.repo, &["rev-parse", "HEAD"]);
+        git(
+            &f.worktree,
+            &[
+                "update-index",
+                "--add",
+                "--cacheinfo",
+                &format!("160000,{oid},submodule"),
+            ],
+        );
+        fs::create_dir(f.worktree.join("submodule")).unwrap();
+        if mapped {
+            fs::write(
+                f.worktree.join(".gitmodules"),
+                "[submodule \"submodule\"]\npath = submodule\nurl = ../module.git\n",
+            )
+            .unwrap();
+            git(&f.worktree, &["add", ".gitmodules"]);
+        }
+        git(&f.worktree, &["commit", "-m", "empty gitlink"]);
+        git(&f.worktree, &["push", "origin", "feature"]);
+        let r = f.result(&[], 0);
+        assert_eq!(r["summary"]["would_remove"], 1);
+        f.unchanged();
+        let r = f.result(&["--apply"], 0);
+        assert_eq!(r["summary"]["removed"], 1);
+        assert!(!f.worktree.exists());
+    }
+}
+
+#[test]
+fn ignored_only_approval_never_discards_other_local_data() {
+    for kind in ["ignored", "tracked", "untracked", "masked"] {
+        let f = Fixture::new();
+        fs::write(f.repo.join(".git/info/exclude"), "cache\n").unwrap();
+        fs::write(f.worktree.join("cache"), "ignored data").unwrap();
+        match kind {
+            "tracked" => {
+                fs::write(f.worktree.join("file"), "precious tracked").unwrap();
+            }
+            "untracked" => {
+                fs::write(f.worktree.join("evidence"), "precious untracked").unwrap();
+            }
+            "masked" => {
+                git(&f.worktree, &["update-index", "--assume-unchanged", "file"]);
+                fs::write(f.worktree.join("file"), "masked data").unwrap();
+            }
+            _ => {}
+        }
+        let blocked = f.result(&[], 1);
+        assert!(
+            blocked["results"][0]["reason"]
+                .as_str()
+                .unwrap()
+                .contains("cache"),
+            "{blocked}"
+        );
+        let ignored = f.worktree.to_str().unwrap();
+        let code = if kind == "ignored" { 0 } else { 1 };
+        let preview = f.result(&["--discard-ignored", ignored], code);
+        assert_eq!(
+            preview["summary"]["would_remove"],
+            usize::from(kind == "ignored")
+        );
+        f.unchanged();
+        let applied = f.result(&["--apply", "--discard-ignored", ignored], code);
+        if kind == "ignored" {
+            assert_eq!(applied["summary"]["removed"], 1);
+            assert!(!f.worktree.exists());
+        } else {
+            assert_eq!(applied["summary"]["blocked"], 1);
+            assert_eq!(
+                fs::read_to_string(f.worktree.join("cache")).unwrap(),
+                "ignored data"
+            );
+            f.unchanged();
+        }
+    }
+}
+
+#[test]
+fn populated_gitlinks_and_private_module_stores_remain_protected() {
+    for kind in ["populated", "private objects", "symlink"] {
+        let f = Fixture::new();
+        let oid = git(&f.repo, &["rev-parse", "HEAD"]);
+        git(
+            &f.worktree,
+            &[
+                "update-index",
+                "--add",
+                "--cacheinfo",
+                &format!("160000,{oid},submodule"),
+            ],
+        );
+        git(&f.worktree, &["commit", "-m", "gitlink"]);
+        git(&f.worktree, &["push", "origin", "feature"]);
+        let owned = PathBuf::from(git(&f.worktree, &["rev-parse", "--absolute-git-dir"]));
+        let protected = match kind {
+            "populated" => {
+                let dir = f.worktree.join("submodule");
+                fs::create_dir(&dir).unwrap();
+                dir.join("precious")
+            }
+            "private objects" => {
+                fs::create_dir_all(owned.join("modules/module/objects")).unwrap();
+                owned.join("modules/module/objects/precious")
+            }
+            _ => {
+                let dir = f.temp.path().join("outside");
+                fs::create_dir(&dir).unwrap();
+                symlink(&dir, f.worktree.join("submodule")).unwrap();
+                dir.join("precious")
+            }
+        };
+        fs::write(&protected, "precious data").unwrap();
+        for approval in ["--discard-local", "--discard-ignored"] {
+            let r = f.result(&["--apply", approval, f.worktree.to_str().unwrap()], 1);
+            assert_eq!(r["summary"]["blocked"], 1, "{kind}: {r}");
+            assert!(
+                r["results"][0]["reason"]
+                    .as_str()
+                    .unwrap()
+                    .contains("submodule"),
+                "{kind}: {r}"
+            );
+            assert_eq!(fs::read_to_string(&protected).unwrap(), "precious data");
+            f.unchanged();
+        }
+    }
+}
+
+#[test]
+fn ignored_only_removal_keeps_native_git_protection_for_last_moment_untracked_files() {
+    let f = Fixture::new();
+    fs::write(f.repo.join(".git/info/exclude"), "cache\n").unwrap();
+    fs::write(f.worktree.join("cache"), "ignored data").unwrap();
+    let evidence = f.worktree.join("last-moment-evidence");
+    let bin = f.shim(&format!(
+        "case \"$*\" in *'worktree remove'*) printf precious > '{}' ;; esac",
+        evidence.display()
+    ));
+    let mut cmd = f.command(&["--apply", "--discard-ignored", f.worktree.to_str().unwrap()]);
+    with_shim(&mut cmd, &bin);
+    let out = cmd.arg(&f.worktree).output().unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+    let r: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(r["summary"]["removed"], 0);
+    assert_eq!(r["summary"]["failed"], 1);
+    assert_eq!(fs::read_to_string(evidence).unwrap(), "precious");
+    f.unchanged();
+}
+
+#[test]
+fn shallow_publication_uses_fresh_evidence_and_preserves_source_boundaries() {
+    for unpublished in [false, true] {
+        let mut f = Fixture::new();
+        for revision in 1..=3 {
+            fs::write(
+                f.repo.join("file"),
+                format!("published revision {revision}\n"),
+            )
+            .unwrap();
+            git(&f.repo, &["add", "file"]);
+            git(&f.repo, &["commit", "-m", "published revision"]);
+        }
+        git(&f.repo, &["push", "origin", "main"]);
+        let shallow = f.temp.path().join("shallow primary");
+        git(
+            f.temp.path(),
+            &[
+                "clone",
+                "--depth",
+                "2",
+                &format!("file://{}", f.remote.display()),
+                shallow.to_str().unwrap(),
+            ],
+        );
+        let linked = f.temp.path().join("shallow linked");
+        git(
+            &shallow,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "shallow-feature",
+                linked.to_str().unwrap(),
+                "HEAD~1",
+            ],
+        );
+        f.repo = shallow;
+        f.worktree = linked;
+        assert_eq!(
+            git(&f.repo, &["rev-parse", "--is-shallow-repository"]),
+            "true"
+        );
+        if unpublished {
+            fs::write(f.worktree.join("file"), "unpublished data\n").unwrap();
+            git(&f.worktree, &["add", "file"]);
+            git(&f.worktree, &["commit", "-m", "unpublished"]);
+        }
+        let boundaries = fs::read(f.repo.join(".git/shallow")).unwrap();
+        let refs = git(&f.repo, &["for-each-ref"]);
+        let head = git(&f.worktree, &["rev-parse", "HEAD"]);
+        let code = if unpublished { 1 } else { 0 };
+        let plan = f.result(&[], code);
+        assert_eq!(plan["summary"]["would_remove"], usize::from(!unpublished));
+        f.unchanged();
+        let applied = f.result(&["--apply"], code);
+        assert_eq!(applied["summary"]["removed"], usize::from(!unpublished));
+        assert_eq!(fs::read(f.repo.join(".git/shallow")).unwrap(), boundaries);
+        assert_eq!(git(&f.repo, &["for-each-ref"]), refs);
+        assert!(!f.repo.join(".git/FETCH_HEAD").exists());
+        if unpublished {
+            assert_eq!(git(&f.worktree, &["rev-parse", "HEAD"]), head);
+            f.unchanged();
+        } else {
+            assert!(!f.worktree.exists());
+        }
+    }
+}
+
+#[test]
+fn publication_handles_case_colliding_remote_refs_without_source_migration() {
+    let mut f = Fixture::new();
+    let quoted = f.temp.path().join("remote \"quoted\".git");
+    fs::rename(&f.remote, &quoted).unwrap();
+    f.remote = quoted;
+    git(
+        &f.repo,
+        &["remote", "set-url", "origin", f.remote.to_str().unwrap()],
+    );
+    let old = git(&f.repo, &["rev-parse", "HEAD"]);
+    fs::write(f.repo.join("file"), "new published\n").unwrap();
+    git(&f.repo, &["add", "file"]);
+    git(&f.repo, &["commit", "-m", "new published"]);
+    git(&f.repo, &["push", "origin", "main"]);
+    let new = git(&f.repo, &["rev-parse", "HEAD"]);
+    // Packed refs can advertise both names on a case-insensitive filesystem.
+    fs::write(f.remote.join("packed-refs"), format!("# pack-refs with: peeled fully-peeled sorted\n{old} refs/heads/Feature\n{new} refs/heads/feature\n{new} refs/heads/quoted\"name\n")).unwrap();
+    let advertised = git(&f.repo, &["ls-remote", "--heads", "origin"]);
+    assert!(advertised.contains("refs/heads/Feature") && advertised.contains("refs/heads/feature"));
+    let config = fs::read(f.repo.join(".git/config")).unwrap();
+    let refs = git(&f.repo, &["for-each-ref"]);
+    let plan = f.result(&[], 0);
+    assert_eq!(plan["summary"]["would_remove"], 1);
+    f.unchanged();
+    let applied = f.result(&["--apply"], 0);
+    assert_eq!(applied["summary"]["removed"], 1);
+    assert_eq!(fs::read(f.repo.join(".git/config")).unwrap(), config);
+    assert_eq!(git(&f.repo, &["for-each-ref"]), refs);
+    assert!(!f.repo.join(".git/FETCH_HEAD").exists());
 }

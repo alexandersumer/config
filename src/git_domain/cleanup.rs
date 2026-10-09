@@ -21,6 +21,9 @@ pub(crate) struct Args {
     /// Authorize loss of tracked changes, untracked files, and ignored files at this exact worktree; repeat per path
     #[arg(long, value_name="PATH", value_hint=clap::ValueHint::DirPath)]
     discard_local: Vec<PathBuf>,
+    /// Authorize loss of ignored files only at this exact worktree; tracked and untracked data remain protected
+    #[arg(long, value_name="PATH", value_hint=clap::ValueHint::DirPath)]
+    discard_ignored: Vec<PathBuf>,
     /// Remote whose current heads and tags must contain every commit being removed
     #[arg(long, default_value="origin", value_parser=super::git_name)]
     remote: String,
@@ -176,6 +179,21 @@ fn select(paths: &[PathBuf]) -> Result<Selection, String> {
         protected,
     })
 }
+fn config_value(value: &[u8]) -> Result<Vec<u8>, String> {
+    let mut quoted = vec![b'"'];
+    for &byte in value {
+        if byte.is_ascii_control() {
+            return Err("control character in remote URL or reference".into());
+        }
+        if byte == b'"' || byte == b'\\' {
+            quoted.push(b'\\');
+        }
+        quoted.push(byte);
+    }
+    quoted.push(b'"');
+    Ok(quoted)
+}
+
 struct Session<'a> {
     args: &'a Args,
     deadline: Instant,
@@ -228,9 +246,7 @@ impl Session<'_> {
         registrations(&self.probe(path, &["worktree", "list", "--porcelain", "-z"])?)
     }
     fn publication(&self, c: &Candidate, head: &str) -> Result<(), String> {
-        if self.text(&c.primary, &["rev-parse", "--is-shallow-repository"])? != "false" {
-            return Err("shallow history cannot prove publication".into());
-        }
+        let shallow = self.text(&c.primary, &["rev-parse", "--is-shallow-repository"])? == "true";
         let urls = self.text(
             &c.primary,
             &["remote", "get-url", "--all", &self.args.remote],
@@ -238,6 +254,8 @@ impl Session<'_> {
         if urls.lines().count() != 1 {
             return Err("remote must resolve to exactly one URL".into());
         }
+        let advertised =
+            self.probe(&c.primary, &["ls-remote", "--heads", "--tags", "--", &urls])?;
         let evidence = tempfile::Builder::new()
             .prefix("workctl-publication-")
             .tempdir()
@@ -249,9 +267,18 @@ impl Session<'_> {
                 "init",
                 "--bare",
                 "--quiet",
+                "--template=",
                 &format!("--object-format={format}"),
             ],
         )?;
+        if shallow {
+            // Preserve Git's boundary knowledge in the evidence store, without deepening the source.
+            fs::write(
+                evidence.path().join("shallow"),
+                fs::read(c.common.join("shallow")).map_err(|e| e.to_string())?,
+            )
+            .map_err(|e| e.to_string())?;
+        }
         // Objects are read from the source only; no refs/FETCH_HEAD are written there.
         let objects = c.common.join("objects");
         if objects.as_os_str().as_encoded_bytes().contains(&b'\n') {
@@ -264,23 +291,61 @@ impl Session<'_> {
             .write_all(objects.as_os_str().as_encoded_bytes())
             .and_then(|_| alternates.write_all(b"\n"))
             .map_err(|e| e.to_string())?;
-        // Keep Git's URL resolution context while writing only the evidence store.
-        self.call(
-            &c.primary,
-            &[
-                OsStr::new("--git-dir"),
-                evidence.path().as_os_str(),
-                OsStr::new("fetch"),
-                OsStr::new("--quiet"),
-                OsStr::new("--no-tags"),
-                OsStr::new("--no-write-fetch-head"),
-                OsStr::new("--no-recurse-submodules"),
-                OsStr::new("--"),
-                OsStr::new(&urls),
-                OsStr::new("+refs/heads/*:refs/remotes/evidence/*"),
-                OsStr::new("+refs/tags/*:refs/tags/*"),
-            ],
-        )?;
+        // Give every advertised source ref a distinct portable destination name.
+        // Only this disposable config changes; the source's ref backend stays intact.
+        let remote_name = evidence
+            .path()
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or("invalid evidence remote name")?;
+        let mut config = b"\n[remote ".to_vec();
+        config.extend(config_value(remote_name.as_bytes())?);
+        config.extend(b"]\n\turl = ");
+        config.extend(config_value(urls.as_bytes())?);
+        config.push(b'\n');
+        for (index, record) in advertised
+            .split(|b| *b == b'\n')
+            .filter(|r| !r.is_empty())
+            .enumerate()
+        {
+            let separator = record
+                .iter()
+                .position(|b| *b == b'\t')
+                .ok_or("invalid remote advertisement")?;
+            let name = &record[separator + 1..];
+            if name.ends_with(b"^{}") {
+                continue;
+            }
+            if !name.starts_with(b"refs/heads/") && !name.starts_with(b"refs/tags/") {
+                return Err("unexpected advertised reference".into());
+            }
+            let mut mapping = b"+".to_vec();
+            mapping.extend(name);
+            mapping.extend(format!(":refs/remotes/evidence/{index:08}").as_bytes());
+            config.extend(b"\tfetch = ");
+            config.extend(config_value(&mapping)?);
+            config.push(b'\n');
+        }
+        fs::OpenOptions::new()
+            .append(true)
+            .open(evidence.path().join("config"))
+            .and_then(|mut f| f.write_all(&config))
+            .map_err(|e| e.to_string())?;
+        let mut fetch = vec![
+            OsStr::new("--git-dir"),
+            evidence.path().as_os_str(),
+            OsStr::new("fetch"),
+            OsStr::new("--quiet"),
+            OsStr::new("--no-tags"),
+            OsStr::new("--no-write-fetch-head"),
+            OsStr::new("--no-recurse-submodules"),
+        ];
+        if shallow {
+            fetch.push(OsStr::new("--unshallow"));
+        }
+        fetch.extend([OsStr::new("--"), OsStr::new(remote_name)]);
+        // Preserve relative URL resolution by retaining the primary working directory.
+        self.call(&c.primary, &fetch)?;
         let tips = self.text(
             evidence.path(),
             &[
@@ -293,11 +358,21 @@ impl Session<'_> {
         if tips.is_empty() {
             return Err("remote has no published heads or tags".into());
         }
-        let mut args = vec!["--no-replace-objects", "rev-list", head, "--not"];
-        args.extend(tips.lines());
-        args.push("--");
-        let unpublished = self.text(evidence.path(), &args)?;
+        let unpublished = self.text(
+            evidence.path(),
+            &[
+                "--no-replace-objects",
+                "rev-list",
+                head,
+                "--not",
+                "--all",
+                "--",
+            ],
+        )?;
         if !unpublished.is_empty() {
+            if self.text(evidence.path(), &["rev-parse", "--is-shallow-repository"])? == "true" {
+                return Err("publication not proven with shallow history; push unpublished work or deepen history before cleanup".into());
+            }
             return Err(format!(
                 "unpublished commits: {}; push or preserve them before cleanup",
                 unpublished.lines().count()
@@ -305,7 +380,12 @@ impl Session<'_> {
         }
         Ok(())
     }
-    fn inspect(&self, c: &Candidate, discard: bool) -> Result<Snapshot, String> {
+    fn inspect(
+        &self,
+        c: &Candidate,
+        discard: bool,
+        discard_ignored: bool,
+    ) -> Result<Snapshot, String> {
         let path = &c.registration.path;
         if c.registration.locked {
             return Err("worktree is locked; investigate and unlock explicitly".into());
@@ -402,11 +482,35 @@ impl Session<'_> {
             }
         }
         let tree = self.probe(path, &["ls-files", "--stage", "-z"])?;
-        if tree
+        for entry in tree
             .split(|b| *b == 0)
-            .any(|line| line.starts_with(b"160000 "))
+            .filter(|e| e.starts_with(b"160000 "))
         {
-            return Err("submodules are unsupported for cleanup".into());
+            let separator = entry
+                .iter()
+                .position(|b| *b == b'\t')
+                .ok_or("invalid gitlink entry")?;
+            let name = &entry[separator + 1..];
+            let submodule = path.join(OsString::from_vec(name.to_vec()));
+            match fs::symlink_metadata(&submodule) {
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Ok(m)
+                    if m.is_dir()
+                        && fs::read_dir(&submodule)
+                            .map_err(|e| e.to_string())?
+                            .next()
+                            .is_none() => {}
+                _ => {
+                    return Err(format!(
+                        "populated or unverifiable submodule path is protected: {}",
+                        display(&submodule)
+                    ))
+                }
+            }
+        }
+        // Removing the registration can also remove its private module object stores.
+        if git::exists(&own.join("modules"))? {
+            return Err("submodule repository data in worktree metadata is protected".into());
         }
         let status = self.probe(
             path,
@@ -427,10 +531,20 @@ impl Session<'_> {
         if c.registration.head.as_ref() != Some(&head) {
             return Err("HEAD changed since discovery".into());
         }
-        if (!status.is_empty() || masked) && !discard {
+        let only_ignored = !masked
+            && status
+                .split(|b| *b == 0)
+                .all(|entry| entry.is_empty() || entry.starts_with(b"!! "));
+        if (!status.is_empty() || masked) && !discard && !(discard_ignored && only_ignored) {
             return Err(format!(
-                "local data ({}) requires --discard-local PATH",
-                local_data(&status, &flags)
+                "local data ({}) requires {}{}",
+                local_data(&status, &flags),
+                if only_ignored {
+                    "--discard-ignored PATH (ignored files only) or --discard-local PATH"
+                } else {
+                    "--discard-local PATH"
+                },
+                local_examples(&status, &flags)
             ));
         }
         Ok(Snapshot {
@@ -479,6 +593,53 @@ fn local_data(status: &[u8], flags: &[u8]) -> String {
         .count();
     format!("{tracked} tracked changes, {untracked} untracked entries, {ignored} ignored entries, {masked} masked tracked paths")
 }
+fn local_examples(status: &[u8], flags: &[u8]) -> String {
+    let mut groups: BTreeMap<&str, Vec<String>> = BTreeMap::new();
+    let mut entries = status.split(|b| *b == 0).filter(|e| !e.is_empty());
+    while let Some(entry) = entries.next() {
+        if entry.len() < 3 {
+            continue;
+        }
+        let kind = if entry.starts_with(b"?? ") {
+            "Untracked"
+        } else if entry.starts_with(b"!! ") {
+            "Ignored"
+        } else {
+            "Tracked"
+        };
+        groups
+            .entry(kind)
+            .or_default()
+            .push(display(OsString::from_vec(entry[3..].to_vec())));
+        if kind == "Tracked" && entry[..2].iter().any(|b| *b == b'R' || *b == b'C') {
+            entries.next();
+        }
+    }
+    for entry in flags
+        .split(|b| *b == 0)
+        .filter(|e| e.len() > 2 && (e[0].is_ascii_lowercase() || e[0] == b'S'))
+    {
+        groups
+            .entry("Masked")
+            .or_default()
+            .push(display(OsString::from_vec(entry[2..].to_vec())));
+    }
+    groups
+        .into_iter()
+        .map(|(kind, paths)| {
+            format!(
+                "\n{kind} examples: {}{}",
+                paths.iter().take(3).cloned().collect::<Vec<_>>().join(", "),
+                if paths.len() > 3 {
+                    format!(" (+{} more)", paths.len() - 3)
+                } else {
+                    String::new()
+                }
+            )
+        })
+        .collect()
+}
+
 struct Failure {
     status: &'static str,
     reason: String,
@@ -498,7 +659,12 @@ impl From<&str> for Failure {
         reason.to_owned().into()
     }
 }
-fn execute(args: &Args, candidate: &Candidate, discard: bool) -> Result<Snapshot, Failure> {
+fn execute(
+    args: &Args,
+    candidate: &Candidate,
+    discard: bool,
+    discard_ignored: bool,
+) -> Result<Snapshot, Failure> {
     if runtime::cancelled() {
         return Err("Interrupted before inspection".into());
     }
@@ -508,17 +674,17 @@ fn execute(args: &Args, candidate: &Candidate, discard: bool) -> Result<Snapshot
         deadline: Instant::now() + Duration::from_secs(args.timeout.into()),
         lock_fd: held.as_raw_fd(),
     };
-    let first = session.inspect(candidate, discard)?;
+    let first = session.inspect(candidate, discard, discard_ignored)?;
     session.publication(candidate, &first.head)?;
     if args.apply {
-        let second = session.inspect(candidate, discard)?;
+        let second = session.inspect(candidate, discard, discard_ignored)?;
         if first != second {
             return Err("worktree changed during inspection; refusing removal".into());
         }
         session.publication(candidate, &second.head)?;
         // Remote I/O may take time. Finish with local ownership, lock, HEAD and
         // file revalidation so native removal follows the last local inspection.
-        let immediate = session.inspect(candidate, discard)?;
+        let immediate = session.inspect(candidate, discard, discard_ignored)?;
         if second != immediate {
             return Err(
                 "worktree changed during publication verification; refusing removal".into(),
@@ -594,17 +760,27 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
     let started = Instant::now();
     let selected = select(&args.paths)?;
     let mut discard = BTreeSet::new();
-    for p in &args.discard_local {
-        let p = p
-            .canonicalize()
-            .map_err(|e| format!("discard path {}: {e}", display(p)))?;
-        if !selected.candidates.iter().any(|c| c.registration.path == p) {
-            return Err(format!(
-                "discard path is not a selected linked worktree: {}",
-                display(p)
-            ));
+    let mut discard_ignored = BTreeSet::new();
+    for (option, paths, approved) in [
+        ("--discard-local", &args.discard_local, &mut discard),
+        (
+            "--discard-ignored",
+            &args.discard_ignored,
+            &mut discard_ignored,
+        ),
+    ] {
+        for p in paths {
+            let p = p
+                .canonicalize()
+                .map_err(|e| format!("{option} path {}: {e}", display(p)))?;
+            if !selected.candidates.iter().any(|c| c.registration.path == p) {
+                return Err(format!(
+                    "{option} path is not a selected linked worktree: {}",
+                    display(p)
+                ));
+            }
+            approved.insert(p);
         }
-        discard.insert(p);
     }
     if !json || !selected.candidates.is_empty() {
         let mut overview: Box<dyn Write> = if json {
@@ -635,8 +811,9 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
         let action = std::thread::scope(|scope| -> Result<Snapshot, Failure> {
             let (tx, rx) = std::sync::mpsc::channel();
             let discard = discard.contains(path);
+            let discard_ignored = discard_ignored.contains(path);
             scope.spawn(move || {
-                let _ = tx.send(execute(args, candidate, discard));
+                let _ = tx.send(execute(args, candidate, discard, discard_ignored));
             });
             loop {
                 if let Err(e) = progress.update(results.len(), 1) {
@@ -686,7 +863,10 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
             display(path),
             reason
                 .as_ref()
-                .map(|e| format!("\n    {}", display(e)))
+                .map(|e| e
+                    .lines()
+                    .map(|line| format!("\n    {}", display(line)))
+                    .collect::<String>())
                 .unwrap_or_default()
         );
         // Permanent rows preserve full deletion paths and block reasons.
@@ -696,7 +876,7 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
         if !json {
             progress.result(&detail)?;
         }
-        results.push(serde_json::json!({"path":path.to_string_lossy(),"path_bytes":presentation::path_bytes(path),"status":status,"reason":reason,"discard_local":discard.contains(path),"evidence":metadata}));
+        results.push(serde_json::json!({"path":path.to_string_lossy(),"path_bytes":presentation::path_bytes(path),"status":status,"reason":reason,"discard_local":discard.contains(path),"discard_ignored":discard_ignored.contains(path),"evidence":metadata}));
         progress.update(results.len(), 0)?;
     }
     progress.finish();

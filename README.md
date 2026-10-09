@@ -89,23 +89,44 @@ worktree selects only itself. Primary checkouts always remain protected.
 Publication is verified against a fresh fetch of the selected remote's current heads
 and tags into a temporary bare repository. Cached remote-tracking refs are never
 publication proof. Source objects are read through alternates, without changing
-source refs or `FETCH_HEAD`. Every commit reachable from the candidate HEAD must
-be reachable from those current remote refs. Missing remotes, shallow history,
-unpublished/detached commits, and failed remote verification block removal.
+source refs or `FETCH_HEAD`. Advertised refs are fetched into distinct temporary
+names, so case-colliding remote names also work on case-insensitive filesystems
+without migrating the source repository. Every commit reachable from the candidate HEAD must
+be reachable from those current remote refs. Missing remotes, unpublished commits, and failed remote verification block removal.
+Shallow repositories are supported when fresh remote evidence proves publication;
+source shallow boundaries are copied into the temporary evidence store, and that
+store is unshallowed within the candidate deadline. The source remains shallow
+and unchanged. Incomplete ancestry that cannot establish a
+positive publication proof remains a blocker. Detached HEADs use the same proof.
 
-Tracked changes, untracked entries, ignored entries, and masked tracked paths
-require a separate exact-path discard decision:
+Tracked changes, untracked entries, ignored entries, and masked tracked paths are
+protected by default. Blockers show example paths so you can inspect what is local.
+Ignored files can include configuration or secrets as well as disposable build outputs.
+To plan removal while authorizing only ignored-file loss at one exact worktree:
+
+```sh
+workctl git worktree clean \
+  --discard-ignored /path/to/work/feature /path/to/work
+```
+
+Add `--apply` to execute the plan. Repeat `--discard-ignored` for each approved
+worktree. Tracked changes, untracked files, and masked tracked paths still block
+removal. This narrower approval uses native Git removal without `--force`, so
+Git can also refuse tracked changes or untracked files created just before removal.
+For an exact worktree whose **all local files** may be lost, use `--discard-local`:
 
 ```sh
 workctl git worktree clean --apply \
   --discard-local /path/to/work/feature /path/to/work
 ```
 
-Repeat `--discard-local` for each worktree whose local data may be lost. It never
-authorizes removal of unpublished commits, main checkouts, locks, missing paths,
-nested repositories, submodules, or unverifiable registrations/ownership.
-Normal cleanup uses native `git worktree remove`; `--force` is used only for a
-worktree with an explicit discard decision. Cleanup never retries removal.
+Neither approval authorizes removal of unpublished commits, main checkouts, locks,
+missing paths, nested repositories, populated submodule paths, private submodule
+object stores in worktree metadata, or unverifiable registrations/ownership.
+Empty or absent uninitialized gitlink paths are supported, including gitlinks with
+no `.gitmodules` mapping. Normal cleanup and ignored-only approval use native
+`git worktree remove`; `--force` is used only with `--discard-local`. Cleanup never
+retries removal.
 `--timeout` bounds each candidate's inspection, remote verification, removal, and
 final verification together. Discovery Git probes have independent 15-second bounds.
 
