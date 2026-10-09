@@ -1672,3 +1672,224 @@ fn publication_handles_case_colliding_remote_refs_without_source_migration() {
     assert_eq!(git(&f.repo, &["for-each-ref"]), refs);
     assert!(!f.repo.join(".git/FETCH_HEAD").exists());
 }
+
+#[test]
+fn publication_resolves_opposing_url_rewrites_once() {
+    let f = Fixture::new();
+    let alias = format!("file://{}/unavailable.git", f.temp.path().display());
+    let actual = format!("file://{}", f.remote.display());
+    git(&f.repo, &["config", "remote.origin.url", &alias]);
+    git(
+        &f.repo,
+        &["config", &format!("url.{actual}.insteadOf"), &alias],
+    );
+    git(
+        &f.repo,
+        &["config", &format!("url.{alias}.insteadOf"), &actual],
+    );
+    assert_eq!(git(&f.repo, &["remote", "get-url", "origin"]), actual);
+    let global = f.temp.path().join("global-config");
+    git(
+        f.temp.path(),
+        &[
+            "config",
+            "--file",
+            global.to_str().unwrap(),
+            &format!("url.{alias}.insteadOf"),
+            &actual,
+        ],
+    );
+    let refs = git(&f.repo, &["for-each-ref"]);
+    for apply in [false, true] {
+        let mut cmd = f.command(if apply { &["--apply"] } else { &[] });
+        cmd.arg(&f.worktree).env("GIT_CONFIG_GLOBAL", &global);
+        let out = cmd.output().unwrap();
+        assert_eq!(out.status.code(), Some(0), "{}", text(&out));
+        let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(
+            result["summary"][if apply { "removed" } else { "would_remove" }],
+            1
+        );
+        if !apply {
+            f.unchanged();
+        }
+    }
+    assert_eq!(git(&f.repo, &["for-each-ref"]), refs);
+}
+
+#[test]
+fn publication_fetches_commit_evidence_without_unneeded_file_contents() {
+    let f = Fixture::new();
+    git(&f.remote, &["config", "uploadpack.allowFilter", "true"]);
+    git(
+        &f.repo,
+        &[
+            "remote",
+            "set-url",
+            "origin",
+            &format!("file://{}", f.remote.display()),
+        ],
+    );
+    // This published content is absent from the source alternate object store.
+    let publisher = f.temp.path().join("publisher");
+    git(
+        f.temp.path(),
+        &[
+            "clone",
+            f.remote.to_str().unwrap(),
+            publisher.to_str().unwrap(),
+        ],
+    );
+    fs::write(
+        publisher.join("remote-only-blob"),
+        vec![b'x'; 4 * 1024 * 1024],
+    )
+    .unwrap();
+    git(&publisher, &["add", "."]);
+    git(&publisher, &["commit", "-m", "remote content"]);
+    git(&publisher, &["push", "origin", "main"]);
+    let remote_blob = git(&publisher, &["rev-parse", "HEAD:remote-only-blob"]);
+    let remote_tree = git(&publisher, &["rev-parse", "HEAD^{tree}"]);
+    let packs = f.temp.path().join("evidence-packs");
+    let bin = f.shim(
+        r#"
+case " $* " in
+  *" fetch "*)
+    "$REAL_GIT" "$@" || exit $?
+    for arg in "$@"; do
+      case "$arg" in */workctl-publication-*)
+        "$REAL_GIT" --git-dir "$arg" cat-file --batch-all-objects --batch-check >> "$PACK_RECORD"
+      ;; esac
+    done
+    exit 0
+  ;;
+esac
+"#,
+    );
+    let mut cmd = f.command(&[]);
+    cmd.arg(&f.worktree)
+        .env("REAL_GIT", git_program())
+        .env("PACK_RECORD", &packs);
+    with_shim(&mut cmd, &bin);
+    let out = cmd.output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out));
+    let packed = fs::read_to_string(&packs).unwrap();
+    assert!(
+        packed
+            .lines()
+            .any(|line| line.split_whitespace().nth(1) == Some("commit")),
+        "{packed}"
+    );
+    assert!(
+        !packed.contains(&remote_blob),
+        "remote-only blob transferred: {packed}"
+    );
+    assert!(
+        !packed.contains(&remote_tree),
+        "remote-only tree transferred: {packed}"
+    );
+    f.unchanged();
+}
+
+#[test]
+fn shallow_publication_tries_the_current_default_branch_before_all_remote_history() {
+    let mut f = Fixture::new();
+    let shallow = f.temp.path().join("shallow");
+    git(
+        f.temp.path(),
+        &[
+            "clone",
+            "--depth",
+            "1",
+            &format!("file://{}", f.remote.display()),
+            shallow.to_str().unwrap(),
+        ],
+    );
+    let linked = f.temp.path().join("shallow-linked");
+    git(
+        &shallow,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "shallow-feature",
+            linked.to_str().unwrap(),
+        ],
+    );
+    f.repo = shallow;
+    f.worktree = linked;
+    let bin = f.shim(r#"
+case " $* " in
+  *" fetch "*)
+    case " $* " in *" +refs/heads/main:refs/remotes/evidence/"*) ;; *) echo 'unnecessary whole-remote deepening' >&2; exit 91;; esac
+  ;;
+esac
+"#);
+    let boundaries = fs::read(f.repo.join(".git/shallow")).unwrap();
+    let mut cmd = f.command(&["--apply"]);
+    cmd.arg(&f.worktree);
+    with_shim(&mut cmd, &bin);
+    let out = cmd.output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out));
+    let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(result["summary"]["removed"], 1);
+    assert_eq!(fs::read(f.repo.join(".git/shallow")).unwrap(), boundaries);
+}
+
+#[test]
+fn publication_does_not_launch_unsupervised_automatic_maintenance() {
+    let f = Fixture::new();
+    let mut cmd = f.command(&["--verbose"]);
+    cmd.arg(&f.worktree).env("GIT_TRACE", "1");
+    let out = cmd.output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out));
+    assert!(
+        !text(&out).contains("maintenance run --auto"),
+        "automatic maintenance escaped the supervised operation: {}",
+        text(&out)
+    );
+    f.unchanged();
+}
+
+#[test]
+fn publication_tolerates_an_unrelated_remote_branch_disappearing_during_fetch() {
+    let f = Fixture::new();
+    git(&f.remote, &["branch", "transient"]);
+    let bin = f.shim(r#"
+case " $* " in *" fetch "*) "$REAL_GIT" --git-dir "$PROBE_REMOTE" update-ref -d refs/heads/transient;; esac
+"#);
+    let mut cmd = f.command(&["--apply"]);
+    cmd.arg(&f.worktree)
+        .env("REAL_GIT", git_program())
+        .env("PROBE_REMOTE", &f.remote);
+    with_shim(&mut cmd, &bin);
+    let out = cmd.output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out));
+    let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(result["summary"]["removed"], 1);
+    assert!(!f.worktree.exists());
+}
+
+#[test]
+fn publication_preserves_case_colliding_refs_with_the_older_git_fallback() {
+    let f = Fixture::new();
+    let head = git(&f.repo, &["rev-parse", "HEAD"]);
+    fs::write(f.remote.join("packed-refs"), format!("# pack-refs with: peeled fully-peeled sorted\n{head} refs/heads/Feature\n{head} refs/heads/feature\n")).unwrap();
+    let bin = f.shim("if [ \"$1\" = --version ]; then echo 'git version 2.44.0'; exit 0; fi");
+    let config = fs::read(f.repo.join(".git/config")).unwrap();
+    let refs = git(&f.repo, &["for-each-ref"]);
+    for apply in [false, true] {
+        let mut cmd = f.command(if apply { &["--apply"] } else { &[] });
+        cmd.arg(&f.worktree);
+        with_shim(&mut cmd, &bin);
+        let out = cmd.output().unwrap();
+        assert_eq!(out.status.code(), Some(0), "{}", text(&out));
+        let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(
+            result["summary"][if apply { "removed" } else { "would_remove" }],
+            1
+        );
+    }
+    assert_eq!(fs::read(f.repo.join(".git/config")).unwrap(), config);
+    assert_eq!(git(&f.repo, &["for-each-ref"]), refs);
+}

@@ -86,16 +86,24 @@ beneath it. A primary checkout selects all its registered linked worktrees, incl
 paths outside the checkout directory; those full paths are shown. An explicit linked
 worktree selects only itself. Primary checkouts always remain protected.
 
-Publication is verified against a fresh fetch of the selected remote's current heads
+Remote URLs use Git's source configuration and are resolved once, including URL
+rewrite rules. Publication is verified against a fresh fetch of the selected remote's current heads
 and tags into a temporary bare repository. Cached remote-tracking refs are never
 publication proof. Source objects are read through alternates, without changing
-source refs or `FETCH_HEAD`. Advertised refs are fetched into distinct temporary
-names, so case-colliding remote names also work on case-insensitive filesystems
-without migrating the source repository. Every commit reachable from the candidate HEAD must
+source refs or `FETCH_HEAD`. Automatic maintenance is disabled for evidence fetches
+so detached maintenance cannot outlive verification or retain repository locks.
+Fetch requests commit-only history; servers that do
+not support filtering may send full objects within the same deadline. Current refs are fetched together into a temporary reftable store on Git 2.45+
+so case-colliding names and disappearing merge-queue branches work without migrating
+the source. Older Git uses the files backend; on case-insensitive filesystems it
+maps advertised refs to distinct temporary names and blocks safely if those refs
+change before fetch. Every commit reachable from the candidate HEAD must
 be reachable from those current remote refs. Missing remotes, unpublished commits, and failed remote verification block removal.
 Shallow repositories are supported when fresh remote evidence proves publication;
 source shallow boundaries are copied into the temporary evidence store, and that
-store is unshallowed within the candidate deadline. The source remains shallow
+store is unshallowed within the candidate deadline. Fresh history from the source's
+tracked default-branch name is tried first; other remote history is fetched if
+that branch cannot prove publication. The source remains shallow
 and unchanged. Incomplete ancestry that cannot establish a
 positive publication proof remains a blocker. Detached HEADs use the same proof.
 

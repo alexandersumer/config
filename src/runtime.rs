@@ -59,7 +59,17 @@ pub(crate) fn stop_group(child: &mut Child) -> Result<ExitStatus, String> {
             return Err(format!("cannot terminate worker group: {error}"));
         }
     }
-    child.wait().map_err(|e| e.to_string())
+    let status = child.wait().map_err(|e| e.to_string())?;
+    // Reaping the leader does not terminate its descendants. Verify that no
+    // live group members remain before releasing repository coordination.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+    while !group_is_inert(child.id())? {
+        if std::time::Instant::now() >= deadline {
+            return Err("worker group still active after termination".into());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    Ok(status)
 }
 
 // Darwin's killpg skips zombies and returns EPERM when no live member remains.
@@ -129,6 +139,55 @@ fn group_is_inert(group: u32) -> Result<bool, String> {
         }
         return Ok(true);
     }
+}
+
+#[cfg(target_os = "linux")]
+fn group_is_inert(group: u32) -> Result<bool, String> {
+    if unsafe { libc::kill(-(group as libc::pid_t), 0) } == -1
+        && io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+    {
+        return Ok(true);
+    }
+    for entry in
+        std::fs::read_dir("/proc").map_err(|e| format!("cannot inspect worker group: {e}"))?
+    {
+        let entry = entry.map_err(|e| e.to_string())?;
+        if entry.file_name().to_string_lossy().parse::<u32>().is_err() {
+            continue;
+        }
+        let stat = match std::fs::read_to_string(entry.path().join("stat")) {
+            Ok(stat) => stat,
+            Err(e)
+                if e.kind() == io::ErrorKind::NotFound || e.raw_os_error() == Some(libc::ESRCH) =>
+            {
+                continue
+            }
+            Err(e) => return Err(format!("cannot inspect worker group member: {e}")),
+        };
+        // comm may contain spaces or parentheses; the fields follow its last ')'.
+        let fields = stat
+            .rsplit_once(") ")
+            .ok_or("invalid process table record")?
+            .1
+            .split_whitespace()
+            .take(3)
+            .collect::<Vec<_>>();
+        if fields.len() != 3 {
+            return Err("incomplete process table record".into());
+        }
+        let pgrp = fields[2]
+            .parse::<u32>()
+            .map_err(|_| "invalid process group")?;
+        if pgrp == group && !matches!(fields[0], "Z" | "X") {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn group_is_inert(_: u32) -> Result<bool, String> {
+    Err("worker group inspection is unsupported on this platform".into())
 }
 
 pub(crate) fn cancel() {

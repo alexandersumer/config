@@ -254,23 +254,59 @@ impl Session<'_> {
         if urls.lines().count() != 1 {
             return Err("remote must resolve to exactly one URL".into());
         }
-        let advertised =
-            self.probe(&c.primary, &["ls-remote", "--heads", "--tags", "--", &urls])?;
+        let raw_url = self.text(
+            &c.primary,
+            &[
+                "config",
+                "--get-all",
+                &format!("remote.{}.url", self.args.remote),
+            ],
+        )?;
+        if raw_url.lines().count() != 1 {
+            return Err("remote must configure exactly one URL".into());
+        }
+        let rewrites = self.probe(
+            &c.primary,
+            &[
+                "config",
+                "--null",
+                "--get-regexp",
+                r"^url\..*\.insteadof$|^remote\..*\.url$",
+            ],
+        )?;
+        let advertised = self
+            .probe(
+                &c.primary,
+                &["ls-remote", "--heads", "--tags", "--", &self.args.remote],
+            )
+            .map_err(|error| format!("remote {}: {error}", diagnostic(&urls)))?;
         let evidence = tempfile::Builder::new()
             .prefix("workctl-publication-")
             .tempdir()
             .map_err(|e| e.to_string())?;
         let format = self.text(&c.primary, &["rev-parse", "--show-object-format"])?;
-        self.probe(
-            evidence.path(),
-            &[
-                "init",
-                "--bare",
-                "--quiet",
-                "--template=",
-                &format!("--object-format={format}"),
-            ],
-        )?;
+        let version = self.text(&c.primary, &["--version"])?;
+        let version = version
+            .split_whitespace()
+            .nth(2)
+            .unwrap_or("")
+            .split('.')
+            .take(2)
+            .map(|part| part.parse::<u32>())
+            .collect::<Result<Vec<_>, _>>();
+        let reftable =
+            version.is_ok_and(|parts| parts.len() == 2 && (parts[0], parts[1]) >= (2, 45));
+        let object_format = format!("--object-format={format}");
+        let mut init = vec!["init", "--bare", "--quiet", "--template=", &object_format];
+        if reftable {
+            init.push("--ref-format=reftable");
+        }
+        self.probe(evidence.path(), &init)?;
+        let probe = evidence.path().join("case-probe");
+        fs::write(&probe, []).map_err(|e| e.to_string())?;
+        let case_sensitive = !git::exists(&evidence.path().join("CASE-PROBE"))?;
+        fs::remove_file(probe).map_err(|e| e.to_string())?;
+        let current_ref_fetch = reftable || case_sensitive;
         if shallow {
             // Preserve Git's boundary knowledge in the evidence store, without deepening the source.
             fs::write(
@@ -293,6 +329,22 @@ impl Session<'_> {
             .map_err(|e| e.to_string())?;
         // Give every advertised source ref a distinct portable destination name.
         // Only this disposable config changes; the source's ref backend stays intact.
+        let default_branch = if shallow {
+            let prefix = format!("refs/remotes/{}/", self.args.remote);
+            self.text(
+                &c.primary,
+                &[
+                    "for-each-ref",
+                    "--format=%(symref)",
+                    &format!("{prefix}HEAD"),
+                ],
+            )?
+            .strip_prefix(&prefix)
+            .map(|name| format!("refs/heads/{name}"))
+        } else {
+            None
+        };
+        let mut preferred_mapping = None;
         let remote_name = evidence
             .path()
             .file_name()
@@ -301,8 +353,34 @@ impl Session<'_> {
         let mut config = b"\n[remote ".to_vec();
         config.extend(config_value(remote_name.as_bytes())?);
         config.extend(b"]\n\turl = ");
-        config.extend(config_value(urls.as_bytes())?);
+        config.extend(config_value(raw_url.as_bytes())?);
         config.push(b'\n');
+        // Preserve source rewrite rules and pass the raw URL, so Git expands
+        // it exactly once in the isolated store as it does in the source.
+        for record in rewrites
+            .split(|byte| *byte == 0)
+            .filter(|record| !record.is_empty())
+        {
+            let (key, value) = record.split_at(
+                record
+                    .iter()
+                    .position(|byte| *byte == b'\n')
+                    .ok_or("invalid Git configuration record")?,
+            );
+            if let Some(base) = key
+                .strip_prefix(b"url.")
+                .and_then(|key| key.strip_suffix(b".insteadof"))
+            {
+                config.extend(b"[url ");
+                config.extend(config_value(base)?);
+                config.extend(b"]\n\tinsteadOf = ");
+                config.extend(config_value(&value[1..])?);
+                config.push(b'\n');
+            }
+        }
+        config.extend(b"[remote ");
+        config.extend(config_value(remote_name.as_bytes())?);
+        config.extend(b"]\n");
         for (index, record) in advertised
             .split(|b| *b == b'\n')
             .filter(|r| !r.is_empty())
@@ -321,10 +399,29 @@ impl Session<'_> {
             }
             let mut mapping = b"+".to_vec();
             mapping.extend(name);
-            mapping.extend(format!(":refs/remotes/evidence/{index:08}").as_bytes());
-            config.extend(b"\tfetch = ");
-            config.extend(config_value(&mapping)?);
-            config.push(b'\n');
+            if current_ref_fetch {
+                mapping.extend(b":refs/remotes/evidence/");
+                mapping.extend(
+                    name.strip_prefix(b"refs/")
+                        .ok_or("invalid advertised reference")?,
+                );
+            } else {
+                mapping.extend(format!(":refs/remotes/evidence/{index:08}").as_bytes());
+            }
+            if default_branch
+                .as_ref()
+                .is_some_and(|branch| branch.as_bytes() == name)
+            {
+                preferred_mapping = Some(OsString::from_vec(mapping.clone()));
+            }
+            if !current_ref_fetch {
+                config.extend(b"\tfetch = ");
+                config.extend(config_value(&mapping)?);
+                config.push(b'\n');
+            }
+        }
+        if current_ref_fetch {
+            config.extend(b"\tfetch = +refs/heads/*:refs/remotes/evidence/heads/*\n\tfetch = +refs/tags/*:refs/remotes/evidence/tags/*\n");
         }
         fs::OpenOptions::new()
             .append(true)
@@ -332,16 +429,45 @@ impl Session<'_> {
             .and_then(|mut f| f.write_all(&config))
             .map_err(|e| e.to_string())?;
         let mut fetch = vec![
+            OsStr::new("-c"),
+            OsStr::new("maintenance.auto=false"),
+            OsStr::new("-c"),
+            OsStr::new("gc.auto=0"),
             OsStr::new("--git-dir"),
             evidence.path().as_os_str(),
             OsStr::new("fetch"),
             OsStr::new("--quiet"),
+            OsStr::new("--prune"),
             OsStr::new("--no-tags"),
+            OsStr::new("--filter=tree:0"),
             OsStr::new("--no-write-fetch-head"),
             OsStr::new("--no-recurse-submodules"),
         ];
         if shallow {
             fetch.push(OsStr::new("--unshallow"));
+        }
+        let walk = [
+            "--no-replace-objects",
+            "rev-list",
+            head,
+            "--not",
+            "--all",
+            "--",
+        ];
+        if let Some(mapping) = preferred_mapping {
+            let mut preferred = fetch.clone();
+            preferred.extend([
+                OsStr::new("--"),
+                OsStr::new(remote_name),
+                mapping.as_os_str(),
+            ]);
+            self.call(&c.primary, &preferred)?;
+            if self.text(evidence.path(), &walk)?.is_empty() {
+                return Ok(());
+            }
+            if self.text(evidence.path(), &["rev-parse", "--is-shallow-repository"])? != "true" {
+                fetch.retain(|arg| *arg != OsStr::new("--unshallow"));
+            }
         }
         fetch.extend([OsStr::new("--"), OsStr::new(remote_name)]);
         // Preserve relative URL resolution by retaining the primary working directory.
@@ -358,17 +484,7 @@ impl Session<'_> {
         if tips.is_empty() {
             return Err("remote has no published heads or tags".into());
         }
-        let unpublished = self.text(
-            evidence.path(),
-            &[
-                "--no-replace-objects",
-                "rev-list",
-                head,
-                "--not",
-                "--all",
-                "--",
-            ],
-        )?;
+        let unpublished = self.text(evidence.path(), &walk)?;
         if !unpublished.is_empty() {
             if self.text(evidence.path(), &["rev-parse", "--is-shallow-repository"])? == "true" {
                 return Err("publication not proven with shallow history; push unpublished work or deepen history before cleanup".into());
