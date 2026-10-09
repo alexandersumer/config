@@ -15,7 +15,7 @@ pub(crate) struct Args {
     /// Checkout, linked worktree, or container directories (default: current directory)
     #[arg(default_value = ".", value_name="PATH", value_hint=clap::ValueHint::DirPath)]
     paths: Vec<PathBuf>,
-    /// Execute eligible removals without another interactive question
+    /// Remove idle worktrees and ignored files; save HEAD locally and protect tracked/untracked changes
     #[arg(long)]
     apply: bool,
     /// Authorize loss of tracked changes, untracked files, and ignored files at this exact worktree; repeat per path
@@ -24,7 +24,13 @@ pub(crate) struct Args {
     /// Authorize loss of ignored files only at this exact worktree; tracked and untracked data remain protected
     #[arg(long, value_name="PATH", value_hint=clap::ValueHint::DirPath)]
     discard_ignored: Vec<PathBuf>,
-    /// Remote whose current heads and tags must contain every commit being removed
+    /// Require remote publication and exact ignored-file approval instead of pragmatic cleanup
+    #[arg(long)]
+    strict: bool,
+    /// Preserve committed history in a local recovery ref at this exact worktree (also available in strict mode)
+    #[arg(long, value_name="PATH", value_hint=clap::ValueHint::DirPath)]
+    preserve_commits: Vec<PathBuf>,
+    /// Remote whose current heads and tags must contain every commit being removed in strict mode
     #[arg(long, default_value="origin", value_parser=super::git_name)]
     remote: String,
     /// Deadline per inspection or removal (1-86400 seconds); cleanup never retries
@@ -571,6 +577,41 @@ impl Session<'_> {
                 }
             }
         }
+        let status = self.probe(
+            path,
+            &[
+                "--no-optional-locks",
+                "status",
+                "--porcelain=v1",
+                "-z",
+                "--untracked-files=all",
+                "--ignored=matching",
+            ],
+        )?;
+        let flags = self.probe(path, &["ls-files", "-v", "-z"])?;
+        let masked = flags
+            .split(|b| *b == 0)
+            .any(|e| !e.is_empty() && (e[0].is_ascii_lowercase() || e[0] == b'S'));
+        let head = self.text(path, &["rev-parse", "--verify", "HEAD"])?;
+        if c.registration.head.as_ref() != Some(&head) {
+            return Err("HEAD changed since discovery".into());
+        }
+        let only_ignored = !masked
+            && status
+                .split(|b| *b == 0)
+                .all(|entry| entry.is_empty() || entry.starts_with(b"!! "));
+        if (!status.is_empty() || masked) && !discard && !(discard_ignored && only_ignored) {
+            return Err(format!(
+                "local data ({}) requires {}{}",
+                local_data(&status, &flags),
+                if only_ignored {
+                    "--discard-ignored PATH (ignored files only) or --discard-local PATH"
+                } else {
+                    "--discard-local PATH"
+                },
+                local_examples(&status, &flags)
+            ));
+        }
         let mut stack = vec![path.clone()];
         while let Some(dir) = stack.pop() {
             if runtime::cancelled() || Instant::now() >= self.deadline {
@@ -628,41 +669,6 @@ impl Session<'_> {
         if git::exists(&own.join("modules"))? {
             return Err("submodule repository data in worktree metadata is protected".into());
         }
-        let status = self.probe(
-            path,
-            &[
-                "--no-optional-locks",
-                "status",
-                "--porcelain=v1",
-                "-z",
-                "--untracked-files=all",
-                "--ignored=matching",
-            ],
-        )?;
-        let flags = self.probe(path, &["ls-files", "-v", "-z"])?;
-        let masked = flags
-            .split(|b| *b == 0)
-            .any(|e| !e.is_empty() && (e[0].is_ascii_lowercase() || e[0] == b'S'));
-        let head = self.text(path, &["rev-parse", "--verify", "HEAD"])?;
-        if c.registration.head.as_ref() != Some(&head) {
-            return Err("HEAD changed since discovery".into());
-        }
-        let only_ignored = !masked
-            && status
-                .split(|b| *b == 0)
-                .all(|entry| entry.is_empty() || entry.starts_with(b"!! "));
-        if (!status.is_empty() || masked) && !discard && !(discard_ignored && only_ignored) {
-            return Err(format!(
-                "local data ({}) requires {}{}",
-                local_data(&status, &flags),
-                if only_ignored {
-                    "--discard-ignored PATH (ignored files only) or --discard-local PATH"
-                } else {
-                    "--discard-local PATH"
-                },
-                local_examples(&status, &flags)
-            ));
-        }
         Ok(Snapshot {
             head,
             status,
@@ -670,6 +676,8 @@ impl Session<'_> {
             device: metadata.dev(),
             inode: metadata.ino(),
             force: discard,
+            recovery_ref: None,
+            recovery_saved: false,
         })
     }
 }
@@ -681,6 +689,8 @@ struct Snapshot {
     device: u64,
     inode: u64,
     force: bool,
+    recovery_ref: Option<String>,
+    recovery_saved: bool,
 }
 
 fn local_data(status: &[u8], flags: &[u8]) -> String {
@@ -780,6 +790,7 @@ fn execute(
     candidate: &Candidate,
     discard: bool,
     discard_ignored: bool,
+    preserve_commits: bool,
 ) -> Result<Snapshot, Failure> {
     if runtime::cancelled() {
         return Err("Interrupted before inspection".into());
@@ -790,14 +801,18 @@ fn execute(
         deadline: Instant::now() + Duration::from_secs(args.timeout.into()),
         lock_fd: held.as_raw_fd(),
     };
-    let first = session.inspect(candidate, discard, discard_ignored)?;
-    session.publication(candidate, &first.head)?;
+    let mut first = session.inspect(candidate, discard, discard_ignored)?;
+    if !preserve_commits {
+        session.publication(candidate, &first.head)?;
+    }
     if args.apply {
         let second = session.inspect(candidate, discard, discard_ignored)?;
         if first != second {
             return Err("worktree changed during inspection; refusing removal".into());
         }
-        session.publication(candidate, &second.head)?;
+        if !preserve_commits {
+            session.publication(candidate, &second.head)?;
+        }
         // Remote I/O may take time. Finish with local ownership, lock, HEAD and
         // file revalidation so native removal follows the last local inspection.
         let immediate = session.inspect(candidate, discard, discard_ignored)?;
@@ -805,6 +820,62 @@ fn execute(
             return Err(
                 "worktree changed during publication verification; refusing removal".into(),
             );
+        }
+        if preserve_commits {
+            let recovery = format!("refs/workctl/cleanup/{}", first.head);
+            // Atomic create-or-verify: never overwrite an existing recovery ref.
+            if !session
+                .text(
+                    &candidate.primary,
+                    &["for-each-ref", "--format=%(symref)", &recovery],
+                )?
+                .trim()
+                .is_empty()
+            {
+                return Err("recovery ref is symbolic; refusing removal".into());
+            }
+            let old = session.text(&candidate.primary, &["rev-parse", "--verify", &recovery]);
+            if old.as_ref().is_ok_and(|head| head != &first.head) {
+                return Err("recovery ref points at different history; refusing removal".into());
+            }
+            if old.is_err() {
+                session.text(
+                    &candidate.primary,
+                    &[
+                        "update-ref",
+                        "--no-deref",
+                        &recovery,
+                        &first.head,
+                        &"0".repeat(first.head.len()),
+                    ],
+                )?;
+            }
+            if session.text(&candidate.primary, &["rev-parse", "--verify", &recovery])?
+                != first.head
+            {
+                return Err("recovery ref did not verify; refusing removal".into());
+            }
+            first.recovery_ref = Some(recovery);
+            first.recovery_saved = true;
+            // Saving a ref is another subprocess boundary. Recheck local state
+            // afterwards so a commit or edit made during recovery cannot be lost.
+            let final_state = match session.inspect(candidate, discard, discard_ignored) {
+                Ok(state) => state,
+                Err(reason) => {
+                    return Err(Failure {
+                        status: "blocked",
+                        reason: format!("{reason}; recovery ref retained"),
+                        evidence: Some(first),
+                    })
+                }
+            };
+            if final_state != immediate {
+                return Err(Failure {
+                    status: "blocked",
+                    reason: "worktree changed while saving recovery history; refusing removal (recovery ref retained)".into(),
+                    evidence: Some(first),
+                });
+            }
         }
         let path = &candidate.registration.path;
         let mut remove = vec![OsStr::new("worktree"), OsStr::new("remove")];
@@ -846,7 +917,122 @@ fn execute(
             evidence: Some(first),
         });
     }
+    if preserve_commits {
+        first.recovery_ref = Some(format!("refs/workctl/cleanup/{}", first.head));
+    }
     Ok(first)
+}
+
+// ANSI-C quoting works in the supported zsh and bash terminals, including
+// paths containing controls or non-UTF-8 bytes. Never render raw controls.
+fn shell_arg(value: &OsStr) -> String {
+    let bytes = value.as_encoded_bytes();
+    if !bytes.is_empty()
+        && bytes
+            .iter()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"-_./:=+".contains(byte))
+    {
+        return String::from_utf8(bytes.to_vec()).expect("ASCII shell argument");
+    }
+    let mut out = String::from("$'");
+    for &byte in bytes {
+        match byte {
+            b'\'' => out.push_str("\\'"),
+            b'\\' => out.push_str("\\\\"),
+            32..=126 => out.push(byte as char),
+            _ => out.push_str(&format!("\\x{byte:02x}")),
+        }
+    }
+    out.push('\'');
+    out
+}
+
+fn next_step(
+    args: &Args,
+    path: &Path,
+    status: &str,
+    reason: Option<&str>,
+    discard: bool,
+    discard_ignored: bool,
+    json: bool,
+) -> Option<serde_json::Value> {
+    let local = reason.is_some_and(|reason| reason.starts_with("local data ("));
+    let ignored = local && reason.is_some_and(|reason| reason.contains("--discard-ignored PATH"));
+    let unpublished = reason.is_some_and(|reason| {
+        reason.starts_with("unpublished commits:")
+            || reason.starts_with("publication not proven with shallow history")
+    });
+    let (action, destructive, mut command) = if status == "would remove" || ignored {
+        let mut command: Vec<OsString> = ["workctl", "git", "worktree", "clean"]
+            .iter()
+            .map(OsString::from)
+            .collect();
+        if status == "would remove" {
+            command.push("--apply".into());
+        }
+        if json {
+            command.push("--json".into());
+        }
+        if args.strict {
+            command.push("--strict".into());
+        }
+        if args
+            .preserve_commits
+            .iter()
+            .any(|approved| approved.canonicalize().ok().as_deref() == Some(path))
+        {
+            command.extend(["--preserve-commits".into(), path.as_os_str().to_owned()]);
+        }
+        if args.remote != "origin" {
+            command.extend(["--remote".into(), args.remote.clone().into()]);
+        }
+        if args.timeout != 300 {
+            command.extend(["--timeout".into(), args.timeout.to_string().into()]);
+        }
+        if discard {
+            command.extend(["--discard-local".into(), path.as_os_str().to_owned()]);
+        } else if ignored || discard_ignored {
+            command.extend(["--discard-ignored".into(), path.as_os_str().to_owned()]);
+        }
+        (
+            if ignored {
+                "preview_ignored_removal"
+            } else {
+                "apply_eligible_removal"
+            },
+            !ignored,
+            command,
+        )
+    } else if local || unpublished {
+        let mut command: Vec<OsString> = ["git", "--no-optional-locks", "-C"]
+            .iter()
+            .map(OsString::from)
+            .collect();
+        command.push(path.as_os_str().to_owned());
+        command.extend(
+            if unpublished {
+                vec!["log", "--oneline", "--decorate", "-20"]
+            } else {
+                vec![
+                    "status",
+                    "--short",
+                    "--untracked-files=all",
+                    "--ignored=matching",
+                ]
+            }
+            .into_iter()
+            .map(OsString::from),
+        );
+        return Some(
+            serde_json::json!({"action":if unpublished {"inspect_commits"} else {"inspect_local_data"},"command":command.iter().map(|arg|shell_arg(arg)).collect::<Vec<_>>().join(" "),"destructive":false}),
+        );
+    } else {
+        return None;
+    };
+    command.push(path.as_os_str().to_owned());
+    Some(
+        serde_json::json!({"action":action,"command":command.iter().map(|arg|shell_arg(arg)).collect::<Vec<_>>().join(" "),"destructive":destructive}),
+    )
 }
 
 pub(crate) fn run(args: Args, json: bool) -> u8 {
@@ -877,8 +1063,14 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
     let selected = select(&args.paths)?;
     let mut discard = BTreeSet::new();
     let mut discard_ignored = BTreeSet::new();
+    let mut preserve_commits = BTreeSet::new();
     for (option, paths, approved) in [
         ("--discard-local", &args.discard_local, &mut discard),
+        (
+            "--preserve-commits",
+            &args.preserve_commits,
+            &mut preserve_commits,
+        ),
         (
             "--discard-ignored",
             &args.discard_ignored,
@@ -927,9 +1119,16 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
         let action = std::thread::scope(|scope| -> Result<Snapshot, Failure> {
             let (tx, rx) = std::sync::mpsc::channel();
             let discard = discard.contains(path);
-            let discard_ignored = discard_ignored.contains(path);
+            let discard_ignored = !args.strict || discard_ignored.contains(path);
+            let preserve_commits = !args.strict || preserve_commits.contains(path);
             scope.spawn(move || {
-                let _ = tx.send(execute(args, candidate, discard, discard_ignored));
+                let _ = tx.send(execute(
+                    args,
+                    candidate,
+                    discard,
+                    discard_ignored,
+                    preserve_commits,
+                ));
             });
             loop {
                 if let Err(e) = progress.update(results.len(), 1) {
@@ -954,7 +1153,21 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
                 }
             }
         });
-        let metadata=action.as_ref().map(Some).unwrap_or_else(|e| e.evidence.as_ref()).map(|snapshot| serde_json::json!({"head":snapshot.head,"local_data":local_data(&snapshot.status,&snapshot.flags),"remote":args.remote}));
+        let metadata = action.as_ref().map(Some).unwrap_or_else(|e| e.evidence.as_ref()).map(|snapshot| {
+            let restore = snapshot.recovery_ref.as_ref().map(|recovery| {
+                [OsString::from("git"), OsString::from("-C"), candidate.primary.as_os_str().to_owned(), OsString::from("worktree"), OsString::from("add"), OsString::from("--detach"), path.as_os_str().to_owned(), OsString::from(recovery)]
+                    .iter().map(|arg| shell_arg(arg)).collect::<Vec<_>>().join(" ")
+            });
+            serde_json::json!({
+                "head":snapshot.head,
+                "local_data":local_data(&snapshot.status,&snapshot.flags),
+                "remote":args.remote,
+                "publication":if snapshot.recovery_ref.is_some(){"not_checked_local_recovery"}else{"verified"},
+                "recovery_ref":snapshot.recovery_ref,
+                "recovery_saved":snapshot.recovery_saved,
+                "restore_command":restore
+            })
+        });
         let (status, reason) = match action {
             Ok(_) => (
                 if args.apply {
@@ -964,18 +1177,41 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
                 },
                 None,
             ),
-            Err(e) => (
-                if runtime::cancelled() && e.status == "blocked" {
-                    "interrupted"
-                } else {
-                    e.status
-                },
-                Some(e.reason),
-            ),
+            Err(e) => {
+                let protected =
+                    !args.strict && e.status == "blocked" && e.reason.starts_with("local data (");
+                (
+                    if runtime::cancelled() && e.status == "blocked" {
+                        "interrupted"
+                    } else if protected {
+                        "protected"
+                    } else {
+                        e.status
+                    },
+                    Some(if protected {
+                        e.reason.replacen(
+                            " requires --discard-local PATH",
+                            "; local work left in place",
+                            1,
+                        )
+                    } else {
+                        e.reason
+                    }),
+                )
+            }
         };
-        let detail = format!(
+        let next = next_step(
+            args,
+            path,
+            status,
+            reason.as_deref(),
+            discard.contains(path),
+            discard_ignored.contains(path),
+            json,
+        );
+        let mut detail = format!(
             "  {}: {}{}",
-            presentation::status(status, reason.is_some(), json),
+            presentation::status(status, reason.is_some() && status != "protected", json),
             display(path),
             reason
                 .as_ref()
@@ -985,6 +1221,35 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
                     .collect::<String>())
                 .unwrap_or_default()
         );
+        if let Some(evidence) = &metadata {
+            if let Some(recovery) = evidence["recovery_ref"].as_str() {
+                detail.push_str(&format!(
+                    "\n    {}: {recovery}\n    Local files: {}",
+                    if args.apply {
+                        "Recovery ref saved"
+                    } else {
+                        "Recovery ref planned"
+                    },
+                    evidence["local_data"].as_str().unwrap_or("unknown")
+                ));
+            }
+        }
+        if args.verbose {
+            if let Some(restore) = metadata
+                .as_ref()
+                .and_then(|e| e["restore_command"].as_str())
+            {
+                detail.push_str(&format!("\n    Restore committed files: {restore}"));
+            }
+        }
+        if let Some(next) = &next {
+            detail.push_str(&format!(
+                "\n    Next: {}",
+                next["command"]
+                    .as_str()
+                    .ok_or("invalid next-step command")?
+            ));
+        }
         // Permanent rows preserve full deletion paths and block reasons.
         if json {
             progress.message(&detail)?;
@@ -992,7 +1257,7 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
         if !json {
             progress.result(&detail)?;
         }
-        results.push(serde_json::json!({"path":path.to_string_lossy(),"path_bytes":presentation::path_bytes(path),"status":status,"reason":reason,"discard_local":discard.contains(path),"discard_ignored":discard_ignored.contains(path),"evidence":metadata}));
+        results.push(serde_json::json!({"path":path.to_string_lossy(),"path_bytes":presentation::path_bytes(path),"status":status,"reason":reason,"discard_local":discard.contains(path),"discard_ignored":!args.strict || discard_ignored.contains(path),"preserve_commits":!args.strict || preserve_commits.contains(path),"evidence":metadata,"next_step":next}));
         progress.update(results.len(), 0)?;
     }
     progress.finish();
@@ -1000,6 +1265,10 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
     let would_remove = results
         .iter()
         .filter(|r| r["status"] == "would remove")
+        .count();
+    let protected_worktrees = results
+        .iter()
+        .filter(|r| r["status"] == "protected")
         .count();
     let blocked = results.iter().filter(|r| r["status"] == "blocked").count();
     let interrupted = results
@@ -1036,7 +1305,7 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
     };
     if json {
         if presentation::json(
-            &serde_json::json!({"schema_version":2,"operation":"git.worktree.clean","status":status,"apply":args.apply,"scope":presentation::paths(&args.paths),"protected":presentation::paths(&selected.protected),"results":results,"summary":{"removed":removed,"would_remove":would_remove,"blocked":blocked,"failed":failed,"unverified":unverified,"errors":errors,"interrupted":interrupted,"elapsed_seconds":started.elapsed().as_secs_f64()}}),
+            &serde_json::json!({"schema_version":2,"operation":"git.worktree.clean","status":status,"apply":args.apply,"policy":if args.strict {"strict"}else{"pragmatic"},"scope":presentation::paths(&args.paths),"protected":presentation::paths(&selected.protected),"results":results,"summary":{"removed":removed,"would_remove":would_remove,"protected_worktrees":protected_worktrees,"blocked":blocked,"failed":failed,"unverified":unverified,"errors":errors,"interrupted":interrupted,"elapsed_seconds":started.elapsed().as_secs_f64()}}),
         ) != 0
         {
             return Ok(1);
@@ -1056,7 +1325,7 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
         let mut out = std::io::stdout().lock();
         writeln!(
             out,
-            "{}{}\n  {} {}\n  {blocked} blocked",
+            "{}{}\n  {} {}",
             if selected.candidates.is_empty() {
                 ""
             } else {
@@ -1071,6 +1340,16 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
             }
         )
         .map_err(|e| e.to_string())?;
+        if protected_worktrees > 0 {
+            writeln!(
+                out,
+                "  {protected_worktrees} protected (local work left in place)"
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        if blocked > 0 || args.strict || errors > 0 {
+            writeln!(out, "  {blocked} blocked").map_err(|e| e.to_string())?;
+        }
         if errors > 0 {
             writeln!(
                 out,
@@ -1087,6 +1366,18 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
             presentation::duration(started.elapsed())
         )
         .map_err(|e| e.to_string())?;
+        if !args.apply && !selected.candidates.is_empty() {
+            writeln!(out, "\nPreview only; nothing removed. Apply rechecks current state and may protect newly changed worktrees.").map_err(|e| e.to_string())?;
+        }
+        if results.iter().any(|result| {
+            result["next_step"]["action"] == "preview_ignored_removal"
+                || result["next_step"]["action"] == "inspect_local_data"
+        }) {
+            writeln!(out, "Tracked changes, untracked files, and masked paths stay protected. Inspect these files before deciding whether to discard them.").map_err(|e| e.to_string())?;
+        } else if !args.apply && would_remove > 0 {
+            writeln!(out, "Apply removes ignored files and saves committed history locally; tracked changes and untracked files stay protected.")
+                .map_err(|e| e.to_string())?;
+        }
     }
     Ok(code)
 }

@@ -86,51 +86,48 @@ beneath it. A primary checkout selects all its registered linked worktrees, incl
 paths outside the checkout directory; those full paths are shown. An explicit linked
 worktree selects only itself. Primary checkouts always remain protected.
 
-Remote URLs use Git's source configuration and are resolved once, including URL
-rewrite rules. Publication is verified against a fresh fetch of the selected remote's current heads
-and tags into a temporary bare repository. Cached remote-tracking refs are never
-publication proof. Source objects are read through alternates, without changing
-source refs or `FETCH_HEAD`. Automatic maintenance is disabled for evidence fetches
-so detached maintenance cannot outlive verification or retain repository locks.
-Fetch requests commit-only history; servers that do
-not support filtering may send full objects within the same deadline. Current refs are fetched together into a temporary reftable store on Git 2.45+
-so case-colliding names and disappearing merge-queue branches work without migrating
-the source. Older Git uses the files backend; on case-insensitive filesystems it
-maps advertised refs to distinct temporary names and blocks safely if those refs
-change before fetch. Every commit reachable from the candidate HEAD must
-be reachable from those current remote refs. Missing remotes, unpublished commits, and failed remote verification block removal.
-Shallow repositories are supported when fresh remote evidence proves publication;
-source shallow boundaries are copied into the temporary evidence store, and that
-store is unshallowed within the candidate deadline. Fresh history from the source's
-tracked default-branch name is tried first; other remote history is fetched if
-that branch cannot prove publication. The source remains shallow
-and unchanged. Incomplete ancestry that cannot establish a
-positive publication proof remains a blocker. Detached HEADs use the same proof.
+Cleanup protects tracked changes, untracked files, masked tracked paths, ongoing Git
+operations, locked worktrees, and unverifiable ownership. These are signs of work
+that must stay in place. These worktrees are reported as `protected`; leaving active
+work in place is a successful cleanup outcome, not an error. Ignored files do not block an otherwise idle worktree:
+`--apply` removes them with the worktree. Preview reports their counts and full
+worktree paths. Ignored files can include local configuration and secrets; inspect
+the preview before applying a container-wide cleanup.
 
-Tracked changes, untracked entries, ignored entries, and masked tracked paths are
-protected by default. Blockers show example paths so you can inspect what is local.
-Ignored files can include configuration or secrets as well as disposable build outputs.
-To plan removal while authorizing only ignored-file loss at one exact worktree:
+Committed history does not have to be pushed before cleanup. Application first
+atomically saves HEAD as `refs/workctl/cleanup/<HEAD>` in the protected primary
+repository and verifies that ref. Preview never writes it. Local branches also
+remain. Cleanup works offline and never pushes commits. To restore committed files:
 
 ```sh
-workctl git worktree clean \
-  --discard-ignored /path/to/work/feature /path/to/work
+git -C /path/to/primary worktree add --detach /path/to/restored refs/workctl/cleanup/<HEAD>
 ```
 
-Add `--apply` to execute the plan. Repeat `--discard-ignored` for each approved
-worktree. Tracked changes, untracked files, and masked tracked paths still block
-removal. This narrower approval uses native Git removal without `--force`, so
-Git can also refuse tracked changes or untracked files created just before removal.
-For an exact worktree whose **all local files** may be lost, use `--discard-local`:
+Recovery refs preserve committed history, not discarded ignored files. A failure to
+save or verify the recovery ref blocks deletion. These refs are intentional retained
+deliverables, not temporary files.
+
+Use `--strict` for the original publication policy: all local files including ignored
+files are protected, and every reachable commit must be proven published against a
+fresh isolated fetch of current remote heads and tags. Cached tracking refs are not
+proof. Source URL rewrite rules, shallow repositories, case-colliding refs, and
+commit-only filtered evidence fetches are supported without changing source refs or
+shallow boundaries. Remote verification remains bounded by `--timeout`.
+In strict mode, repeat `--discard-ignored PATH` to authorize ignored-file loss and
+`--preserve-commits PATH` to use local recovery instead of remote publication at an
+exact selected worktree.
+
+For a worktree whose **all local files** may be lost, explicit per-path approval is
+still required:
 
 ```sh
 workctl git worktree clean --apply \
   --discard-local /path/to/work/feature /path/to/work
 ```
 
-Neither approval authorizes removal of unpublished commits, main checkouts, locks,
-missing paths, nested repositories, populated submodule paths, private submodule
-object stores in worktree metadata, or unverifiable registrations/ownership.
+No option authorizes removing main checkouts, locks, missing paths, nested
+repositories, populated submodule paths, private submodule object stores, or
+unverifiable registrations/ownership.
 Empty or absent uninitialized gitlink paths are supported, including gitlinks with
 no `.gitmodules` mapping. Normal cleanup and ignored-only approval use native
 `git worktree remove`; `--force` is used only with `--discard-local`. Cleanup never
@@ -138,10 +135,11 @@ retries removal.
 `--timeout` bounds each candidate's inspection, remote verification, removal, and
 final verification together. Discovery Git probes have independent 15-second bounds.
 
-Application checks files, locks, topology, HEAD, registration, and publication again,
-then rechecks local state immediately after remote I/O. Success requires both the
+Application rechecks files, locks, topology, HEAD, and registration before removal.
+Strict mode also rechecks publication and then local state after remote I/O. Success requires both the
 path and its Git registration to be absent. Outcomes are `would remove`, `removed`,
-`blocked`, or `interrupted`; partial cleanup exits nonzero and reports blockers.
+`protected`, `blocked`, or `interrupted`. Active local work stays protected with exit 0;
+actual safety blockers or deletion errors cause exit 1.
 A removed worktree's local branch is retained. Stale registrations with missing
 filesystem paths remain blockers, rather than being pruned speculatively.
 
@@ -177,7 +175,11 @@ errors have `error`. Reset and cleanup include scope, per-target `results`, and 
 counts with `elapsed_seconds`. Reset additionally reports excluded worktrees,
 recovery refs, attempts, and retained diagnostics. Cleanup reports protected primary
 checkouts, discard decisions, and publication/local-data evidence for eligible targets.
-Cleanup version 2 reserves `blocked` for pre-removal refusals. After removal starts,
+Cleanup version 2 reports `policy` (`pragmatic` or `strict`) and `protected_worktrees`
+in the summary. Pragmatic local-work skips have target status `protected` and do not
+make the command fail. Strict mode retains `blocked` and exit 1 for these refusals.
+Evidence includes planned/saved recovery refs and explicitly distinguishes local
+recovery from verified remote publication. Other pre-removal refusals use `blocked`. After removal starts,
 `removed` requires verified absence of both the path and registration; `failed` means
 one remains; `unverified` means the final state could not be checked. Inspected evidence
 is retained for these outcomes. A verified removal following a Git error still counts

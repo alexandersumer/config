@@ -94,11 +94,13 @@ impl Fixture {
             worktree,
         }
     }
+    // Existing remote-publication and explicit-data-approval contracts remain
+    // meaningful under --strict; pragmatic defaults have separate real-Git tests.
     fn command(&self, extra: &[&str]) -> Command {
         let mut c = Command::new(BIN);
         env(&mut c);
         c.current_dir(&self.repo)
-            .args(["git", "worktree", "clean", "--json"])
+            .args(["git", "worktree", "clean", "--json", "--strict"])
             .args(extra);
         c
     }
@@ -273,7 +275,15 @@ fn git_diagnostics_redact_query_values_in_results_and_retained_logs() {
     fs::create_dir(&runtime).unwrap();
     for args in [
         vec!["git", "reset", "--attempts", "1", "--json", "--verbose"],
-        vec!["git", "worktree", "clean", "--apply", "--json", "--verbose"],
+        vec![
+            "git",
+            "worktree",
+            "clean",
+            "--strict",
+            "--apply",
+            "--json",
+            "--verbose",
+        ],
     ] {
         let out = env(&mut Command::new(BIN))
             .args(args)
@@ -1892,4 +1902,492 @@ fn publication_preserves_case_colliding_refs_with_the_older_git_fallback() {
     }
     assert_eq!(fs::read(f.repo.join(".git/config")).unwrap(), config);
     assert_eq!(git(&f.repo, &["for-each-ref"]), refs);
+}
+
+#[test]
+fn unapproved_local_data_is_reported_before_scanning_protected_ignored_contents() {
+    let f = Fixture::new();
+    fs::write(f.worktree.join(".gitignore"), "generated/\n").unwrap();
+    git(&f.worktree, &["add", ".gitignore"]);
+    git(&f.worktree, &["commit", "-m", "ignore generated files"]);
+    git(&f.worktree, &["push", "origin", "feature"]);
+    let generated = f.worktree.join("generated");
+    fs::create_dir(&generated).unwrap();
+    fs::write(generated.join("precious-cache"), "preserve").unwrap();
+    struct Restore(PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            fs::set_permissions(&self.0, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+    }
+    let _restore = Restore(generated.clone());
+    fs::set_permissions(&generated, fs::Permissions::from_mode(0o000)).unwrap();
+    let blocked = f.result(&[], 1);
+    assert!(
+        blocked["results"][0]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("local data"),
+        "{blocked}"
+    );
+    assert!(
+        blocked["results"][0]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("generated/"),
+        "{blocked}"
+    );
+    let approved = f.result(
+        &["--apply", "--discard-ignored", f.worktree.to_str().unwrap()],
+        1,
+    );
+    assert!(
+        approved["results"][0]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("Permission denied"),
+        "{approved}"
+    );
+    f.unchanged();
+}
+
+#[test]
+fn cleanup_next_steps_are_scoped_executable_and_preserve_protected_data() {
+    let mut f = Fixture::new();
+    let unusual = f.temp.path().join("linked '; touch escaped; #\n\x1b");
+    git(
+        &f.repo,
+        &[
+            "worktree",
+            "move",
+            f.worktree.to_str().unwrap(),
+            unusual.to_str().unwrap(),
+        ],
+    );
+    f.worktree = unusual;
+    fs::write(f.worktree.join(".gitignore"), "cache/\n").unwrap();
+    git(&f.worktree, &["add", ".gitignore"]);
+    git(&f.worktree, &["commit", "-m", "ignore cache"]);
+    git(&f.worktree, &["push", "origin", "feature"]);
+    fs::create_dir(f.worktree.join("cache")).unwrap();
+    fs::write(
+        f.worktree.join("cache/data"),
+        "preserve unless explicitly approved",
+    )
+    .unwrap();
+    let blocked = f.result(&[], 1);
+    let step = &blocked["results"][0]["next_step"];
+    assert_eq!(step["action"], "preview_ignored_removal");
+    assert_eq!(step["destructive"], false);
+    let command = step["command"].as_str().unwrap();
+    assert!(!command.contains(['\n', '\x1b']));
+    let mut shell = Command::new("zsh");
+    env(&mut shell);
+    shell
+        .current_dir(f.temp.path())
+        .args(["-f", "-c", command])
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                Path::new(BIN).parent().unwrap().display(),
+                std::env::var("PATH").unwrap()
+            ),
+        );
+    let out = shell.output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out));
+    assert!(!f.temp.path().join("escaped").exists());
+    f.unchanged();
+    assert!(f.worktree.join("cache/data").is_file());
+    fs::write(f.worktree.join("untracked-evidence"), "keep").unwrap();
+    let blocked = f.result(&[], 1);
+    let step = &blocked["results"][0]["next_step"];
+    assert_eq!(step["action"], "inspect_local_data");
+    assert_eq!(step["destructive"], false);
+    assert!(!step["command"]
+        .as_str()
+        .unwrap()
+        .contains("--discard-local"));
+    assert!(f.worktree.join("untracked-evidence").is_file());
+}
+
+#[test]
+fn cleanup_human_guidance_distinguishes_preview_and_current_state_revalidation() {
+    let f = Fixture::new();
+    let out = f.command(&[]).arg(&f.worktree).output().unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(
+        result["results"][0]["next_step"]["action"],
+        "apply_eligible_removal"
+    );
+    let mut cmd = Command::new(BIN);
+    env(&mut cmd);
+    let human = cmd
+        .args(["git", "worktree", "clean"])
+        .arg(&f.worktree)
+        .output()
+        .unwrap();
+    assert_eq!(human.status.code(), Some(0));
+    let human = text(&human);
+    assert!(
+        human.contains("Next: workctl git worktree clean --apply"),
+        "{human}"
+    );
+    assert!(human.contains("Preview only; nothing removed."), "{human}");
+    assert!(human.contains("Apply rechecks current state"), "{human}");
+    assert!(
+        human.contains("tracked changes and untracked files stay protected"),
+        "{human}"
+    );
+    f.unchanged();
+}
+
+#[test]
+fn exact_commit_preservation_allows_offline_cleanup_without_losing_unpublished_history() {
+    for format in ["sha1", "sha256"] {
+        let f = Fixture::with_object_format(format);
+        fs::write(f.worktree.join("file"), "unpublished committed work").unwrap();
+        git(&f.worktree, &["add", "file"]);
+        git(&f.worktree, &["commit", "-m", "unpublished"]);
+        let head = git(&f.worktree, &["rev-parse", "HEAD"]);
+        assert_eq!(f.result(&[], 1)["summary"]["blocked"], 1);
+        git(&f.repo, &["remote", "remove", "origin"]);
+        let before = git(&f.repo, &["for-each-ref"]);
+        let extra = ["--preserve-commits", f.worktree.to_str().unwrap()];
+        let plan = f.result(&extra, 0);
+        assert_eq!(plan["summary"]["would_remove"], 1);
+        assert_eq!(git(&f.repo, &["for-each-ref"]), before);
+        f.unchanged();
+        let applied = f.result(
+            &[
+                "--apply",
+                "--preserve-commits",
+                f.worktree.to_str().unwrap(),
+            ],
+            0,
+        );
+        assert_eq!(applied["summary"]["removed"], 1);
+        let recovery = applied["results"][0]["evidence"]["recovery_ref"]
+            .as_str()
+            .unwrap();
+        assert_eq!(git(&f.repo, &["rev-parse", recovery]), head);
+        assert_eq!(
+            git(&f.repo, &["show", &format!("{recovery}:file")]),
+            "unpublished committed work"
+        );
+        assert!(!f.worktree.exists());
+        assert!(f.repo.join("file").is_file());
+    }
+}
+
+#[test]
+fn commit_preservation_never_authorizes_file_loss_or_wrong_scope() {
+    let f = Fixture::new();
+    fs::write(f.worktree.join("evidence"), "keep local files").unwrap();
+    let before = git(&f.repo, &["for-each-ref"]);
+    let blocked = f.result(
+        &[
+            "--apply",
+            "--preserve-commits",
+            f.worktree.to_str().unwrap(),
+        ],
+        1,
+    );
+    assert_eq!(blocked["summary"]["blocked"], 1);
+    assert_eq!(
+        fs::read_to_string(f.worktree.join("evidence")).unwrap(),
+        "keep local files"
+    );
+    assert_eq!(git(&f.repo, &["for-each-ref"]), before);
+    let out = f
+        .command(&["--apply", "--preserve-commits", f.repo.to_str().unwrap()])
+        .arg(&f.worktree)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+    assert!(text(&out).contains("not a selected linked worktree"));
+    assert_eq!(git(&f.repo, &["for-each-ref"]), before);
+    f.unchanged();
+}
+
+#[test]
+fn pragmatic_cleanup_removes_idle_worktrees_offline_and_preserves_active_work() {
+    for format in ["sha1", "sha256"] {
+        let f = Fixture::with_object_format(format);
+        fs::write(f.worktree.join(".gitignore"), "cache/\n").unwrap();
+        git(&f.worktree, &["add", ".gitignore"]);
+        git(&f.worktree, &["commit", "-m", "unpublished idle work"]);
+        git(&f.worktree, &["checkout", "--detach"]);
+        let head = git(&f.worktree, &["rev-parse", "HEAD"]);
+        fs::create_dir(f.worktree.join("cache")).unwrap();
+        fs::write(f.worktree.join("cache/data"), "ignored cache").unwrap();
+        let active = f.temp.path().join("active");
+        git(
+            &f.repo,
+            &["worktree", "add", "-b", "active", active.to_str().unwrap()],
+        );
+        fs::write(active.join("untracked-work"), "keep this work").unwrap();
+        git(&f.repo, &["remote", "remove", "origin"]);
+        let run = |apply: bool| {
+            let mut c = Command::new(BIN);
+            env(&mut c);
+            c.args(["git", "worktree", "clean", "--json"]);
+            if apply {
+                c.arg("--apply");
+            }
+            c.arg(&f.worktree).arg(&active);
+            let out = c.output().unwrap();
+            assert_eq!(out.status.code(), Some(0), "{}", text(&out));
+            serde_json::from_slice::<serde_json::Value>(&out.stdout).unwrap()
+        };
+        let refs = git(&f.repo, &["for-each-ref"]);
+        let preview = run(false);
+        assert_eq!(preview["summary"]["would_remove"], 1);
+        assert_eq!(preview["summary"]["protected_worktrees"], 1);
+        assert_eq!(git(&f.repo, &["for-each-ref"]), refs);
+        assert!(f.worktree.join("cache/data").is_file());
+        let applied = run(true);
+        assert_eq!(applied["summary"]["removed"], 1);
+        assert_eq!(applied["summary"]["protected_worktrees"], 1);
+        assert!(!f.worktree.exists());
+        git(&f.repo, &["branch", "-D", "feature"]);
+        let removed = applied["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["status"] == "removed")
+            .unwrap();
+        let restored = env(&mut Command::new("zsh"))
+            .args([
+                "-f",
+                "-c",
+                removed["evidence"]["restore_command"].as_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
+        assert!(restored.status.success(), "{}", text(&restored));
+        assert_eq!(git(&f.worktree, &["rev-parse", "HEAD"]), head);
+        assert!(!f.worktree.join("cache/data").exists());
+        assert_eq!(
+            fs::read_to_string(active.join("untracked-work")).unwrap(),
+            "keep this work"
+        );
+        assert_eq!(
+            git(
+                &f.repo,
+                &["rev-parse", &format!("refs/workctl/cleanup/{head}")]
+            ),
+            head
+        );
+        assert_eq!(
+            git(
+                &f.repo,
+                &["show", &format!("refs/workctl/cleanup/{head}:.gitignore")]
+            ),
+            "cache/"
+        );
+        assert!(f.repo.join("file").is_file());
+    }
+}
+
+#[test]
+fn pragmatic_cleanup_refuses_removal_when_history_cannot_be_saved() {
+    let f = Fixture::new();
+    let shim = f.shim(
+        "case \" $* \" in *' update-ref '*) echo 'recovery write denied' >&2; exit 91;; esac",
+    );
+    let mut c = Command::new(BIN);
+    env(&mut c);
+    c.args(["git", "worktree", "clean", "--apply", "--json"])
+        .arg(&f.worktree)
+        .env(
+            "PATH",
+            format!("{}:{}", shim.display(), std::env::var("PATH").unwrap()),
+        );
+    let out = c.output().unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+    assert!(
+        text(&out).contains("recovery write denied"),
+        "{}",
+        text(&out)
+    );
+    f.unchanged();
+}
+
+#[test]
+fn pragmatic_cleanup_protects_tracked_masked_and_late_untracked_work() {
+    for kind in ["tracked", "masked", "late untracked"] {
+        let f = Fixture::new();
+        if kind == "masked" {
+            git(&f.worktree, &["update-index", "--skip-worktree", "file"]);
+        }
+        if kind != "late untracked" {
+            fs::write(f.worktree.join("file"), "active tracked work").unwrap();
+        }
+        let mut c = Command::new(BIN);
+        env(&mut c);
+        c.args(["git", "worktree", "clean", "--apply", "--json"])
+            .arg(&f.worktree);
+        if kind == "late untracked" {
+            let evidence = f.worktree.join("last-moment-work");
+            let shim = f.shim(&format!(
+                "case \"$*\" in *'worktree remove'*) printf precious > '{}' ;; esac",
+                evidence.display()
+            ));
+            with_shim(&mut c, &shim);
+        }
+        let out = c.output().unwrap();
+        assert_eq!(
+            out.status.code(),
+            Some(if kind == "late untracked" { 1 } else { 0 }),
+            "{}",
+            text(&out)
+        );
+        let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(result["summary"]["removed"], 0);
+        if kind != "late untracked" {
+            assert_eq!(result["summary"]["protected_worktrees"], 1);
+        }
+        if kind == "late untracked" {
+            assert_eq!(
+                fs::read_to_string(f.worktree.join("last-moment-work")).unwrap(),
+                "precious"
+            );
+        } else {
+            assert_eq!(
+                fs::read_to_string(f.worktree.join("file")).unwrap(),
+                "active tracked work"
+            );
+        }
+        f.unchanged();
+    }
+}
+
+#[test]
+fn pragmatic_cleanup_does_not_overwrite_conflicting_or_symbolic_recovery_refs() {
+    for symbolic in [false, true] {
+        let f = Fixture::new();
+        let old = git(&f.repo, &["rev-parse", "HEAD"]);
+        fs::write(f.worktree.join("file"), "committed history").unwrap();
+        git(&f.worktree, &["add", "file"]);
+        git(&f.worktree, &["commit", "-m", "local history"]);
+        let head = git(&f.worktree, &["rev-parse", "HEAD"]);
+        let recovery = format!("refs/workctl/cleanup/{head}");
+        if symbolic {
+            git(&f.repo, &["symbolic-ref", &recovery, "refs/heads/feature"]);
+        } else {
+            git(&f.repo, &["update-ref", &recovery, &old]);
+        }
+        let before = git(
+            &f.repo,
+            &[
+                "for-each-ref",
+                "--format=%(refname) %(objectname) %(symref)",
+            ],
+        );
+        let out = env(&mut Command::new(BIN))
+            .args(["git", "worktree", "clean", "--apply", "--json"])
+            .arg(&f.worktree)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+        assert!(text(&out).contains("recovery ref"), "{}", text(&out));
+        assert_eq!(
+            git(
+                &f.repo,
+                &[
+                    "for-each-ref",
+                    "--format=%(refname) %(objectname) %(symref)"
+                ]
+            ),
+            before
+        );
+        f.unchanged();
+    }
+}
+
+#[test]
+fn pragmatic_cleanup_revalidates_commits_made_while_saving_recovery() {
+    let f = Fixture::new();
+    let head = git(&f.worktree, &["rev-parse", "HEAD"]);
+    let shim = f.shim("case \" $* \" in *' update-ref '*) \"$REAL_GIT\" -C \"$PROBE_WORKTREE\" -c user.name=Probe -c user.email=probe@example.test commit --allow-empty -m concurrent-work >/dev/null || exit $?;; esac");
+    let real = Command::new("sh")
+        .args(["-c", "command -v git"])
+        .output()
+        .unwrap();
+    let mut c = Command::new(BIN);
+    env(&mut c);
+    c.args(["git", "worktree", "clean", "--apply", "--json"])
+        .arg(&f.worktree)
+        .env("REAL_GIT", String::from_utf8(real.stdout).unwrap().trim())
+        .env("PROBE_WORKTREE", &f.worktree);
+    with_shim(&mut c, &shim);
+    let out = c.output().unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+    assert!(
+        text(&out).contains("registration changed during inspection"),
+        "{}",
+        text(&out)
+    );
+    assert_ne!(git(&f.worktree, &["rev-parse", "HEAD"]), head);
+    assert_eq!(
+        git(
+            &f.repo,
+            &["rev-parse", &format!("refs/workctl/cleanup/{head}")]
+        ),
+        head
+    );
+    f.unchanged();
+}
+
+#[test]
+fn pragmatic_recovery_deadlines_and_cancellation_preserve_work_and_release_locks() {
+    for cancel in [false, true] {
+        let f = Fixture::new();
+        let started = f.temp.path().join("recovery-started");
+        let count = f.temp.path().join("attempts");
+        let shim = f.shim("case \" $* \" in *' update-ref '*) echo attempt >> \"$PROBE_COUNT\"; touch \"$PROBE_STARTED\"; sleep 30;; esac");
+        let mut c = Command::new(BIN);
+        env(&mut c);
+        c.args([
+            "git",
+            "worktree",
+            "clean",
+            "--apply",
+            "--json",
+            "--timeout",
+            if cancel { "30" } else { "4" },
+        ])
+        .arg(&f.worktree)
+        .env("PROBE_STARTED", &started)
+        .env("PROBE_COUNT", &count)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+        with_shim(&mut c, &shim);
+        let child = c.spawn().unwrap();
+        wait(&started);
+        if cancel {
+            unsafe {
+                libc::kill(child.id() as i32, libc::SIGINT);
+            }
+        }
+        let out = child.wait_with_output().unwrap();
+        assert_eq!(
+            out.status.code(),
+            Some(if cancel { 130 } else { 1 }),
+            "{}",
+            text(&out)
+        );
+        assert_eq!(fs::read_to_string(count).unwrap(), "attempt\n");
+        assert!(git(&f.repo, &["for-each-ref", "refs/workctl/cleanup/"]).is_empty());
+        f.unchanged();
+        let retry = env(&mut Command::new(BIN))
+            .args(["git", "worktree", "clean", "--json"])
+            .arg(&f.worktree)
+            .output()
+            .unwrap();
+        assert!(retry.status.success(), "{}", text(&retry));
+        f.unchanged();
+    }
 }

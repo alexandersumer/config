@@ -127,7 +127,9 @@ impl Runtime {
     }
     fn cleanup(&self, args: &[&str], code: i32) -> serde_json::Value {
         let mut cmd = self.command(self.root(), &self.binary);
-        cmd.args(["git", "worktree", "clean", "--json"]).args(args);
+        // Exercise the strict remote-publication contract explicitly.
+        cmd.args(["git", "worktree", "clean", "--json", "--strict"])
+            .args(args);
         let out = self.run(cmd);
         assert_eq!(out.status.code(), Some(code), "{}", text(&out));
         assert!(
@@ -304,6 +306,72 @@ fn standalone_cleanup_uses_current_git_protocol_evidence_and_explicit_discard() 
     let repeated = rt.cleanup(&["--apply", path(&primary)], 0);
     assert_eq!(repeated["status"], "completed");
     assert_eq!(repeated["summary"]["removed"], 0);
+
+    // The public default must also work when the real remote is unavailable.
+    rt.git(&primary, &["worktree", "add", "--detach", path(&private)]);
+    fs::write(private.join(".gitignore"), "cache/\n").unwrap();
+    rt.git(&private, &["add", ".gitignore"]);
+    rt.git(&private, &["commit", "-m", "offline unpublished history"]);
+    let offline_head = rt.git(&private, &["rev-parse", "HEAD"]);
+    fs::create_dir(private.join("cache")).unwrap();
+    fs::write(private.join("cache/output"), "ignored output").unwrap();
+    rt.git(
+        &primary,
+        &["worktree", "add", "-b", "active", path(&published)],
+    );
+    fs::write(published.join("file"), "active tracked changes").unwrap();
+    let mut daemon = rt.daemon.take().unwrap();
+    unsafe {
+        libc::kill(-(daemon.id() as i32), libc::SIGKILL);
+    }
+    daemon.wait().unwrap();
+    for apply in [false, true] {
+        let mut cmd = rt.command(rt.root(), &rt.binary);
+        cmd.args(["git", "worktree", "clean", "--json"]);
+        if apply {
+            cmd.arg("--apply");
+        }
+        cmd.arg(&primary);
+        let out = rt.run(cmd);
+        assert!(out.status.success(), "{}", text(&out));
+        let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(result["policy"], "pragmatic");
+        assert_eq!(result["summary"]["protected_worktrees"], 1);
+        assert_eq!(
+            result["summary"][if apply { "removed" } else { "would_remove" }],
+            1
+        );
+        assert_eq!(
+            fs::read_to_string(published.join("file")).unwrap(),
+            "active tracked changes"
+        );
+        if !apply {
+            assert!(private.join("cache/output").is_file());
+            assert!(rt
+                .git(&primary, &["for-each-ref", "refs/workctl/cleanup/"])
+                .is_empty());
+        }
+    }
+    assert!(!private.exists());
+    assert_eq!(
+        rt.git(
+            &primary,
+            &["rev-parse", &format!("refs/workctl/cleanup/{offline_head}")]
+        ),
+        offline_head
+    );
+    assert_eq!(
+        rt.git(
+            &primary,
+            &[
+                "show",
+                &format!("refs/workctl/cleanup/{offline_head}:.gitignore")
+            ]
+        ),
+        "cache/"
+    );
+    assert_eq!(rt.git(&primary, &["rev-parse", "HEAD"]), baseline);
+    assert!(rt.git(&primary, &["status", "--porcelain"]).is_empty());
 }
 impl Drop for Runtime {
     fn drop(&mut self) {
