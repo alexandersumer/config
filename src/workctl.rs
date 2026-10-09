@@ -27,7 +27,7 @@ enum Operation {
         #[command(subcommand)]
         command: Git,
     },
-    /// Inspect installation, prerequisites, and supported capabilities without repairs
+    /// Inspect runtime prerequisites and supported capabilities without repairs
     #[command(after_help = "Examples:\n  workctl doctor\n  workctl doctor --json")]
     Doctor,
     /// Generate shell completion from the command hierarchy
@@ -180,7 +180,7 @@ fn doctor(json: bool) -> u8 {
         "Failed"
     };
     if json { let write = crate::presentation::json(&serde_json::json!({"schema_version":1,"operation":"doctor","status":if code==130 {"interrupted"} else if code==0 {"completed"} else {"failed"},"checks":checks})); if write != 0 { return write; } }
-    else if writeln!(std::io::stdout(), "Workstation doctor\n\nScope          Local installation\nExecutable     {}\nGit            {} (requires 2.36+)\nTemporary dir  {}\nProcess groups {}\nRepo locks     {}\n\n{}",
+    else if writeln!(std::io::stdout(), "Workstation doctor\n\nScope          Runtime capabilities\nExecutable     {}\nGit            {} (requires 2.36+)\nTemporary dir  {}\nProcess groups {}\nRepo locks     {}\n\n{}",
         executable.map(|p|crate::presentation::safe_text(&p.to_string_lossy())).unwrap_or("unavailable".into()),
         crate::presentation::safe_text(checks["git"].as_str().unwrap_or("unavailable")), if temp.is_ok() {"available"} else {"unavailable"}, if groups {"available"} else {"unavailable"}, if locking {"available"} else {"unavailable"}, crate::presentation::status(outcome,code!=0,false)).is_err() { return 1; }
     code

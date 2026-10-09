@@ -114,6 +114,10 @@ filesystem paths remain blockers, rather than being pruned speculatively.
 
 Both operations share process supervision and common-directory locks. These locks
 coordinate workctl and the former reset runner, not editors or unrelated Git commands;
+preview may create the persistent `repo-batch.lock` coordination file in the common
+Git directory. It does not change refs, tracked files, or worktree registrations.
+Publication checks access the remote and use automatically removed temporary object
+stores. The coordination file remains in place so concurrent callers lock the same inode;
 run while repositories are otherwise idle. Cancellation/deadlines terminate process
 groups before locks are released. Descendants inherit the lock so forced supervisor
 termination cannot release it while they run. Interrupted Git writes may leave native
@@ -152,7 +156,9 @@ accepting version 2. No failed deletion is retried.
 Per-target `path` is a display string; `path_bytes` is the exact Unix path as an array
 of byte values, preserving non-UTF-8 filenames. Help, version, and usage errors follow
 Clap conventions even when `--json` is present. Doctor checks Git 2.36+, the executable,
-temporary storage, and relevant process/lock capabilities without repairs.
+temporary storage, and relevant process/lock capabilities without repairs. It supports
+standalone executables and does not certify managed installation or shell configuration;
+use `config-tools check-install` for managed installation checks.
 
 ### Architecture and verification
 

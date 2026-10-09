@@ -138,6 +138,99 @@ impl Fixture {
 }
 
 #[test]
+fn relative_remote_publication_preserves_source_resolution_without_mutating_refs() {
+    let f = Fixture::new();
+    git(&f.repo, &["remote", "set-url", "origin", "../remote.git"]);
+    assert!(!git(&f.repo, &["ls-remote", "origin"]).is_empty());
+    let refs = git(&f.repo, &["for-each-ref"]);
+    let plan = f.result(&[], 0);
+    assert_eq!(plan["summary"]["would_remove"], 1);
+    f.unchanged();
+    assert_eq!(git(&f.repo, &["for-each-ref"]), refs);
+    assert!(!f.repo.join(".git/FETCH_HEAD").exists());
+    let applied = f.result(&["--apply"], 0);
+    assert_eq!(applied["summary"]["removed"], 1);
+    assert!(!f.worktree.exists());
+    assert_eq!(git(&f.repo, &["for-each-ref"]), refs);
+    assert!(!f.repo.join(".git/FETCH_HEAD").exists());
+    assert_eq!(
+        git(&f.repo, &["worktree", "list", "--porcelain"])
+            .lines()
+            .filter(|line| line.starts_with("worktree "))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn special_coordination_files_refuse_promptly_in_reset_and_cleanup() {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    for cleanup in [false, true] {
+        let f = Fixture::new();
+        let lock = f.repo.join(".git/repo-batch.lock");
+        let name = CString::new(lock.as_os_str().as_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+        let mut cmd = Command::new(BIN);
+        env(&mut cmd);
+        cmd.args(if cleanup {
+            vec!["git", "worktree", "clean", "--json", "--timeout", "1"]
+        } else {
+            vec![
+                "git",
+                "reset",
+                "--json",
+                "--timeout",
+                "1",
+                "--attempts",
+                "1",
+            ]
+        });
+        cmd.arg(if cleanup { &f.worktree } else { &f.repo })
+            .env("TMPDIR", f.temp.path())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut child = cmd.spawn().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if child.try_wait().unwrap().is_some() {
+                break;
+            }
+            if Instant::now() >= deadline {
+                child.kill().unwrap();
+                let out = child.wait_with_output().unwrap();
+                panic!(
+                    "special coordination file bypassed deadline: {}",
+                    text(&out)
+                );
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let out = child.wait_with_output().unwrap();
+        assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+        let r: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(r["schema_version"], if cleanup { 2 } else { 1 });
+        assert_eq!(r["status"], if cleanup { "blocked" } else { "failed" });
+        assert_eq!(
+            r["results"][0]["attempts"],
+            if cleanup {
+                serde_json::Value::Null
+            } else {
+                serde_json::json!(0)
+            }
+        );
+        let detail = if cleanup {
+            &r["results"][0]["reason"]
+        } else {
+            &r["results"][0]["detail"]
+        };
+        assert!(detail.as_str().unwrap().contains("repo-batch.lock"), "{r}");
+        f.unchanged();
+        assert_eq!(git(&f.repo, &["log", "-1", "--format=%s"]), "initial");
+    }
+}
+
+#[test]
 fn cleanup_uses_source_object_format_even_when_init_default_differs() {
     for (source, default) in [("sha256", "sha1"), ("sha1", "sha256")] {
         let f = Fixture::with_object_format(source);
@@ -627,6 +720,10 @@ fn atomic_install_migrates_owned_files_preserves_foreign_files_and_works_in_fres
     };
     let out = install();
     assert!(out.status.success(), "{}", text(&out));
+    let expected = fs::read(env!("CARGO_BIN_EXE_config-tools")).unwrap();
+    for name in ["workctl", "config-tools"] {
+        assert_eq!(fs::read(bin.join(name)).unwrap(), expected);
+    }
     assert!(!bin.join("reset_to_origin").exists());
     assert!(home
         .path()
@@ -663,8 +760,25 @@ fn atomic_install_migrates_owned_files_preserves_foreign_files_and_works_in_fres
         assert!(out.status.success(), "{}", text(&out));
         assert!(text(&out).contains("workctl"));
     }
+    symlink(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("zsh"),
+        home.path().join(".zsh"),
+    )
+    .unwrap();
+    let config =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("zsh/zshrc")).unwrap();
+    let helpers = config
+        .split_once("# Git helpers\n")
+        .unwrap()
+        .1
+        .split_once("# Claude Code (auto-update)")
+        .unwrap()
+        .0;
+    let shell_config = home.path().join("workctl-shell-config.zsh");
+    fs::write(&shell_config, helpers).unwrap();
     let out = Command::new("zsh")
-        .args(["-f", "-c", "fpath=(\"$HOME/.local/share/zsh/site-functions\" $fpath); autoload -Uz compinit compaudit; compaudit || exit 1; compinit -D; rehash; [[ ${_comps[workctl]} == _workctl ]] && autoload +X _workctl && ! whence reset_to_origin && workctl doctor --json"])
+        .args(["-f", "-c", "reset_to_origin() { return 99; }; alias reset_to_origin='return 98'; source \"$1\" || exit 1; fpath=(\"$HOME/.local/share/zsh/site-functions\" $fpath); autoload -Uz compinit compaudit; compaudit || exit 1; compinit -D; rehash; [[ ${_comps[workctl]} == _workctl ]] && autoload +X _workctl && ! whence reset_to_origin && workctl doctor --json", "verification"])
+        .arg(&shell_config)
         .env("HOME", home.path())
         .env("PATH", format!("{}:{}", bin.display(), "/usr/bin:/bin"))
         .output().unwrap();

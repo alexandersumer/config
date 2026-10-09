@@ -260,18 +260,21 @@ impl Session<'_> {
             .write_all(objects.as_os_str().as_encoded_bytes())
             .and_then(|_| alternates.write_all(b"\n"))
             .map_err(|e| e.to_string())?;
-        self.probe(
-            evidence.path(),
+        // Keep Git's URL resolution context while writing only the evidence store.
+        self.call(
+            &c.primary,
             &[
-                "fetch",
-                "--quiet",
-                "--no-tags",
-                "--no-write-fetch-head",
-                "--no-recurse-submodules",
-                "--",
-                &urls,
-                "+refs/heads/*:refs/remotes/evidence/*",
-                "+refs/tags/*:refs/tags/*",
+                OsStr::new("--git-dir"),
+                evidence.path().as_os_str(),
+                OsStr::new("fetch"),
+                OsStr::new("--quiet"),
+                OsStr::new("--no-tags"),
+                OsStr::new("--no-write-fetch-head"),
+                OsStr::new("--no-recurse-submodules"),
+                OsStr::new("--"),
+                OsStr::new(&urls),
+                OsStr::new("+refs/heads/*:refs/remotes/evidence/*"),
+                OsStr::new("+refs/tags/*:refs/tags/*"),
             ],
         )?;
         let tips = self.text(
