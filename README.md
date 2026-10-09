@@ -63,7 +63,9 @@ resolve it unambiguously, match the fetched tip, and never replace local branche
 Hooks are followed by branch, commit, and tracked-file verification. Other branches,
 linked worktree files, and noncolliding local files remain intact. Replaced target
 branch tips are retained under `refs/home-reset-backups/`. Detached-HEAD commits
-receive no additional backup.
+receive no additional backup. Successful runs summarize saved recovery refs;
+`--verbose` shows individual recovery commands. Failed checkouts show their recovery
+commands by default, and JSON always includes the exact backup refs.
 
 The measured existing default remains 32 workers, bounded by checkout count;
 this migration introduces no new performance claim. `--jobs` accepts 1–32,

@@ -456,6 +456,19 @@ fn run_inner(options: &Options, selection: Selection) -> Result<u8, String> {
             crate::presentation::duration(started.elapsed())
         )
         .map_err(|e| e.to_string())?;
+        let backups: usize = records.iter().map(|record| record.backups.len()).sum();
+        if backups > 0 {
+            writeln!(
+                out,
+                "  {backups} recovery refs saved{}",
+                if options.verbose {
+                    ""
+                } else {
+                    " (--verbose shows recovery commands)"
+                }
+            )
+            .map_err(|e| e.to_string())?;
+        }
         for record in &records {
             if total == 1 && record.code == 0 {
                 writeln!(
@@ -466,7 +479,11 @@ fn run_inner(options: &Options, selection: Selection) -> Result<u8, String> {
                 )
                 .map_err(|e| e.to_string())?;
             }
-            for backup in &record.backups {
+            for backup in record
+                .backups
+                .iter()
+                .filter(|_| options.verbose || record.code != 0)
+            {
                 writeln!(
                     out,
                     "  Recover {}: git branch recovered-work {}",

@@ -1375,6 +1375,10 @@ fi
         f.old
     );
     assert!(!text(&out).contains("1 succeeded"));
+    assert!(String::from_utf8_lossy(&out.stdout).contains(&format!(
+        "git branch recovered-work {}",
+        backups[0].as_str().unwrap()
+    )));
 }
 
 #[test]
@@ -1404,7 +1408,7 @@ fi
 
 #[test]
 fn successful_default_runs_remove_logs_and_preserve_recovery_refs() {
-    for count in [1, 2] {
+    for (count, verbose) in [(1, false), (2, false), (1, true), (2, true)] {
         let f = Fixture::new();
         let mut repos = vec![f.repo.clone()];
         if count == 2 {
@@ -1414,11 +1418,14 @@ fn successful_default_runs_remove_logs_and_preserve_recovery_refs() {
         for repo in &repos {
             git(repo, &["reset", "--hard", &f.old]);
         }
-        let out = env(Command::new(BIN).current_dir(&f.workspace))
+        let mut command = Command::new(BIN);
+        env(command.current_dir(&f.workspace))
             .args(["git", "reset", "--attempts", "1"])
-            .env("TMPDIR", f.temp.path().join("runtime"))
-            .output()
-            .unwrap();
+            .env("TMPDIR", f.temp.path().join("runtime"));
+        if verbose {
+            command.arg("--verbose");
+        }
+        let out = command.output().unwrap();
         success(&out);
         let stdout = String::from_utf8_lossy(&out.stdout);
         assert!(stdout.starts_with("Git checkout reset\n"));
@@ -1430,7 +1437,29 @@ fn successful_default_runs_remove_logs_and_preserve_recovery_refs() {
             fs::read_dir(f.temp.path().join("runtime")).unwrap().count(),
             0
         );
+        assert_eq!(
+            stdout.matches("  Recover ").count(),
+            if verbose { count } else { 0 }
+        );
+        assert!(
+            stdout.contains(&format!("{count} recovery refs saved")),
+            "{stdout}"
+        );
+        if !verbose {
+            assert!(stdout.contains("--verbose"));
+        }
         for repo in &repos {
+            if verbose {
+                let reference = git(
+                    repo,
+                    &[
+                        "for-each-ref",
+                        "--format=%(refname)",
+                        "refs/home-reset-backups/",
+                    ],
+                );
+                assert!(stdout.contains(&format!("git branch recovered-work {reference}")));
+            }
             assert_eq!(git(repo, &["rev-parse", "HEAD"]), f.new);
             assert_eq!(
                 git(
