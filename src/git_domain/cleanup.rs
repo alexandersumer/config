@@ -97,6 +97,7 @@ struct Selection {
     protected: BTreeSet<PathBuf>,
 }
 fn select(paths: &[PathBuf]) -> Result<Selection, String> {
+    let mut progress = presentation::Discovery::new("worktrees")?;
     let mut containers = Vec::new();
     let mut explicit = BTreeSet::new();
     let mut explicit_linked = BTreeSet::new();
@@ -104,6 +105,7 @@ fn select(paths: &[PathBuf]) -> Result<Selection, String> {
     let mut walked = BTreeSet::new();
     // Validate the entire scope before publication probes or mutation.
     for path in paths {
+        progress.update()?;
         let p = path
             .canonicalize()
             .map_err(|e| format!("{}: {e}", display(path)))?;
@@ -123,6 +125,7 @@ fn select(paths: &[PathBuf]) -> Result<Selection, String> {
     }
     let mut stack = containers.clone();
     while let Some(p) = stack.pop() {
+        progress.update()?;
         if runtime::cancelled() {
             return Err("Discovery interrupted".into());
         }
@@ -144,6 +147,7 @@ fn select(paths: &[PathBuf]) -> Result<Selection, String> {
     let mut candidates = Vec::new();
     let mut protected = BTreeSet::new();
     for (common, probe) in repos {
+        progress.update()?;
         let registrations = list(&probe)?;
         let primary = registrations[0].path.clone();
         // Git's first registration is primary, but independently verify it.
@@ -587,6 +591,7 @@ pub(crate) fn run(args: Args, json: bool) -> u8 {
 }
 fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
     use std::io::Write;
+    let started = Instant::now();
     let selected = select(&args.paths)?;
     let mut discard = BTreeSet::new();
     for p in &args.discard_local {
@@ -601,7 +606,6 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
         }
         discard.insert(p);
     }
-    let started = Instant::now();
     if !json || !selected.candidates.is_empty() {
         let mut overview: Box<dyn Write> = if json {
             Box::new(std::io::stderr())

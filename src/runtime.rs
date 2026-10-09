@@ -53,11 +53,82 @@ pub(crate) fn stop_group(child: &mut Child) -> Result<ExitStatus, String> {
     let result = unsafe { libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL) };
     if result != 0 {
         let error = io::Error::last_os_error();
-        if error.raw_os_error() != Some(libc::ESRCH) {
+        if error.raw_os_error() != Some(libc::ESRCH)
+            && !inert_group_permission_error(child.id(), &error)?
+        {
             return Err(format!("cannot terminate worker group: {error}"));
         }
     }
     child.wait().map_err(|e| e.to_string())
+}
+
+// Darwin's killpg skips zombies and returns EPERM when no live member remains.
+// Never suppress a permission error unless the process table proves that case.
+fn inert_group_permission_error(group: u32, error: &io::Error) -> Result<bool, String> {
+    #[cfg(target_os = "macos")]
+    if error.raw_os_error() == Some(libc::EPERM) {
+        return group_is_inert(group);
+    }
+    let _ = (group, error);
+    Ok(false)
+}
+
+#[cfg(target_os = "macos")]
+fn group_is_inert(group: u32) -> Result<bool, String> {
+    const PROC_PGRP_ONLY: u32 = 2; // sys/proc_info.h
+    let mut capacity = 64;
+    loop {
+        let mut pids = vec![0 as libc::pid_t; capacity];
+        let size = std::mem::size_of_val(pids.as_slice());
+        unsafe { *libc::__error() = 0 };
+        let bytes = unsafe {
+            libc::proc_listpids(PROC_PGRP_ONLY, group, pids.as_mut_ptr().cast(), size as i32)
+        };
+        if bytes < 0 || (bytes == 0 && io::Error::last_os_error().raw_os_error() != Some(0)) {
+            return Err(format!(
+                "cannot inspect worker group: {}",
+                io::Error::last_os_error()
+            ));
+        }
+        if bytes as usize % std::mem::size_of::<libc::pid_t>() != 0 {
+            return Err("cannot inspect worker group: incomplete process table".into());
+        }
+        if bytes as usize >= size {
+            if capacity >= 65_536 {
+                return Err("cannot inspect complete worker group: process table changed".into());
+            }
+            capacity *= 2;
+            continue;
+        }
+        for pid in pids
+            .into_iter()
+            .take(bytes as usize / std::mem::size_of::<libc::pid_t>())
+        {
+            let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+            let size = std::mem::size_of_val(&info) as i32;
+            let read = unsafe {
+                libc::proc_pidinfo(
+                    pid,
+                    libc::PROC_PIDTBSDINFO,
+                    0,
+                    (&mut info as *mut libc::proc_bsdinfo).cast(),
+                    size,
+                )
+            };
+            if read == size {
+                if info.pbi_pgid == group && info.pbi_status != libc::SZOMB {
+                    return Ok(false);
+                }
+            } else if read != 0 || io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH) {
+                return Err(format!(
+                    "cannot inspect worker group member {pid}: {}",
+                    io::Error::last_os_error()
+                ));
+            }
+            // proc_pidinfo returns ESRCH for zombies and members that exited.
+        }
+        return Ok(true);
+    }
 }
 
 pub(crate) fn cancel() {
@@ -125,4 +196,67 @@ pub(crate) fn capture(
         .and_then(|_| err.read_to_end(&mut stderr))
         .map_err(|e| e.to_string())?;
     Ok((code, stdout, stderr))
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::*;
+    use std::os::unix::process::CommandExt;
+
+    #[test]
+    fn exited_group_with_unreaped_descendant_is_not_a_permission_failure() {
+        struct Leader(std::process::Child);
+        impl Drop for Leader {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+        let mut owned = Leader(
+            std::process::Command::new("/bin/sleep")
+                .arg("30")
+                .process_group(0)
+                .spawn()
+                .unwrap(),
+        );
+        let leader = &mut owned.0;
+        let group = leader.id() as libc::pid_t;
+        assert!(!group_is_inert(group as u32).unwrap());
+        assert!(!inert_group_permission_error(
+            group as u32,
+            &io::Error::from_raw_os_error(libc::EPERM)
+        )
+        .unwrap());
+        let zombie = unsafe { libc::fork() };
+        assert!(zombie >= 0);
+        if zombie == 0 {
+            // Only async-signal-safe operations after fork in the test runner.
+            let joined = unsafe { libc::setpgid(0, group) };
+            unsafe { libc::_exit(if joined == 0 { 0 } else { 1 }) };
+        }
+        struct Reap(libc::pid_t);
+        impl Drop for Reap {
+            fn drop(&mut self) {
+                unsafe { libc::waitpid(self.0, std::ptr::null_mut(), 0) };
+            }
+        }
+        let _reap = Reap(zombie);
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        assert_eq!(
+            unsafe {
+                libc::waitid(
+                    libc::P_PID,
+                    zombie as _,
+                    &mut info,
+                    libc::WEXITED | libc::WNOWAIT,
+                )
+            },
+            0
+        );
+        leader.kill().unwrap();
+        leader.wait().unwrap();
+        assert_eq!(unsafe { libc::kill(-group, libc::SIGKILL) }, -1);
+        assert_eq!(io::Error::last_os_error().raw_os_error(), Some(libc::EPERM));
+        assert!(stop_group(leader).is_ok());
+    }
 }

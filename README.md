@@ -49,6 +49,10 @@ workctl git reset --remote upstream --branch release /path/to/repository
 workctl git reset --json /path/to/workspace
 ```
 
+Reset and cleanup announce discovery before probing repositories. Interactive terminals
+show discovery elapsed time; redirected output includes periodic discovery updates.
+The final elapsed time includes discovery as well as execution.
+
 A checkout or directory inside it selects its primary checkout. Containers recursively
 select primary checkouts, stopping at repositories and skipping directory symlinks.
 Overlapping scopes are deduplicated. Linked worktrees encountered in containers are

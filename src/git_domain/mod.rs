@@ -90,6 +90,7 @@ pub(crate) fn run(cli: ResetArgs, json: bool) -> u8 {
             return 1;
         }
     };
+    let started = std::time::Instant::now();
     match discover::select(&options.paths) {
         Ok(selection) if options.list => {
             let result = serde_json::json!({"schema_version":1,"operation":"git.reset.inspect",
@@ -125,7 +126,7 @@ pub(crate) fn run(cli: ResetArgs, json: bool) -> u8 {
                 0
             }
         }
-        Ok(selection) => supervisor::run(&options, selection),
+        Ok(selection) => supervisor::run(&options, selection, started),
         Err(e) => {
             report(&e);
             if json {

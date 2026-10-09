@@ -69,6 +69,7 @@ pub(super) fn repository(path: &Path) -> Result<Option<(Repo, bool)>, String> {
 }
 
 pub(super) fn select(paths: &[PathBuf]) -> Result<Selection, String> {
+    let mut progress = crate::presentation::Discovery::new("checkouts")?;
     let mut result = Selection {
         repos: vec![],
         excluded: BTreeSet::new(),
@@ -78,6 +79,7 @@ pub(super) fn select(paths: &[PathBuf]) -> Result<Selection, String> {
     // Prevalidate every explicit input, including worktrees hidden by overlapping roots.
     let mut roots = vec![];
     for path in paths {
+        progress.update()?;
         let root = path
             .canonicalize()
             .map_err(|e| format!("{}: {e}", display(path)))?;
@@ -101,6 +103,7 @@ pub(super) fn select(paths: &[PathBuf]) -> Result<Selection, String> {
     for root in roots {
         let mut stack = vec![root];
         while let Some(path) = stack.pop() {
+            progress.update()?;
             if supervisor::cancelled() {
                 return Err("Discovery interrupted".into());
             }

@@ -32,6 +32,61 @@ pub(crate) fn duration(duration: Duration) -> String {
         format!("{s}s")
     }
 }
+/// Selection has no known total yet, but must be visible before Git probes finish.
+pub(crate) struct Discovery {
+    bar: ProgressBar,
+    last: Instant,
+    start: Instant,
+}
+impl Discovery {
+    pub fn new(kind: &str) -> Result<Self, String> {
+        writeln!(io::stderr(), "Discovering {kind}…").map_err(|e| e.to_string())?;
+        let interactive =
+            io::stderr().is_terminal() && std::env::var_os("TERM").is_none_or(|v| v != "dumb");
+        let bar = ProgressBar::with_draw_target(
+            None,
+            if interactive {
+                ProgressDrawTarget::stderr()
+            } else {
+                ProgressDrawTarget::hidden()
+            },
+        );
+        bar.set_style(
+            ProgressStyle::with_template("  Discovery in progress · elapsed {human_elapsed}")
+                .expect("static discovery template")
+                .with_key(
+                    "human_elapsed",
+                    |state: &indicatif::ProgressState, writer: &mut dyn std::fmt::Write| {
+                        let _ = write!(writer, "{}", duration(state.elapsed()));
+                    },
+                ),
+        );
+        bar.enable_steady_tick(Duration::from_millis(100));
+        Ok(Self {
+            bar,
+            last: Instant::now(),
+            start: Instant::now(),
+        })
+    }
+    pub fn update(&mut self) -> Result<(), String> {
+        if self.bar.is_hidden() && self.last.elapsed() >= Duration::from_secs(15) {
+            writeln!(
+                io::stderr(),
+                "  Discovery in progress · elapsed {}",
+                duration(self.start.elapsed())
+            )
+            .map_err(|e| e.to_string())?;
+            self.last = Instant::now();
+        }
+        Ok(())
+    }
+}
+impl Drop for Discovery {
+    fn drop(&mut self) {
+        self.bar.finish_and_clear();
+    }
+}
+
 pub(crate) struct Progress {
     bar: ProgressBar,
     last: Instant,

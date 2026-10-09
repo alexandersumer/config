@@ -309,18 +309,22 @@ fn reset_startup_output_failure_removes_empty_diagnostics() {
     let f = Fixture::new();
     let runtime = f.temp.path().join("runtime");
     fs::create_dir(&runtime).unwrap();
-    let mut child = env(&mut Command::new(BIN))
+    // Close the reader before launch so the discovery announcement deterministically fails.
+    let (reader, writer) = std::os::unix::net::UnixStream::pair().unwrap();
+    drop(reader);
+    let out = env(&mut Command::new(BIN))
         .args(["git", "reset"])
         .arg(&f.repo)
         .env("TMPDIR", &runtime)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
+        .stderr(Stdio::from(std::os::fd::OwnedFd::from(writer)))
+        .output()
         .unwrap();
-    drop(child.stderr.take());
-    let out = child.wait_with_output().unwrap();
     assert_eq!(out.status.code(), Some(1), "{}", text(&out));
-    assert!(String::from_utf8_lossy(&out.stdout).contains("Git checkout reset"));
+    assert!(
+        out.stdout.is_empty(),
+        "startup must stop before discovery or reset: {}",
+        text(&out)
+    );
     assert_eq!(fs::read_dir(runtime).unwrap().count(), 0);
     f.unchanged();
 }
@@ -1232,7 +1236,7 @@ esac"#);
 }
 
 #[test]
-fn empty_cleanup_has_no_activity_and_preserves_exact_plan_results() {
+fn empty_cleanup_announces_discovery_without_execution_activity() {
     let root = tempfile::tempdir().unwrap();
     for apply in [false, true] {
         for json in [false, true] {
@@ -1246,7 +1250,12 @@ fn empty_cleanup_has_no_activity_and_preserves_exact_plan_results() {
             }
             let out = cmd.arg(root.path()).output().unwrap();
             assert!(out.status.success(), "{}", text(&out));
-            assert!(out.stderr.is_empty(), "{}", text(&out));
+            assert_eq!(
+                String::from_utf8_lossy(&out.stderr),
+                "Discovering worktrees…\n",
+                "{}",
+                text(&out)
+            );
             if json {
                 let r: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
                 assert_eq!(r["status"], if apply { "completed" } else { "planned" });
@@ -1309,4 +1318,92 @@ fn doctor_git_version_is_safe_in_human_output() {
     assert!(!out.stdout.contains(&0x1b));
     assert!(!out.stdout.contains(&b'\r'));
     assert!(String::from_utf8_lossy(&out.stdout).contains("\\u{1b}"));
+}
+
+#[test]
+fn discovery_is_visible_before_git_finishes_and_counts_toward_elapsed() {
+    for operation in [vec!["git", "reset"], vec!["git", "worktree", "clean"]] {
+        let f = Fixture::new();
+        let sentinel = f.temp.path().join("discovering");
+        let stderr = f.temp.path().join("stderr");
+        let bin = f.shim(&format!(
+            "if [ ! -f '{}' ]; then touch '{}'; sleep 2; fi",
+            sentinel.display(),
+            sentinel.display()
+        ));
+        let mut cmd = Command::new(BIN);
+        env(&mut cmd).arg("--json").args(&operation).arg(&f.repo);
+        with_shim(&mut cmd, &bin);
+        let child = cmd
+            .stdout(Stdio::piped())
+            .stderr(fs::File::create(&stderr).unwrap())
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !sentinel.exists() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let early = fs::read_to_string(&stderr).unwrap();
+        let out = child.wait_with_output().unwrap();
+        assert!(out.status.success(), "{}", text(&out));
+        assert!(
+            early.contains("Discovering"),
+            "discovery must be visible before its first Git probe completes: {early:?}"
+        );
+        let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert!(
+            result["summary"]["elapsed_seconds"].as_f64().unwrap() >= 2.0,
+            "elapsed must include discovery: {result}"
+        );
+    }
+}
+
+#[test]
+fn cancellation_during_discovery_reports_interruption_without_starting_mutation() {
+    for operation in [
+        vec!["git", "reset"],
+        vec!["git", "worktree", "clean", "--apply"],
+    ] {
+        let f = Fixture::new();
+        let sentinel = f.temp.path().join("discovering");
+        let bin = f.shim(&format!("touch '{}'; sleep 30", sentinel.display()));
+        let mut cmd = Command::new(BIN);
+        env(&mut cmd).arg("--json").args(&operation).arg(&f.repo);
+        with_shim(&mut cmd, &bin);
+        let mut child = cmd
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !sentinel.exists() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let reached_probe = sentinel.exists();
+        unsafe {
+            libc::kill(child.id() as i32, libc::SIGINT);
+        }
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while child.try_wait().unwrap().is_none() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let timed_out = child.try_wait().unwrap().is_none();
+        if timed_out {
+            child.kill().unwrap();
+        }
+        let out = child.wait_with_output().unwrap();
+        assert!(reached_probe && !timed_out, "{}", text(&out));
+        assert_eq!(out.status.code(), Some(130), "{}", text(&out));
+        let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(result["status"], "interrupted");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.contains("Discovering"), "{stderr}");
+        assert!(
+            !stderr.contains("Resetting checkouts")
+                && !stderr.contains("Revalidating and removing"),
+            "{stderr}"
+        );
+        f.unchanged();
+        assert_eq!(git(&f.repo, &["status", "--porcelain"]), "");
+    }
 }

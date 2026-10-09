@@ -229,8 +229,8 @@ fn execute(
     Ok((code, attempts, detail))
 }
 
-pub(super) fn run(options: &Options, selection: Selection) -> u8 {
-    match run_inner(options, selection) {
+pub(super) fn run(options: &Options, selection: Selection, started: Instant) -> u8 {
+    match run_inner(options, selection, started) {
         Ok(code) => code,
         Err(error) => {
             super::report(&error);
@@ -244,7 +244,7 @@ pub(super) fn run(options: &Options, selection: Selection) -> u8 {
         }
     }
 }
-fn run_inner(options: &Options, selection: Selection) -> Result<u8, String> {
+fn run_inner(options: &Options, selection: Selection, started: Instant) -> Result<u8, String> {
     let mut overview: Box<dyn Write> = if options.json {
         Box::new(io::stderr())
     } else {
@@ -255,16 +255,16 @@ fn run_inner(options: &Options, selection: Selection) -> Result<u8, String> {
     overview.flush().map_err(|e| e.to_string())?;
     drop(overview);
     let total = selection.repos.len();
-    let started = Instant::now();
     if total == 0 {
         if options.json {
             return Ok(crate::presentation::json(
-                &serde_json::json!({"schema_version":1,"operation":"git.reset","status":"completed","scope":crate::presentation::paths(&options.paths),"results":[],"excluded":crate::presentation::paths(&selection.excluded),"summary":{"succeeded":0,"failed":0,"cancelled":0,"elapsed_seconds":0.0}}),
+                &serde_json::json!({"schema_version":1,"operation":"git.reset","status":"completed","scope":crate::presentation::paths(&options.paths),"results":[],"excluded":crate::presentation::paths(&selection.excluded),"summary":{"succeeded":0,"failed":0,"cancelled":0,"elapsed_seconds":started.elapsed().as_secs_f64()}}),
             ));
         }
         writeln!(
             io::stdout(),
-            "Completed\n  No repositories to reset.\n  0 succeeded\n  0 failed\n  Elapsed 0s"
+            "Completed\n  No repositories to reset.\n  0 succeeded\n  0 failed\n  Elapsed {}",
+            crate::presentation::duration(started.elapsed())
         )
         .map_err(|e| e.to_string())?;
         return Ok(0);
