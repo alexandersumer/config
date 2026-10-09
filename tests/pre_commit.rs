@@ -153,8 +153,9 @@ fn pre_commit_validates_index_and_preserves_local_changes() {
     );
     assert!(
         String::from_utf8_lossy(&result.stderr).contains("Config validation failed"),
-        "{}",
-        String::from_utf8_lossy(&result.stderr)
+        "{}{}",
+        String::from_utf8_lossy(&result.stderr),
+        String::from_utf8_lossy(&result.stdout)
     );
     assert_eq!(fs::read(&skill).unwrap(), valid);
 }

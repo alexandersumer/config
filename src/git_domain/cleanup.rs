@@ -599,24 +599,28 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
         discard.insert(p);
     }
     let started = Instant::now();
-    let mut overview: Box<dyn Write> = if json {
-        Box::new(std::io::stderr())
-    } else {
-        Box::new(std::io::stdout())
-    };
-    writeln!(overview,"Git worktree cleanup{}\n\nScope          {}\nWorktrees      {}\nProtected      {} main checkouts\n",if args.apply {""}else{" preview"},args.paths.iter().map(|p| super::output::short(p)).collect::<Vec<_>>().join(" "),selected.candidates.len(),selected.protected.len()).map_err(|e|e.to_string())?;
-    overview.flush().map_err(|e| e.to_string())?;
-    drop(overview);
-    writeln!(
-        std::io::stderr(),
-        "{} worktrees…",
-        if args.apply {
-            "Revalidating and removing"
+    if !json || !selected.candidates.is_empty() {
+        let mut overview: Box<dyn Write> = if json {
+            Box::new(std::io::stderr())
         } else {
-            "Inspecting"
-        }
-    )
-    .map_err(|e| e.to_string())?;
+            Box::new(std::io::stdout())
+        };
+        writeln!(overview,"Git worktree cleanup{}\n\nScope          {}\nWorktrees      {}\nProtected      {} main checkouts\n",if args.apply {""}else{" preview"},args.paths.iter().map(|p| super::output::short(p)).collect::<Vec<_>>().join(" "),selected.candidates.len(),selected.protected.len()).map_err(|e|e.to_string())?;
+        overview.flush().map_err(|e| e.to_string())?;
+        drop(overview);
+    }
+    if !selected.candidates.is_empty() {
+        writeln!(
+            std::io::stderr(),
+            "{} worktrees…",
+            if args.apply {
+                "Revalidating and removing"
+            } else {
+                "Inspecting"
+            }
+        )
+        .map_err(|e| e.to_string())?;
+    }
     let mut progress = presentation::Progress::new(selected.candidates.len());
     let mut results = Vec::new();
     for candidate in &selected.candidates {
@@ -749,7 +753,12 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
         let mut out = std::io::stdout().lock();
         writeln!(
             out,
-            "\n{}\n  {} {}\n  {blocked} blocked",
+            "{}{}\n  {} {}\n  {blocked} blocked",
+            if selected.candidates.is_empty() {
+                ""
+            } else {
+                "\n"
+            },
             presentation::status(outcome, code != 0, false),
             if args.apply { removed } else { would_remove },
             if args.apply {

@@ -1045,7 +1045,8 @@ fn output_failure_after_workers_start_cancels_their_process_groups() {
     fs::write(dirty.join("file"), "dirty").unwrap();
     let marker = f.temp.path().join("started");
     let escaped = f.temp.path().join("escaped");
-    let dir=f.shim(&format!("case \"$PWD\" in *zz-dirty) case \"$*\" in *status*) sleep 2;; esac;; esac\nfor arg in \"$@\"; do if [ \"$arg\" = fetch ]; then touch '{}'; (sleep 4; touch '{}') & sleep 20; fi; done",marker.display(),escaped.display()));
+    let release = f.temp.path().join("release-descendant");
+    let dir=f.shim(&format!("case \"$PWD\" in *zz-dirty) case \"$*\" in *status*) sleep 2;; esac;; esac\nfor arg in \"$@\"; do if [ \"$arg\" = fetch ]; then touch '{}'; (while [ ! -e '{}' ]; do sleep 0.05; done; touch '{}') & sleep 20; fi; done",marker.display(),release.display(),escaped.display()));
     let mut cmd = f.cli(&f.workspace, &[]);
     f.with_shim(&mut cmd, &dir);
     let mut child = cmd
@@ -1057,6 +1058,8 @@ fn output_failure_after_workers_start_cancels_their_process_groups() {
     drop(child.stderr.take());
     let out = wait_child(child);
     assert_eq!(out.status.code(), Some(1));
+    assert!(!escaped.exists());
+    fs::write(release, "release\n").unwrap();
     thread::sleep(Duration::from_secs(4));
     assert!(!escaped.exists());
     assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.old);
@@ -1447,6 +1450,11 @@ fn successful_default_runs_remove_logs_and_preserve_recovery_refs() {
         );
         if !verbose {
             assert!(stdout.contains("--verbose"));
+            assert!(
+                String::from_utf8_lossy(&out.stderr).ends_with("\n\n"),
+                "{}",
+                text(&out)
+            );
         }
         for repo in &repos {
             if verbose {

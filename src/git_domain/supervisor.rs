@@ -377,6 +377,7 @@ fn run_inner(options: &Options, selection: Selection) -> Result<u8, String> {
         Ok(records.into_iter().map(|(_, r)| r).collect())
     })?;
     rendering.finish();
+    writeln!(io::stderr()).map_err(|e| e.to_string())?;
     if options.verbose {
         for record in &records {
             let text = fs::read(&record.log).unwrap_or_default();

@@ -520,9 +520,10 @@ fn deadline_and_cancellation_terminate_groups_without_retrying_cleanup() {
         // Release the sentinel only after shutdown; a slow concurrent check must not
         // make it fire while the subprocess is legitimately still running.
         let bin=f.shim(&format!("for arg in \"$@\"; do if [ \"$arg\" = fetch ]; then echo attempt >> '{}'; (touch '{}'; while [ ! -e '{}' ]; do sleep 0.05; done; touch '{}') & sleep 30; fi; done",count.display(),started.display(),release.display(),escaped.display()));
-        let mut cmd = f.command(&["--apply", "--timeout", if cancel { "30" } else { "1" }]);
+        let mut cmd = f.command(&["--apply", "--timeout", if cancel { "30" } else { "4" }]);
         cmd.arg(&f.worktree);
         with_shim(&mut cmd, &bin);
+        let execution = Instant::now();
         let child = cmd
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -544,6 +545,11 @@ fn deadline_and_cancellation_terminate_groups_without_retrying_cleanup() {
             }
         }
         let out = child.wait_with_output().unwrap();
+        assert!(
+            execution.elapsed() < Duration::from_secs(8),
+            "shutdown exceeded its bounded budget: {}",
+            text(&out)
+        );
         assert_eq!(
             out.status.code(),
             Some(if cancel { 130 } else { 1 }),
@@ -1109,4 +1115,84 @@ esac"#);
     );
     assert_eq!(git(&f.repo, &["status", "--porcelain"]), "");
     assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), head);
+}
+
+#[test]
+fn empty_cleanup_has_no_activity_and_preserves_exact_plan_results() {
+    let root = tempfile::tempdir().unwrap();
+    for apply in [false, true] {
+        for json in [false, true] {
+            let mut cmd = Command::new(BIN);
+            env(&mut cmd).args(["git", "worktree", "clean"]);
+            if apply {
+                cmd.arg("--apply");
+            }
+            if json {
+                cmd.arg("--json");
+            }
+            let out = cmd.arg(root.path()).output().unwrap();
+            assert!(out.status.success(), "{}", text(&out));
+            assert!(out.stderr.is_empty(), "{}", text(&out));
+            if json {
+                let r: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+                assert_eq!(r["status"], if apply { "completed" } else { "planned" });
+                assert_eq!(r["results"], serde_json::json!([]));
+                for key in [
+                    "removed",
+                    "would_remove",
+                    "blocked",
+                    "failed",
+                    "unverified",
+                    "errors",
+                    "interrupted",
+                ] {
+                    assert_eq!(r["summary"][key], 0);
+                }
+            } else {
+                let output = String::from_utf8_lossy(&out.stdout);
+                assert!(!output.contains("\n\n\n"), "{output}");
+                assert!(output.contains(if apply { "Completed" } else { "Removal plan" }));
+                assert!(output.contains(if apply { "0 removed" } else { "0 would remove" }));
+            }
+        }
+    }
+}
+
+#[test]
+fn doctor_startup_failure_still_emits_a_structured_result() {
+    let root = tempfile::tempdir().unwrap();
+    let deleted = root.path().join("deleted-cwd");
+    fs::create_dir(&deleted).unwrap();
+    let out = env(&mut Command::new("/bin/sh"))
+        .args([
+            "-c",
+            r#"cd "$1" && rmdir "$1" && exec "$2" doctor --json"#,
+            "probe",
+        ])
+        .arg(&deleted)
+        .arg(BIN)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+    let r: serde_json::Value =
+        serde_json::from_slice(&out.stdout).expect("failed doctor must emit one JSON result");
+    assert_eq!(r["schema_version"], 1);
+    assert_eq!(r["operation"], "doctor");
+    assert_eq!(r["status"], "failed");
+    assert!(r["error"].as_str().is_some_and(|e| !e.is_empty()));
+    assert!(!out.stdout.contains(&0x1b));
+}
+
+#[test]
+fn doctor_git_version_is_safe_in_human_output() {
+    let f = Fixture::new();
+    let bin = f.shim(r#"if [ "$1" = --version ]; then printf 'git version 2.54.0\033[31m\rforged\n'; exit 0; fi"#);
+    let mut cmd = Command::new(BIN);
+    env(&mut cmd).arg("doctor");
+    with_shim(&mut cmd, &bin);
+    let out = cmd.output().unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(!out.stdout.contains(&0x1b));
+    assert!(!out.stdout.contains(&b'\r'));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("\\u{1b}"));
 }
