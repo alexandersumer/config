@@ -2357,7 +2357,7 @@ fn pragmatic_recovery_deadlines_and_cancellation_preserve_work_and_release_locks
             "--apply",
             "--json",
             "--timeout",
-            if cancel { "30" } else { "4" },
+            if cancel { "30" } else { "8" },
         ])
         .arg(&f.worktree)
         .env("PROBE_STARTED", &started)
@@ -2365,14 +2365,48 @@ fn pragmatic_recovery_deadlines_and_cancellation_preserve_work_and_release_locks
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
         with_shim(&mut c, &shim);
-        let child = c.spawn().unwrap();
-        wait(&started);
+        let launched = Instant::now();
+        let mut child = c.spawn().unwrap();
+        // Allow real preflight under concurrent suite load, then exercise the
+        // hung recovery command. The public deadline and its reason stay asserted.
+        let startup_deadline = launched + Duration::from_secs(10);
+        while !started.exists() {
+            if child.try_wait().unwrap().is_some() {
+                panic!(
+                    "cleanup exited before the recovery probe: {}",
+                    text(&child.wait_with_output().unwrap())
+                );
+            }
+            if Instant::now() >= startup_deadline {
+                unsafe {
+                    libc::kill(child.id() as i32, libc::SIGINT);
+                }
+                panic!(
+                    "recovery probe did not start: {}",
+                    text(&child.wait_with_output().unwrap())
+                );
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
         if cancel {
             unsafe {
                 libc::kill(child.id() as i32, libc::SIGINT);
             }
         }
         let out = child.wait_with_output().unwrap();
+        assert!(
+            launched.elapsed() < Duration::from_secs(15),
+            "cleanup did not honor its bounded deadline"
+        );
+        assert!(
+            text(&out).contains(if cancel {
+                "Interrupted"
+            } else {
+                "Deadline exceeded"
+            }),
+            "{}",
+            text(&out)
+        );
         assert_eq!(
             out.status.code(),
             Some(if cancel { 130 } else { 1 }),
@@ -2390,4 +2424,343 @@ fn pragmatic_recovery_deadlines_and_cancellation_preserve_work_and_release_locks
         assert!(retry.status.success(), "{}", text(&retry));
         f.unchanged();
     }
+}
+
+#[test]
+fn cleanup_revalidates_state_after_the_final_filesystem_scan() {
+    for kind in ["commit", "masked", "operation"] {
+        let f = Fixture::new();
+        git(&f.worktree, &["checkout", "--detach"]);
+        let head = git(&f.worktree, &["rev-parse", "HEAD"]);
+        let shim = f.shim(r#"
+case " $* " in *' ls-files --stage -z '*)
+  n=0; [ ! -f "$PROBE_COUNT" ] || n=$(cat "$PROBE_COUNT")
+  n=$((n+1)); printf '%s' "$n" > "$PROBE_COUNT"
+  if [ "$n" = 4 ]; then
+    case "$PROBE_KIND" in
+      commit) "$REAL_GIT" -C "$PROBE_WORKTREE" -c user.name=Probe -c user.email=probe@example.test commit --allow-empty -m late-committed-work >/dev/null || exit $?;;
+      masked) "$REAL_GIT" -C "$PROBE_WORKTREE" update-index --assume-unchanged file || exit $?; printf precious > "$PROBE_WORKTREE/file";;
+      operation) touch "$PROBE_GIT_DIR/index.lock";;
+    esac
+  fi;;
+esac
+"#);
+        let real = Command::new("sh")
+            .args(["-c", "command -v git"])
+            .output()
+            .unwrap();
+        let mut c = Command::new(BIN);
+        env(&mut c);
+        c.args(["git", "worktree", "clean", "--apply", "--json"])
+            .arg(&f.worktree)
+            .env("REAL_GIT", String::from_utf8(real.stdout).unwrap().trim())
+            .env("PROBE_WORKTREE", &f.worktree)
+            .env(
+                "PROBE_GIT_DIR",
+                git(&f.worktree, &["rev-parse", "--absolute-git-dir"]),
+            )
+            .env("PROBE_KIND", kind)
+            .env("PROBE_COUNT", f.temp.path().join("scan-count"));
+        with_shim(&mut c, &shim);
+        let out = c.output().unwrap();
+        let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(result["summary"]["removed"], 0, "{kind}: {}", text(&out));
+        f.unchanged();
+        assert_eq!(
+            git(
+                &f.repo,
+                &["rev-parse", &format!("refs/workctl/cleanup/{head}")]
+            ),
+            head
+        );
+        if kind == "commit" {
+            assert_ne!(git(&f.worktree, &["rev-parse", "HEAD"]), head);
+            assert_eq!(out.status.code(), Some(1));
+        } else if kind == "masked" {
+            assert_eq!(
+                fs::read_to_string(f.worktree.join("file")).unwrap(),
+                "precious"
+            );
+            assert_eq!(result["summary"]["protected_worktrees"], 1);
+        } else {
+            assert_eq!(out.status.code(), Some(1));
+        }
+        assert_eq!(result["results"][0]["evidence"]["recovery_saved"], true);
+    }
+}
+
+#[test]
+fn git_services_run_without_leaking_the_coordination_lock() {
+    for kind in [
+        "reference-transaction",
+        "fsmonitor",
+        "removal-fsmonitor",
+        "removal-filter",
+    ] {
+        let f = Fixture::new();
+        let next = f.temp.path().join("next");
+        git(
+            &f.repo,
+            &["worktree", "add", "--detach", next.to_str().unwrap()],
+        );
+        let hook = f
+            .repo
+            .join(".git/hooks")
+            .join(if kind == "reference-transaction" {
+                kind
+            } else {
+                "fsmonitor"
+            });
+        if kind == "removal-filter" {
+            fs::write(f.worktree.join(".gitattributes"), "file filter=probe\n").unwrap();
+            git(&f.worktree, &["add", ".gitattributes"]);
+            git(&f.worktree, &["commit", "-m", "configure identity filter"]);
+            git(
+                &f.repo,
+                &["config", "filter.probe.clean", hook.to_str().unwrap()],
+            );
+            git(&f.repo, &["config", "filter.probe.required", "true"]);
+        } else if kind != "reference-transaction" {
+            git(
+                &f.repo,
+                &["config", "core.fsmonitor", hook.to_str().unwrap()],
+            );
+            git(&f.repo, &["config", "core.fsmonitorHookVersion", "2"]);
+        }
+        let release = f.temp.path().join("release-hook");
+        let done = f.temp.path().join("hook-done");
+        let ready = f.temp.path().join("hook-ready");
+        let removing = f.temp.path().join("removing");
+        let invoked = f.temp.path().join("hook-invoked");
+        let shim =
+            f.shim("case \" $* \" in *' worktree remove '*) touch \"$PROBE_REMOVING\";; esac");
+        struct HookCleanup {
+            release: PathBuf,
+            done: PathBuf,
+        }
+        impl Drop for HookCleanup {
+            fn drop(&mut self) {
+                let _ = fs::write(&self.release, "release");
+                for _ in 0..200 {
+                    if self.done.exists() {
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            }
+        }
+        let _cleanup = HookCleanup {
+            release: release.clone(),
+            done: done.clone(),
+        };
+        fs::write(
+            &hook,
+            r#"#!/usr/bin/env python3
+import os, sys, time
+kind = os.environ['PROBE_HOOK_KIND']
+updates = sys.stdin.read() if kind == 'reference-transaction' else ''
+trigger = kind == 'fsmonitor' or (kind in ('removal-fsmonitor', 'removal-filter') and os.path.exists(os.environ['PROBE_REMOVING'])) or (kind == 'reference-transaction' and sys.argv[1] == 'committed' and 'refs/workctl/cleanup/' in updates)
+if kind != 'reference-transaction':
+    with open(os.environ['PROBE_INVOKED'], 'w') as f: f.write('invoked')
+    sys.stdout.buffer.write(sys.stdin.buffer.read() if kind == 'removal-filter' else b'token\0/\0')
+    sys.stdout.buffer.flush()
+if trigger and not os.path.exists(os.environ['PROBE_READY']):
+    pid = os.fork()
+    if pid == 0:
+        os.setsid()
+        devnull = os.open('/dev/null', os.O_RDWR)
+        for fd in (0, 1, 2): os.dup2(devnull, fd)
+        with open(os.environ['PROBE_READY'], 'w') as f: f.write('ready')
+        while not os.path.exists(os.environ['PROBE_RELEASE']): time.sleep(0.01)
+        os.closerange(3, 65536)
+        with open(os.environ['PROBE_DONE'], 'w') as f: f.write('done')
+        os._exit(0)
+    deadline = time.monotonic() + 5
+    while not os.path.exists(os.environ['PROBE_READY']):
+        if time.monotonic() > deadline: sys.exit(1)
+        time.sleep(0.01)
+"#,
+        )
+        .unwrap();
+        fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+        let mut command = Command::new(BIN);
+        env(&mut command);
+        with_shim(&mut command, &shim);
+        let out = command
+            .args(["git", "worktree", "clean", "--apply", "--json"])
+            .arg(&f.worktree)
+            .env("PROBE_FILE", f.worktree.join("file"))
+            .env("PROBE_REMOVING", &removing)
+            .env("PROBE_INVOKED", &invoked)
+            .env("PROBE_HOOK_KIND", kind)
+            .env("PROBE_READY", &ready)
+            .env("PROBE_RELEASE", &release)
+            .env("PROBE_DONE", &done)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", text(&out));
+        wait(&ready);
+        if kind != "reference-transaction" {
+            assert!(invoked.exists());
+        }
+        assert!(removing.exists());
+        assert!(!f.worktree.exists());
+        fs::remove_file(&removing).unwrap();
+        let retry = env(&mut Command::new(BIN))
+            .args(["git", "worktree", "clean", "--json"])
+            .arg(&next)
+            .env("PROBE_FILE", f.worktree.join("file"))
+            .env("PROBE_REMOVING", &removing)
+            .env("PROBE_INVOKED", &invoked)
+            .env("PROBE_HOOK_KIND", kind)
+            .env("PROBE_READY", &ready)
+            .env("PROBE_RELEASE", &release)
+            .env("PROBE_DONE", &done)
+            .output()
+            .unwrap();
+        assert!(retry.status.success(), "{}", text(&retry));
+        assert!(next.join("file").is_file());
+    }
+}
+
+#[test]
+fn recovery_reference_hook_veto_prevents_deletion() {
+    let f = Fixture::new();
+    let hook = f.repo.join(".git/hooks/reference-transaction");
+    fs::write(&hook, "#!/bin/sh\nif [ \"$1\" = prepared ]; then echo 'repository policy denied recovery ref' >&2; exit 1; fi\n").unwrap();
+    fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+    let out = env(&mut Command::new(BIN))
+        .args(["git", "worktree", "clean", "--apply", "--json"])
+        .arg(&f.worktree)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+    assert!(
+        text(&out).contains("repository policy denied recovery ref"),
+        "{}",
+        text(&out)
+    );
+    assert!(git(&f.repo, &["for-each-ref", "refs/workctl/cleanup/"]).is_empty());
+    f.unchanged();
+}
+
+#[test]
+fn destructive_cleanup_keeps_the_lock_after_its_supervisor_is_killed() {
+    for orphan_deadline in [false, true] {
+        let f = Fixture::new();
+        let started = f.temp.path().join("removal-started");
+        let group = f.temp.path().join("removal-group");
+        let shim = f.shim("case \" $* \" in *' worktree remove '*) ps -o pgid= -p \"$$\" | tr -d ' ' > \"$PROBE_GROUP\"; touch \"$PROBE_STARTED\"; sleep 30;; esac");
+        struct GroupCleanup(PathBuf);
+        impl Drop for GroupCleanup {
+            fn drop(&mut self) {
+                if let Ok(text) = fs::read_to_string(&self.0) {
+                    if let Ok(pid) = text.trim().parse::<i32>() {
+                        unsafe {
+                            libc::kill(-pid, libc::SIGKILL);
+                        }
+                    }
+                }
+            }
+        }
+        let cleanup = GroupCleanup(group.clone());
+        let mut cmd = Command::new(BIN);
+        env(&mut cmd);
+        cmd.args(["git", "worktree", "clean", "--apply", "--json"])
+            .arg(&f.worktree)
+            .args(["--timeout", "8"])
+            .env("PROBE_GROUP", &group)
+            .env("PROBE_STARTED", &started)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        with_shim(&mut cmd, &shim);
+        let child = cmd.spawn().unwrap();
+        wait(&started);
+        unsafe {
+            libc::kill(child.id() as i32, libc::SIGKILL);
+        }
+        let out = child.wait_with_output().unwrap();
+        assert!(!out.status.success());
+        let probe = || {
+            env(&mut Command::new(BIN))
+                .args(["git", "worktree", "clean", "--json"])
+                .arg(&f.worktree)
+                .output()
+                .unwrap()
+        };
+        let busy = probe();
+        assert_eq!(busy.status.code(), Some(1), "{}", text(&busy));
+        assert!(
+            text(&busy).contains("Repository is busy"),
+            "{}",
+            text(&busy)
+        );
+        if orphan_deadline {
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            while !probe().status.success() {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "orphaned removal did not honor its deadline"
+                );
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
+        drop(cleanup);
+        std::thread::sleep(Duration::from_millis(100));
+        let retry = probe();
+        assert!(retry.status.success(), "{}", text(&retry));
+        f.unchanged();
+    }
+}
+
+#[test]
+fn cleanup_internal_worker_requires_supervisor_descriptors() {
+    let out = env(&mut Command::new(BIN))
+        .args([
+            "--internal-cleanup-worker",
+            "worktree",
+            "remove",
+            "--",
+            "/unused",
+        ])
+        .env_remove("WORKCTL_CLEANUP_LOCK")
+        .env_remove("WORKCTL_CLEANUP_TERMINAL")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+}
+
+#[test]
+fn cleanup_preserves_nested_data_created_during_final_git_probes() {
+    let f = Fixture::new();
+    fs::write(f.repo.join(".git/info/exclude"), "ignored/\n").unwrap();
+    fs::create_dir(f.worktree.join("ignored")).unwrap();
+    let shim = f.shim(
+        r#"
+case " $* " in *' ls-files -v -z '*)
+  n=0; [ ! -f "$PROBE_COUNT" ] || n=$(cat "$PROBE_COUNT")
+  n=$((n+1)); printf '%s' "$n" > "$PROBE_COUNT"
+  if [ "$n" = 8 ]; then
+    mkdir -p "$PROBE_WORKTREE/ignored/new/.git"
+    printf precious > "$PROBE_WORKTREE/ignored/new/.git/config"
+  fi;;
+esac
+"#,
+    );
+    let mut command = Command::new(BIN);
+    env(&mut command);
+    command
+        .args(["git", "worktree", "clean", "--apply", "--json"])
+        .arg(&f.worktree)
+        .env("PROBE_COUNT", f.temp.path().join("count"))
+        .env("PROBE_WORKTREE", &f.worktree);
+    with_shim(&mut command, &shim);
+    let out = command.output().unwrap();
+    let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(result["summary"]["removed"], 0, "{}", text(&out));
+    assert_eq!(
+        fs::read_to_string(f.worktree.join("ignored/new/.git/config")).unwrap(),
+        "precious"
+    );
+    f.unchanged();
 }

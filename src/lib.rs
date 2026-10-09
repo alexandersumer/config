@@ -16,6 +16,12 @@ pub fn run() -> std::process::ExitCode {
     if args.first().is_some_and(|a| a == "--internal-reset-worker") {
         return std::process::ExitCode::from(git_domain::worker(&args[1..]));
     }
+    if args
+        .first()
+        .is_some_and(|a| a == "--internal-cleanup-worker")
+    {
+        return std::process::ExitCode::from(git_domain::cleanup::worker(&args[1..]));
+    }
     if std::env::args_os().next().is_some_and(|p| {
         std::path::Path::new(&p)
             .file_name()

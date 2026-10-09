@@ -4,8 +4,8 @@ use crate::{presentation, runtime};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::io::Write;
-use std::os::fd::AsRawFd;
+use std::io::{Read, Seek, Write};
+use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::{ffi::OsStringExt, fs::MetadataExt, process::CommandExt};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -200,30 +200,202 @@ fn config_value(value: &[u8]) -> Result<Vec<u8>, String> {
     Ok(quoted)
 }
 
+/// Private destructive-command protocol. The worker, not Git, owns the flock.
+pub(crate) fn worker(args: &[OsString]) -> u8 {
+    let descriptor = |name| {
+        std::env::var(name)
+            .ok()
+            .and_then(|v| v.parse::<i32>().ok())
+            .filter(|&fd| fd > 2 && unsafe { libc::fcntl(fd, libc::F_GETFD) } != -1)
+    };
+    let Some(lock_fd) = descriptor("WORKCTL_CLEANUP_LOCK") else {
+        return 2;
+    };
+    let Some(terminal_fd) = descriptor("WORKCTL_CLEANUP_TERMINAL") else {
+        return 2;
+    };
+    let Some(timeout) = std::env::var("WORKCTL_CLEANUP_TIMEOUT_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|&v| v > 0 && v <= 86_400_000)
+    else {
+        return 2;
+    };
+    if lock_fd == terminal_fd
+        || unsafe { libc::getpgrp() != libc::getpid() }
+        || !matches!(args.len(), 4 | 5)
+        || args[0] != "worktree"
+        || args[1] != "remove"
+        || args[args.len() - 2] != "--"
+        || (args.len() == 5 && args[2] != "--force")
+    {
+        return 2;
+    }
+    // Set these before any exec: filters, hooks and filesystem monitors may
+    // intentionally outlive Git, but cannot retain repository coordination.
+    for fd in [lock_fd, terminal_fd] {
+        if unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) } == -1 {
+            return 2;
+        }
+    }
+    let lock = unsafe { fs::File::from_raw_fd(lock_fd) };
+    let mut terminal = unsafe { fs::File::from_raw_fd(terminal_fd) };
+    if !lock.metadata().is_ok_and(|m| m.is_file())
+        || !terminal.metadata().is_ok_and(|m| m.is_file())
+    {
+        return 2;
+    }
+    let Some(common) = std::env::var_os("WORKCTL_CLEANUP_COMMON") else {
+        return 2;
+    };
+    let matching = lock
+        .metadata()
+        .ok()
+        .zip(fs::metadata(PathBuf::from(common).join("repo-batch.lock")).ok())
+        .is_some_and(|(a, b)| a.dev() == b.dev() && a.ino() == b.ino());
+    if !matching {
+        return 2;
+    }
+    let deadline = Instant::now() + Duration::from_millis(timeout);
+    let cwd = match std::env::current_dir() {
+        Ok(p) => p,
+        Err(_) => return 1,
+    };
+    let _signals = match runtime::Signals::install() {
+        Ok(s) => s,
+        Err(_) => return 1,
+    };
+    let mut command = git::command(&cwd);
+    command
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .process_group(0);
+    let code = match command.spawn() {
+        Ok(mut child) => {
+            let code = loop {
+                match child.try_wait() {
+                    Ok(Some(status)) => break status.code().unwrap_or(1),
+                    Ok(None) => {}
+                    Err(e) => {
+                        eprintln!("Cannot wait for cleanup Git: {e}");
+                        break 1;
+                    }
+                }
+                if runtime::cancelled() {
+                    break 130;
+                }
+                if Instant::now() >= deadline {
+                    break 124;
+                }
+                std::thread::sleep(Duration::from_millis(2));
+            };
+            // Never kill the final lock owner. Even an uninterruptible Git
+            // filesystem operation must finish before exclusion is released.
+            let mut reported = false;
+            while let Err(error) = runtime::stop_group(&mut child) {
+                if !reported {
+                    eprintln!("Cleanup Git has not stopped; retaining repository lock: {error}");
+                    reported = true;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            code
+        }
+        Err(e) => {
+            eprintln!("Cannot launch cleanup Git: {e}");
+            1
+        }
+    };
+    // A terminal result means Git and its entire group are already inert.
+    if terminal.write_all(&i32::to_ne_bytes(code)).is_err() {
+        return 1;
+    }
+    code as u8
+}
+
 struct Session<'a> {
     args: &'a Args,
     deadline: Instant,
     lock_fd: i32,
+    common: &'a Path,
 }
 impl Session<'_> {
     fn call(&self, path: &Path, args: &[&OsStr]) -> Result<Vec<u8>, String> {
+        self.call_with_lock(path, args, false)
+    }
+    fn call_with_lock(
+        &self,
+        path: &Path,
+        args: &[&OsStr],
+        inherit_lock: bool,
+    ) -> Result<Vec<u8>, String> {
         let remaining = self
             .deadline
             .checked_duration_since(Instant::now())
             .ok_or("Deadline exceeded")?;
-        let mut cmd = git::command(path);
+        let mut terminal = tempfile::tempfile().map_err(|e| e.to_string())?;
+        let mut cmd = if inherit_lock {
+            // A dedicated process holds exclusion until the entire destructive
+            // group is stopped. Git and its hooks never receive the lock fd.
+            let mut worker =
+                std::process::Command::new(std::env::current_exe().map_err(|e| e.to_string())?);
+            worker
+                .arg("--internal-cleanup-worker")
+                .current_dir(path)
+                .env("WORKCTL_CLEANUP_LOCK", self.lock_fd.to_string())
+                .env("WORKCTL_CLEANUP_COMMON", self.common)
+                .env("WORKCTL_CLEANUP_TERMINAL", terminal.as_raw_fd().to_string())
+                .env(
+                    "WORKCTL_CLEANUP_TIMEOUT_MS",
+                    remaining.as_millis().to_string(),
+                );
+            worker
+        } else {
+            git::command(path)
+        };
         cmd.args(args);
-        // A killed supervisor cannot release the common lock while descendants run.
         let fd = self.lock_fd;
+        let terminal_fd = terminal.as_raw_fd();
         unsafe {
             cmd.pre_exec(move || {
-                if libc::fcntl(fd, libc::F_SETFD, 0) == -1 {
-                    return Err(std::io::Error::last_os_error());
+                for descriptor in [fd, terminal_fd] {
+                    if libc::fcntl(
+                        descriptor,
+                        libc::F_SETFD,
+                        if inherit_lock { 0 } else { libc::FD_CLOEXEC },
+                    ) == -1
+                    {
+                        return Err(std::io::Error::last_os_error());
+                    }
                 }
                 Ok(())
             });
         }
-        let (code, out, err) = runtime::capture(cmd, remaining, true)?;
+        let (mut code, out, err) = if inherit_lock {
+            runtime::capture_guarded(cmd, remaining)?
+        } else {
+            runtime::capture(cmd, remaining, true)?
+        };
+        if inherit_lock {
+            // The worker publishes a result only after its Git group is inert.
+            let worker_code = code;
+            terminal.rewind().map_err(|e| e.to_string())?;
+            let mut bytes = Vec::new();
+            terminal
+                .read_to_end(&mut bytes)
+                .map_err(|e| e.to_string())?;
+            code = i32::from_ne_bytes(
+                bytes
+                    .try_into()
+                    .map_err(|_| "Cleanup worker exited without a terminal result".to_string())?,
+            );
+            if code != worker_code {
+                return Err("Cleanup worker exited without a matching terminal result".into());
+            }
+            if code == 124 {
+                return Err("Deadline exceeded; process group terminated".into());
+            }
+        }
         if code != 0 {
             return Err(format!(
                 "git {} failed (exit {code}): {}",
@@ -502,12 +674,12 @@ impl Session<'_> {
         }
         Ok(())
     }
-    fn inspect(
+    fn local_state(
         &self,
         c: &Candidate,
         discard: bool,
         discard_ignored: bool,
-    ) -> Result<Snapshot, String> {
+    ) -> Result<(Snapshot, PathBuf), String> {
         let path = &c.registration.path;
         if c.registration.locked {
             return Err("worktree is locked; investigate and unlock explicitly".into());
@@ -557,26 +729,30 @@ impl Session<'_> {
         if !current.contains(&c.registration) {
             return Err("registration changed during inspection".into());
         }
-        for directory in [&own, &common] {
-            for marker in [
-                "index.lock",
-                "HEAD.lock",
-                "packed-refs.lock",
-                "shallow.lock",
-                "config.lock",
-                "MERGE_HEAD",
-                "CHERRY_PICK_HEAD",
-                "REVERT_HEAD",
-                "rebase-merge",
-                "rebase-apply",
-                "BISECT_LOG",
-                "sequencer",
-            ] {
-                if git::exists(&directory.join(marker))? {
-                    return Err(format!("Git lock or operation in progress: {marker}"));
+        let check_operations = || -> Result<(), String> {
+            for directory in [&own, &common] {
+                for marker in [
+                    "index.lock",
+                    "HEAD.lock",
+                    "packed-refs.lock",
+                    "shallow.lock",
+                    "config.lock",
+                    "MERGE_HEAD",
+                    "CHERRY_PICK_HEAD",
+                    "REVERT_HEAD",
+                    "rebase-merge",
+                    "rebase-apply",
+                    "BISECT_LOG",
+                    "sequencer",
+                ] {
+                    if git::exists(&directory.join(marker))? {
+                        return Err(format!("Git lock or operation in progress: {marker}"));
+                    }
                 }
             }
-        }
+            Ok(())
+        };
+        check_operations()?;
         let status = self.probe(
             path,
             &[
@@ -612,11 +788,50 @@ impl Session<'_> {
                 local_examples(&status, &flags)
             ));
         }
+        check_operations()?;
+        Ok((
+            Snapshot {
+                head,
+                status,
+                flags,
+                device: metadata.dev(),
+                inode: metadata.ino(),
+                force: discard,
+                recovery_ref: None,
+                recovery_saved: false,
+            },
+            own,
+        ))
+    }
+    fn inspect(
+        &self,
+        c: &Candidate,
+        discard: bool,
+        discard_ignored: bool,
+    ) -> Result<Snapshot, String> {
+        let (before, own) = self.local_state(c, discard, discard_ignored)?;
+        let path = &c.registration.path;
         let mut stack = vec![path.clone()];
+        let mut scanned = Vec::new();
         while let Some(dir) = stack.pop() {
             if runtime::cancelled() || Instant::now() >= self.deadline {
                 return Err("nested repository scan interrupted or timed out".into());
             }
+            let metadata = fs::symlink_metadata(&dir).map_err(|e| e.to_string())?;
+            if !metadata.is_dir() {
+                return Err("directory changed during filesystem inspection".into());
+            }
+            let stamp = |m: &fs::Metadata| {
+                (
+                    m.dev(),
+                    m.ino(),
+                    m.mtime(),
+                    m.mtime_nsec(),
+                    m.ctime(),
+                    m.ctime_nsec(),
+                )
+            };
+            scanned.push((dir.clone(), stamp(&metadata)));
             for entry in fs::read_dir(&dir).map_err(|e| e.to_string())? {
                 let entry = entry.map_err(|e| e.to_string())?;
                 if entry.file_name() == ".git" {
@@ -669,16 +884,39 @@ impl Session<'_> {
         if git::exists(&own.join("modules"))? {
             return Err("submodule repository data in worktree metadata is protected".into());
         }
-        Ok(Snapshot {
-            head,
-            status,
-            flags,
-            device: metadata.dev(),
-            inode: metadata.ino(),
-            force: discard,
-            recovery_ref: None,
-            recovery_saved: false,
-        })
+        // A large ignored directory scan can outlast a commit, an index change,
+        // or a new Git operation. Only return freshly revalidated local state.
+        let (after, _) = self.local_state(c, discard, discard_ignored)?;
+        if before != after {
+            return Err("worktree changed during filesystem inspection; refusing removal".into());
+        }
+        // The final Git probes can invoke hooks or filters. Preserve nested
+        // repository data created after its parent directory was scanned.
+        for (directory, before) in scanned {
+            if runtime::cancelled() || Instant::now() >= self.deadline {
+                return Err("filesystem revalidation interrupted or timed out".into());
+            }
+            let m = fs::symlink_metadata(directory).map_err(|e| e.to_string())?;
+            if !m.is_dir()
+                || before
+                    != (
+                        m.dev(),
+                        m.ino(),
+                        m.mtime(),
+                        m.mtime_nsec(),
+                        m.ctime(),
+                        m.ctime_nsec(),
+                    )
+            {
+                return Err(
+                    "directory changed during filesystem inspection; refusing removal".into(),
+                );
+            }
+        }
+        if git::exists(&own.join("modules"))? {
+            return Err("submodule repository data in worktree metadata is protected".into());
+        }
+        Ok(after)
     }
 }
 #[derive(PartialEq, Eq)]
@@ -800,6 +1038,7 @@ fn execute(
         args,
         deadline: Instant::now() + Duration::from_secs(args.timeout.into()),
         lock_fd: held.as_raw_fd(),
+        common: &candidate.common,
     };
     let mut first = session.inspect(candidate, discard, discard_ignored)?;
     if !preserve_commits {
@@ -839,15 +1078,15 @@ fn execute(
                 return Err("recovery ref points at different history; refusing removal".into());
             }
             if old.is_err() {
-                session.text(
+                // Creating a recovery pin cannot remove worktree data. Keep
+                // hooks and their vetoes, but don't let a detached hook service
+                // inherit our flock. Destructive commands still inherit it so
+                // killing the supervisor cannot release it before removal ends.
+                let zero = "0".repeat(first.head.len());
+                session.call_with_lock(
                     &candidate.primary,
-                    &[
-                        "update-ref",
-                        "--no-deref",
-                        &recovery,
-                        &first.head,
-                        &"0".repeat(first.head.len()),
-                    ],
+                    &["update-ref", "--no-deref", &recovery, &first.head, &zero].map(OsStr::new),
+                    false,
                 )?;
             }
             if session.text(&candidate.primary, &["rev-parse", "--verify", &recovery])?
@@ -884,7 +1123,7 @@ fn execute(
         }
         remove.push(OsStr::new("--"));
         remove.push(path.as_os_str());
-        let removal = session.call(&candidate.primary, &remove);
+        let removal = session.call_with_lock(&candidate.primary, &remove, true);
         let verification = git::exists(path).and_then(|exists| {
             session
                 .list(&candidate.primary)

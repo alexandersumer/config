@@ -200,9 +200,46 @@ pub(crate) fn interrupted() -> bool {
 /// Bound a command's lifetime and clean descendants before returning captures.
 /// Worker commands already belong to an enclosing supervised group.
 pub(crate) fn capture(
+    cmd: std::process::Command,
+    timeout: std::time::Duration,
+    own_group: bool,
+) -> Result<(i32, Vec<u8>, Vec<u8>), String> {
+    capture_inner(cmd, timeout, own_group, false)
+}
+
+/// A lock-owning supervisor must survive cancellation until its Git group is
+/// proven inert. Request shutdown without killing that final lock owner.
+pub(crate) fn capture_guarded(
+    cmd: std::process::Command,
+    timeout: std::time::Duration,
+) -> Result<(i32, Vec<u8>, Vec<u8>), String> {
+    capture_inner(cmd, timeout, true, true)
+}
+
+fn stop_guarded(child: &mut Child) -> Result<bool, String> {
+    if unsafe { libc::kill(child.id() as libc::pid_t, libc::SIGTERM) } != 0
+        && io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
+    {
+        return Err("Cannot request cleanup supervisor shutdown; repository remains locked".into());
+    }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+    loop {
+        if exited(child)? {
+            stop_group(child)?;
+            return Ok(true);
+        }
+        if std::time::Instant::now() >= deadline {
+            return Ok(false);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+}
+
+fn capture_inner(
     mut cmd: std::process::Command,
     timeout: std::time::Duration,
     own_group: bool,
+    guarded: bool,
 ) -> Result<(i32, Vec<u8>, Vec<u8>), String> {
     use std::io::{Read, Seek};
     use std::os::unix::process::CommandExt;
@@ -230,18 +267,34 @@ pub(crate) fn capture(
                 Ok(true) => break stop_group(&mut child)?.code().unwrap_or(1),
                 Ok(false) => {}
                 Err(e) => {
-                    let _ = stop_group(&mut child);
+                    if guarded {
+                        let _ = stop_guarded(&mut child);
+                    } else {
+                        let _ = stop_group(&mut child);
+                    }
                     return Err(e);
                 }
             }
             if cancelled() || std::time::Instant::now() >= deadline {
-                stop_group(&mut child)?;
-                return Err(if cancelled() {
-                    "Interrupted; process group terminated"
+                let stopped = if guarded {
+                    stop_guarded(&mut child)?
                 } else {
-                    "Deadline exceeded; process group terminated"
-                }
-                .into());
+                    stop_group(&mut child)?;
+                    true
+                };
+                let reason = if cancelled() {
+                    "Interrupted"
+                } else {
+                    "Deadline exceeded"
+                };
+                return Err(format!(
+                    "{reason}; {}",
+                    if stopped {
+                        "process group terminated"
+                    } else {
+                        "Git termination requested; repository remains locked until its worker stops"
+                    }
+                ));
             }
             std::thread::sleep(std::time::Duration::from_millis(2));
         }
