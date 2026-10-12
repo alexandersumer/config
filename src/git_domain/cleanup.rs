@@ -1,6 +1,7 @@
 //! Conservative linked-worktree policy. Preview never removes files or registrations.
 use super::{discover, display, git, git::diagnostic, lock};
 use crate::{presentation, runtime};
+use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::{OsStr, OsString};
 use std::fs;
@@ -8,6 +9,10 @@ use std::io::{Read, Seek, Write};
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::{ffi::OsStringExt, fs::MetadataExt, process::CommandExt};
 use std::path::{Path, PathBuf};
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Mutex,
+};
 use std::time::{Duration, Instant};
 
 #[derive(Debug, clap::Args)]
@@ -36,6 +41,9 @@ pub(crate) struct Args {
     /// Deadline per inspection or removal (1-86400 seconds); cleanup never retries
     #[arg(long, default_value_t=300, value_parser=clap::value_parser!(u32).range(1..=86_400), value_name="SECONDS")]
     timeout: u32,
+    /// Concurrent worktrees (1-32); repositories remain exclusively locked
+    #[arg(long, default_value_t=4, value_parser=clap::value_parser!(u32).range(1..=32), value_name="N")]
+    jobs: u32,
     /// Show successful Git diagnostic output on stderr
     #[arg(short, long)]
     verbose: bool,
@@ -313,11 +321,41 @@ pub(crate) fn worker(args: &[OsString]) -> u8 {
     code as u8
 }
 
+struct Repository {
+    lock: fs::File,
+    recovery: Mutex<()>,
+}
+#[derive(Default)]
+struct Timings {
+    inspection: Cell<f64>,
+    recovery: Cell<f64>,
+    removal: Cell<f64>,
+    inspections: Cell<usize>,
+}
+struct PhaseTimer<'a> {
+    started: Instant,
+    elapsed: &'a Cell<f64>,
+}
+impl<'a> PhaseTimer<'a> {
+    fn new(elapsed: &'a Cell<f64>) -> Self {
+        Self {
+            started: Instant::now(),
+            elapsed,
+        }
+    }
+}
+impl Drop for PhaseTimer<'_> {
+    fn drop(&mut self) {
+        self.elapsed
+            .set(self.elapsed.get() + self.started.elapsed().as_secs_f64());
+    }
+}
 struct Session<'a> {
     args: &'a Args,
     deadline: Instant,
     lock_fd: i32,
     common: &'a Path,
+    timings: &'a Timings,
 }
 impl Session<'_> {
     fn call(&self, path: &Path, args: &[&OsStr]) -> Result<Vec<u8>, String> {
@@ -809,6 +847,10 @@ impl Session<'_> {
         discard: bool,
         discard_ignored: bool,
     ) -> Result<Snapshot, String> {
+        let _timing = PhaseTimer::new(&self.timings.inspection);
+        self.timings
+            .inspections
+            .set(self.timings.inspections.get() + 1);
         let (before, own) = self.local_state(c, discard, discard_ignored)?;
         let path = &c.registration.path;
         let mut stack = vec![path.clone()];
@@ -1029,16 +1071,18 @@ fn execute(
     discard: bool,
     discard_ignored: bool,
     preserve_commits: bool,
+    repository: &Repository,
+    timings: &Timings,
 ) -> Result<Snapshot, Failure> {
     if runtime::cancelled() {
         return Err("Interrupted before inspection".into());
     }
-    let held = lock::acquire(&candidate.common)?;
     let session = Session {
         args,
         deadline: Instant::now() + Duration::from_secs(args.timeout.into()),
-        lock_fd: held.as_raw_fd(),
+        lock_fd: repository.lock.as_raw_fd(),
         common: &candidate.common,
+        timings,
     };
     let mut first = session.inspect(candidate, discard, discard_ignored)?;
     if !preserve_commits {
@@ -1065,41 +1109,49 @@ fn execute(
             immediate
         };
         if preserve_commits {
-            let recovery = format!("refs/workctl/cleanup/{}", first.head);
-            // Atomic create-or-verify: never overwrite an existing recovery ref.
-            if !session
-                .text(
-                    &candidate.primary,
-                    &["for-each-ref", "--format=%(symref)", &recovery],
-                )?
-                .trim()
-                .is_empty()
             {
-                return Err("recovery ref is symbolic; refusing removal".into());
+                let _timing = PhaseTimer::new(&timings.recovery);
+                let _recovery = repository
+                    .recovery
+                    .lock()
+                    .map_err(|_| "repository recovery coordination failed")?;
+                let recovery = format!("refs/workctl/cleanup/{}", first.head);
+                // Atomic create-or-verify: never overwrite an existing recovery ref.
+                if !session
+                    .text(
+                        &candidate.primary,
+                        &["for-each-ref", "--format=%(symref)", &recovery],
+                    )?
+                    .trim()
+                    .is_empty()
+                {
+                    return Err("recovery ref is symbolic; refusing removal".into());
+                }
+                let old = session.text(&candidate.primary, &["rev-parse", "--verify", &recovery]);
+                if old.as_ref().is_ok_and(|head| head != &first.head) {
+                    return Err("recovery ref points at different history; refusing removal".into());
+                }
+                if old.is_err() {
+                    // Creating a recovery pin cannot remove worktree data. Keep
+                    // hooks and their vetoes, but don't let a detached hook service
+                    // inherit our flock. Destructive commands still inherit it so
+                    // killing the supervisor cannot release it before removal ends.
+                    let zero = "0".repeat(first.head.len());
+                    session.call_with_lock(
+                        &candidate.primary,
+                        &["update-ref", "--no-deref", &recovery, &first.head, &zero]
+                            .map(OsStr::new),
+                        false,
+                    )?;
+                }
+                if session.text(&candidate.primary, &["rev-parse", "--verify", &recovery])?
+                    != first.head
+                {
+                    return Err("recovery ref did not verify; refusing removal".into());
+                }
+                first.recovery_ref = Some(recovery);
+                first.recovery_saved = true;
             }
-            let old = session.text(&candidate.primary, &["rev-parse", "--verify", &recovery]);
-            if old.as_ref().is_ok_and(|head| head != &first.head) {
-                return Err("recovery ref points at different history; refusing removal".into());
-            }
-            if old.is_err() {
-                // Creating a recovery pin cannot remove worktree data. Keep
-                // hooks and their vetoes, but don't let a detached hook service
-                // inherit our flock. Destructive commands still inherit it so
-                // killing the supervisor cannot release it before removal ends.
-                let zero = "0".repeat(first.head.len());
-                session.call_with_lock(
-                    &candidate.primary,
-                    &["update-ref", "--no-deref", &recovery, &first.head, &zero].map(OsStr::new),
-                    false,
-                )?;
-            }
-            if session.text(&candidate.primary, &["rev-parse", "--verify", &recovery])?
-                != first.head
-            {
-                return Err("recovery ref did not verify; refusing removal".into());
-            }
-            first.recovery_ref = Some(recovery);
-            first.recovery_saved = true;
             // Saving a ref is another subprocess boundary. Recheck local state
             // afterwards so a commit or edit made during recovery cannot be lost.
             let final_state = match session.inspect(candidate, discard, discard_ignored) {
@@ -1127,7 +1179,10 @@ fn execute(
         }
         remove.push(OsStr::new("--"));
         remove.push(path.as_os_str());
-        let removal = session.call_with_lock(&candidate.primary, &remove, true);
+        let removal = {
+            let _timing = PhaseTimer::new(&timings.removal);
+            session.call_with_lock(&candidate.primary, &remove, true)
+        };
         let verification = git::exists(path).and_then(|exists| {
             session
                 .list(&candidate.primary)
@@ -1339,7 +1394,7 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
         } else {
             Box::new(std::io::stdout())
         };
-        writeln!(overview,"Git worktree cleanup{}\n\nScope          {}\nWorktrees      {}\nProtected      {} main checkouts\n",if args.apply {""}else{" preview"},args.paths.iter().map(|p| super::output::short(p)).collect::<Vec<_>>().join(" "),selected.candidates.len(),selected.protected.len()).map_err(|e|e.to_string())?;
+        writeln!(overview,"Git worktree cleanup{}\n\nScope          {}\nWorktrees      {}\nProtected      {} main checkouts\nWorkers        {}\n",if args.apply {""}else{" preview"},args.paths.iter().map(|p| super::output::short(p)).collect::<Vec<_>>().join(" "),selected.candidates.len(),selected.protected.len(),(args.jobs as usize).min(selected.candidates.len())).map_err(|e|e.to_string())?;
         overview.flush().map_err(|e| e.to_string())?;
         drop(overview);
     }
@@ -1355,48 +1410,71 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
         )
         .map_err(|e| e.to_string())?;
     }
+    let workers = (args.jobs as usize).min(selected.candidates.len());
+    let mut repositories = BTreeMap::new();
+    for candidate in &selected.candidates {
+        repositories
+            .entry(candidate.common.clone())
+            .or_insert_with(|| {
+                lock::acquire(&candidate.common).map(|lock| Repository {
+                    lock,
+                    recovery: Mutex::new(()),
+                })
+            });
+    }
     let mut progress = presentation::Progress::new(selected.candidates.len());
     let mut results = Vec::new();
-    for candidate in &selected.candidates {
-        let path = &candidate.registration.path;
-        let action = std::thread::scope(|scope| -> Result<Snapshot, Failure> {
-            let (tx, rx) = std::sync::mpsc::channel();
-            let discard = discard.contains(path);
-            let discard_ignored = !args.strict || discard_ignored.contains(path);
-            let preserve_commits = !args.strict || preserve_commits.contains(path);
+    let mut result_order = Vec::new();
+    let next = AtomicUsize::new(0);
+    std::thread::scope(|scope| -> Result<(), String> {
+        let next = &next;
+        let (tx, rx) = std::sync::mpsc::channel();
+        for _ in 0..workers {
+            let tx = tx.clone();
+            let selected = &selected;
+            let repositories = &repositories;
+            let discard = &discard;
+            let discard_ignored = &discard_ignored;
+            let preserve_commits = &preserve_commits;
             scope.spawn(move || {
-                let _ = tx.send(execute(
-                    args,
-                    candidate,
-                    discard,
-                    discard_ignored,
-                    preserve_commits,
-                ));
+                loop {
+                    let index = next.fetch_add(1, Ordering::Relaxed);
+                    let Some(candidate) = selected.candidates.get(index) else { break };
+                    let path = &candidate.registration.path;
+                    let started = Instant::now();
+                    let timings = Timings::default();
+                    let action = match &repositories[&candidate.common] {
+                        Ok(repository) => execute(args, candidate, discard.contains(path),
+                            !args.strict || discard_ignored.contains(path),
+                            !args.strict || preserve_commits.contains(path), repository, &timings),
+                        Err(error) => Err(Failure::from(error.clone())),
+                    };
+                    let timing = serde_json::json!({"elapsed_seconds":started.elapsed().as_secs_f64(),
+                        "inspection_seconds":timings.inspection.get(), "inspection_count":timings.inspections.get(),
+                        "recovery_seconds":timings.recovery.get(), "removal_seconds":timings.removal.get()});
+                    if tx.send((index, action, timing)).is_err() { break }
+                }
             });
-            loop {
-                if let Err(e) = progress.update(results.len(), 1) {
-                    runtime::cancel();
-                    return Err(Failure {
-                        status: "unverified",
-                        reason: e,
-                        evidence: None,
-                    });
-                }
-                match rx.recv_timeout(Duration::from_millis(100)) {
-                    Ok(result) => return result,
-                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-                    Err(e) => {
-                        runtime::cancel();
-                        return Err(Failure {
-                            status: "unverified",
-                            reason: format!("cleanup worker reporting failed: {e}"),
-                            evidence: None,
-                        });
+        }
+        drop(tx);
+        let outcome = (|| -> Result<(), String> {
+            for _ in 0..selected.candidates.len() {
+                let (index, action, timing) = loop {
+                    progress.update(
+                        results.len(),
+                        workers.min(selected.candidates.len() - results.len()),
+                    )?;
+                    match rx.recv_timeout(Duration::from_millis(100)) {
+                        Ok(result) => break result,
+                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                        Err(error) => {
+                            return Err(format!("cleanup worker reporting failed: {error}"))
+                        }
                     }
-                }
-            }
-        });
-        let metadata = action.as_ref().map(Some).unwrap_or_else(|e| e.evidence.as_ref()).map(|snapshot| {
+                };
+                let candidate = &selected.candidates[index];
+                let path = &candidate.registration.path;
+                let metadata = action.as_ref().map(Some).unwrap_or_else(|e| e.evidence.as_ref()).map(|snapshot| {
             let restore = snapshot.recovery_ref.as_ref().map(|recovery| {
                 [OsString::from("git"), OsString::from("-C"), candidate.primary.as_os_str().to_owned(), OsString::from("worktree"), OsString::from("add"), OsString::from("--detach"), path.as_os_str().to_owned(), OsString::from(recovery)]
                     .iter().map(|arg| shell_arg(arg)).collect::<Vec<_>>().join(" ")
@@ -1411,98 +1489,115 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
                 "restore_command":restore
             })
         });
-        let (status, reason) = match action {
-            Ok(_) => (
-                if args.apply {
-                    "removed"
-                } else {
-                    "would remove"
-                },
-                None,
-            ),
-            Err(e) => {
-                let protected =
-                    !args.strict && e.status == "blocked" && e.reason.starts_with("local data (");
-                (
-                    if runtime::cancelled() && e.status == "blocked" {
-                        "interrupted"
-                    } else if protected {
-                        "protected"
-                    } else {
-                        e.status
-                    },
-                    Some(if protected {
-                        e.reason.replacen(
-                            " requires --discard-local PATH",
-                            "; local work left in place",
-                            1,
+                let (status, reason) = match action {
+                    Ok(_) => (
+                        if args.apply {
+                            "removed"
+                        } else {
+                            "would remove"
+                        },
+                        None,
+                    ),
+                    Err(e) => {
+                        let protected = !args.strict
+                            && e.status == "blocked"
+                            && e.reason.starts_with("local data (");
+                        (
+                            if runtime::cancelled() && e.status == "blocked" {
+                                "interrupted"
+                            } else if protected {
+                                "protected"
+                            } else {
+                                e.status
+                            },
+                            Some(if protected {
+                                e.reason.replacen(
+                                    " requires --discard-local PATH",
+                                    "; local work left in place",
+                                    1,
+                                )
+                            } else {
+                                e.reason
+                            }),
                         )
-                    } else {
-                        e.reason
-                    }),
-                )
+                    }
+                };
+                let next = next_step(
+                    args,
+                    path,
+                    status,
+                    reason.as_deref(),
+                    discard.contains(path),
+                    discard_ignored.contains(path),
+                    json,
+                );
+                let mut detail = format!(
+                    "  {}: {}{}",
+                    presentation::status(status, reason.is_some() && status != "protected", json),
+                    display(path),
+                    reason
+                        .as_ref()
+                        .map(|e| e
+                            .lines()
+                            .map(|line| format!("\n    {}", display(line)))
+                            .collect::<String>())
+                        .unwrap_or_default()
+                );
+                if let Some(evidence) = &metadata {
+                    if let Some(recovery) = evidence["recovery_ref"].as_str() {
+                        detail.push_str(&format!(
+                            "\n    {}: {recovery}\n    Local files: {}",
+                            if args.apply {
+                                "Recovery ref saved"
+                            } else {
+                                "Recovery ref planned"
+                            },
+                            evidence["local_data"].as_str().unwrap_or("unknown")
+                        ));
+                    }
+                }
+                if args.verbose {
+                    detail.push_str(&format!("\n    Timing: inspection {:.2}s ({} scans), recovery {:.2}s, removal {:.2}s",
+                timing["inspection_seconds"].as_f64().unwrap_or(0.0), timing["inspection_count"],
+                timing["recovery_seconds"].as_f64().unwrap_or(0.0), timing["removal_seconds"].as_f64().unwrap_or(0.0)));
+                    if let Some(restore) = metadata
+                        .as_ref()
+                        .and_then(|e| e["restore_command"].as_str())
+                    {
+                        detail.push_str(&format!("\n    Restore committed files: {restore}"));
+                    }
+                }
+                if let Some(next) = &next {
+                    detail.push_str(&format!(
+                        "\n    Next: {}",
+                        next["command"]
+                            .as_str()
+                            .ok_or("invalid next-step command")?
+                    ));
+                }
+                // Permanent rows preserve full deletion paths and block reasons.
+                if json {
+                    progress.message(&detail)?;
+                }
+                if !json {
+                    progress.result(&detail)?;
+                }
+                results.push(serde_json::json!({"path":path.to_string_lossy(),"path_bytes":presentation::path_bytes(path),"status":status,"reason":reason,"discard_local":discard.contains(path),"discard_ignored":!args.strict || discard_ignored.contains(path),"preserve_commits":!args.strict || preserve_commits.contains(path),"evidence":metadata,"next_step":next,"timing":timing}));
+                result_order.push(index);
             }
-        };
-        let next = next_step(
-            args,
-            path,
-            status,
-            reason.as_deref(),
-            discard.contains(path),
-            discard_ignored.contains(path),
-            json,
-        );
-        let mut detail = format!(
-            "  {}: {}{}",
-            presentation::status(status, reason.is_some() && status != "protected", json),
-            display(path),
-            reason
-                .as_ref()
-                .map(|e| e
-                    .lines()
-                    .map(|line| format!("\n    {}", display(line)))
-                    .collect::<String>())
-                .unwrap_or_default()
-        );
-        if let Some(evidence) = &metadata {
-            if let Some(recovery) = evidence["recovery_ref"].as_str() {
-                detail.push_str(&format!(
-                    "\n    {}: {recovery}\n    Local files: {}",
-                    if args.apply {
-                        "Recovery ref saved"
-                    } else {
-                        "Recovery ref planned"
-                    },
-                    evidence["local_data"].as_str().unwrap_or("unknown")
-                ));
-            }
+            Ok(())
+        })();
+        if outcome.is_err() {
+            runtime::cancel();
         }
-        if args.verbose {
-            if let Some(restore) = metadata
-                .as_ref()
-                .and_then(|e| e["restore_command"].as_str())
-            {
-                detail.push_str(&format!("\n    Restore committed files: {restore}"));
-            }
-        }
-        if let Some(next) = &next {
-            detail.push_str(&format!(
-                "\n    Next: {}",
-                next["command"]
-                    .as_str()
-                    .ok_or("invalid next-step command")?
-            ));
-        }
-        // Permanent rows preserve full deletion paths and block reasons.
-        if json {
-            progress.message(&detail)?;
-        }
-        if !json {
-            progress.result(&detail)?;
-        }
-        results.push(serde_json::json!({"path":path.to_string_lossy(),"path_bytes":presentation::path_bytes(path),"status":status,"reason":reason,"discard_local":discard.contains(path),"discard_ignored":!args.strict || discard_ignored.contains(path),"preserve_commits":!args.strict || preserve_commits.contains(path),"evidence":metadata,"next_step":next}));
-        progress.update(results.len(), 0)?;
-    }
+        outcome
+    })?;
+    let mut ordered = result_order.into_iter().zip(results).collect::<Vec<_>>();
+    ordered.sort_by_key(|(index, _)| *index);
+    let results = ordered
+        .into_iter()
+        .map(|(_, result)| result)
+        .collect::<Vec<_>>();
     progress.finish();
     let removed = results.iter().filter(|r| r["status"] == "removed").count();
     let would_remove = results
@@ -1548,7 +1643,7 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
     };
     if json {
         if presentation::json(
-            &serde_json::json!({"schema_version":2,"operation":"git.worktree.clean","status":status,"apply":args.apply,"policy":if args.strict {"strict"}else{"pragmatic"},"scope":presentation::paths(&args.paths),"protected":presentation::paths(&selected.protected),"results":results,"summary":{"removed":removed,"would_remove":would_remove,"protected_worktrees":protected_worktrees,"blocked":blocked,"failed":failed,"unverified":unverified,"errors":errors,"interrupted":interrupted,"elapsed_seconds":started.elapsed().as_secs_f64()}}),
+            &serde_json::json!({"schema_version":2,"operation":"git.worktree.clean","status":status,"apply":args.apply,"policy":if args.strict {"strict"}else{"pragmatic"},"scope":presentation::paths(&args.paths),"protected":presentation::paths(&selected.protected),"results":results,"summary":{"removed":removed,"would_remove":would_remove,"protected_worktrees":protected_worktrees,"workers":workers,"blocked":blocked,"failed":failed,"unverified":unverified,"errors":errors,"interrupted":interrupted,"elapsed_seconds":started.elapsed().as_secs_f64()}}),
         ) != 0
         {
             return Ok(1);

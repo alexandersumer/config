@@ -35,7 +35,7 @@ configuration removes the retired function and alias and refreshes command hashe
 
 Every public command has Clap-generated help, version information, and examples.
 Use `--` before paths beginning with a dash. Git options belong to their operation:
-`--jobs` applies to reset, and `--apply` belongs to cleanup. No paths means `.`;
+`--jobs` applies to reset and cleanup, and `--apply` belongs to cleanup. No paths means `.`;
 there are no hardcoded workspace roots. Help and completions require no Git access.
 Exit codes are 0 for success, 1 for operational failure or blocked cleanup,
 2 for invalid usage, and 130 for interruption.
@@ -79,6 +79,25 @@ safety refusals are not retried. There is no transaction or rollback across chec
 fetches, backups, switches, and upstream changes may persist after later failure.
 
 ### Linked-worktree cleanup
+
+Cleanup runs up to four worktrees concurrently by default; `--jobs N` accepts 1–32.
+Worktrees from the same repository share one exclusive coordination lock for the
+invocation. Recovery-ref writes are serialized within each repository; inspections
+and native Git removals run concurrently. Other workctl invocations remain excluded
+until the batch finishes. Each removal still performs its own final safety inspection.
+JSON reports the worker count and per-worktree inspection, recovery, and removal
+timings; `--verbose` prints those timings. JSON results retain discovery order even
+when worktrees finish out of order.
+
+Measure complete cleanup on dependency-heavy disposable worktrees with:
+
+```sh
+python3 examples/cleanup_benchmark.py --candidate target/release/workctl \
+  --baseline /path/to/previous/workctl --output /tmp/cleanup-benchmark.json
+```
+
+The benchmark compares worker counts on fresh worktrees sharing one repository and
+verifies recovery refs, protected local work, primary checkout state, and removal.
 
 The default is an exact removal plan. `--apply` executes eligible removals without
 an interactive question. A container scope selects registered linked worktrees

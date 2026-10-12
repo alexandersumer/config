@@ -609,9 +609,24 @@ fn fetch_timeout_cancellation_and_normal_completion_reap_descendants() {
         let f = Fixture::new();
         let marker = f.temp.path().join("started");
         let escaped = f.temp.path().join("escaped");
-        let script = format!("for arg in \"$@\"; do\n if [ \"$arg\" = fetch ]; then\n  (sleep 5; touch '{}') &\n  echo $$ > '{}'\n  {}\n fi\ndone", escaped.display(), marker.display(), if mode == "normal" { ":" } else { "sleep 20" });
+        let descendant = f.temp.path().join("descendant");
+        let release = f.temp.path().join("release-descendant");
+        struct Release(PathBuf);
+        impl Drop for Release {
+            fn drop(&mut self) {
+                let _ = fs::write(&self.0, "release");
+            }
+        }
+        let _release = Release(release.clone());
+        // Exercise a slow target lookup without expiring before the fetch fixture starts.
+        let script = format!(
+            "for arg in \"$@\"; do\n if [ \"$arg\" = ls-remote ]; then {} fi\n if [ \"$arg\" = fetch ]; then\n  (n=0; while [ ! -e '{}' ] && [ \"$n\" -lt 400 ]; do sleep 0.05; n=$((n+1)); done; [ ! -e '{}' ] || touch '{}') &\n  echo $! > '{}'\n  echo $$ > '{}'\n  {}\n fi\ndone",
+            if mode == "timeout" { "sleep 2;" } else { ":;" },
+            release.display(), release.display(), escaped.display(), descendant.display(),
+            marker.display(), if mode == "normal" { ":" } else { "sleep 20" }
+        );
         let dir = f.shim(&script);
-        let timeout = if mode == "normal" { "10" } else { "1" };
+        let timeout = if mode == "timeout" { "8" } else { "30" };
         let mut cmd = f.cli(&f.repo, &[OsStr::new("--timeout"), OsStr::new(timeout)]);
         f.with_shim(&mut cmd, &dir);
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -657,7 +672,17 @@ fn fetch_timeout_cancellation_and_normal_completion_reap_descendants() {
         } else {
             assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.new);
         }
-        thread::sleep(Duration::from_secs(5));
+        let pid = fs::read_to_string(descendant)
+            .unwrap()
+            .trim()
+            .parse::<i32>()
+            .unwrap();
+        let until = Instant::now() + Duration::from_secs(2);
+        while unsafe { libc::kill(pid, 0) } == 0 {
+            assert!(Instant::now() < until, "descendant survived {mode}");
+            thread::sleep(Duration::from_millis(10));
+        }
+        fs::write(&release, "release").unwrap();
         assert!(!escaped.exists(), "descendant outlived {mode}");
     }
 }

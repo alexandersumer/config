@@ -2981,6 +2981,258 @@ fn destructive_cleanup_keeps_the_lock_after_its_supervisor_is_killed() {
 }
 
 #[test]
+fn parallel_cleanup_shares_repository_lock_bounds_removals_and_preserves_local_work() {
+    for shutdown in ["complete", "cancel", "kill"] {
+        let f = Fixture::new();
+        let mut trees = vec![f.worktree.clone()];
+        for n in 0..3 {
+            let tree = f.temp.path().join(format!("linked-{n}"));
+            git(
+                &f.repo,
+                &["worktree", "add", "--detach", tree.to_str().unwrap()],
+            );
+            trees.push(tree);
+        }
+        let dirty = f.temp.path().join("active-work");
+        git(
+            &f.repo,
+            &["worktree", "add", "--detach", dirty.to_str().unwrap()],
+        );
+        fs::write(dirty.join("precious"), "keep active work").unwrap();
+        let head = git(&f.repo, &["rev-parse", "HEAD"]);
+        let state = f.temp.path().join("state");
+        fs::create_dir(&state).unwrap();
+        let release = state.join("release");
+        struct Release(PathBuf);
+        impl Drop for Release {
+            fn drop(&mut self) {
+                let _ = fs::write(&self.0, "release");
+            }
+        }
+        let _release = Release(release.clone());
+        let gate = f.temp.path().join("gate.py");
+        fs::write(&gate, r#"import fcntl, json, os, pathlib, subprocess, sys, time
+root = pathlib.Path(os.environ['PROBE_STATE'])
+counter = root / 'counter'
+def update(delta):
+    with counter.open('a+') as file:
+        fcntl.flock(file, fcntl.LOCK_EX)
+        file.seek(0)
+        data = json.loads(file.read() or '{"active":0,"maximum":0}')
+        data['active'] += delta
+        data['maximum'] = max(data['maximum'], data['active'])
+        file.seek(0); file.truncate(); json.dump(data, file); file.flush()
+        return data['maximum']
+maximum = update(1)
+(root / ('ready-' + str(os.getpid()))).write_text(json.dumps({'group': os.getpgrp(), 'owner': os.getppid()}))
+try:
+    if maximum > 2: sys.exit(73)
+    until = time.monotonic() + 12
+    while not (root / 'release').exists():
+        if time.monotonic() > until: sys.exit(74)
+        time.sleep(0.01)
+    sys.exit(subprocess.run([os.environ['REAL_GIT']] + sys.argv[1:]).returncode)
+finally:
+    update(-1)
+"#).unwrap();
+        let shim = f.shim(
+            "case \" $* \" in *' worktree remove '*) exec python3 \"$PROBE_GATE\" \"$@\";; esac",
+        );
+        let real = Command::new("sh")
+            .args(["-c", "command -v git"])
+            .output()
+            .unwrap();
+        let mut command = Command::new(BIN);
+        env(&mut command);
+        with_shim(&mut command, &shim);
+        let child = command
+            .args([
+                "git",
+                "worktree",
+                "clean",
+                "--apply",
+                "--json",
+                "--jobs",
+                "2",
+                "--timeout",
+                "15",
+            ])
+            .arg(&f.repo)
+            .env("PROBE_GATE", &gate)
+            .env("PROBE_STATE", &state)
+            .env("REAL_GIT", String::from_utf8(real.stdout).unwrap().trim())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let ready = || {
+            fs::read_dir(&state)
+                .unwrap()
+                .filter_map(|e| {
+                    let e = e.unwrap();
+                    e.file_name()
+                        .to_string_lossy()
+                        .starts_with("ready-")
+                        .then_some(e.path())
+                })
+                .collect::<Vec<_>>()
+        };
+        let until = Instant::now() + Duration::from_secs(10);
+        while ready().len() < 2 {
+            assert!(Instant::now() < until, "parallel removal did not start");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let probe = || {
+            env(&mut Command::new(BIN))
+                .args(["git", "worktree", "clean", "--json"])
+                .arg(&f.repo)
+                .output()
+                .unwrap()
+        };
+        let busy = probe();
+        assert_eq!(busy.status.code(), Some(1), "{}", text(&busy));
+        assert!(text(&busy).contains("Repository is busy"));
+        for tree in &trees {
+            assert!(tree.join("file").exists());
+        }
+        let markers = ready();
+        assert_eq!(markers.len(), 2);
+        if shutdown == "complete" {
+            fs::write(&release, "release").unwrap();
+        } else {
+            unsafe {
+                libc::kill(
+                    child.id() as i32,
+                    if shutdown == "cancel" {
+                        libc::SIGINT
+                    } else {
+                        libc::SIGKILL
+                    },
+                );
+            }
+        }
+        let out = child.wait_with_output().unwrap();
+        if shutdown == "kill" {
+            for (index, marker) in markers.iter().enumerate() {
+                let process: serde_json::Value =
+                    serde_json::from_slice(&fs::read(marker).unwrap()).unwrap();
+                let group = process["group"].as_i64().unwrap() as i32;
+                let owner = process["owner"].as_i64().unwrap() as i32;
+                unsafe {
+                    libc::kill(-group, libc::SIGKILL);
+                }
+                let until = Instant::now() + Duration::from_secs(5);
+                while unsafe { libc::kill(owner, 0) } == 0 {
+                    assert!(Instant::now() < until, "orphaned owner stayed alive");
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                if index == 0 {
+                    assert!(text(&probe()).contains("Repository is busy"));
+                }
+            }
+        } else {
+            assert_eq!(
+                out.status.code(),
+                Some(if shutdown == "complete" { 0 } else { 130 }),
+                "{}",
+                text(&out)
+            );
+            let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+            assert_eq!(result["summary"]["workers"], 2);
+            assert_eq!(
+                result["summary"]["removed"],
+                if shutdown == "complete" { 4 } else { 0 }
+            );
+            let paths = result["results"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|r| r["path"].as_str().unwrap())
+                .collect::<Vec<_>>();
+            assert!(paths.windows(2).all(|pair| pair[0] < pair[1]));
+        }
+        assert!(probe().status.success(), "lock was not released");
+        assert_eq!(
+            fs::read_to_string(dirty.join("precious")).unwrap(),
+            "keep active work"
+        );
+        assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), head);
+        assert!(git(&f.repo, &["status", "--porcelain"]).is_empty());
+        if shutdown == "complete" {
+            for tree in &trees {
+                assert!(!tree.exists());
+            }
+            assert_eq!(
+                git(
+                    &f.repo,
+                    &["rev-parse", &format!("refs/workctl/cleanup/{head}")]
+                ),
+                head
+            );
+            let counter: serde_json::Value =
+                serde_json::from_slice(&fs::read(state.join("counter")).unwrap()).unwrap();
+            assert_eq!(counter["maximum"], 2);
+        } else {
+            for tree in &trees {
+                assert!(tree.join("file").exists());
+            }
+        }
+    }
+}
+
+#[test]
+fn parallel_cleanup_serializes_recovery_of_shared_heads() {
+    let f = Fixture::new();
+    for n in 0..7 {
+        let tree = f.temp.path().join(format!("linked-{n}"));
+        git(
+            &f.repo,
+            &["worktree", "add", "--detach", tree.to_str().unwrap()],
+        );
+    }
+    let updates = f.temp.path().join("updates");
+    let shim = f.shim("case \" $* \" in *' update-ref '*) printf 'update\\n' >> \"$PROBE_UPDATES\"; sleep 0.3;; esac");
+    let mut command = Command::new(BIN);
+    env(&mut command);
+    with_shim(&mut command, &shim);
+    let out = command
+        .args([
+            "git", "worktree", "clean", "--apply", "--json", "--jobs", "8",
+        ])
+        .arg(&f.repo)
+        .env("PROBE_UPDATES", &updates)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+    let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(result["summary"]["removed"], 8);
+    assert_eq!(fs::read_to_string(updates).unwrap(), "update\n");
+    assert_eq!(
+        git(&f.repo, &["worktree", "list", "--porcelain"])
+            .lines()
+            .filter(|line| line.starts_with("worktree "))
+            .count(),
+        1
+    );
+    let head = git(&f.repo, &["rev-parse", "HEAD"]);
+    assert_eq!(
+        git(
+            &f.repo,
+            &["rev-parse", &format!("refs/workctl/cleanup/{head}")]
+        ),
+        head
+    );
+    for entry in result["results"].as_array().unwrap() {
+        assert_eq!(entry["timing"]["inspection_count"], 2);
+        let total = entry["timing"]["elapsed_seconds"].as_f64().unwrap();
+        for key in ["inspection_seconds", "recovery_seconds", "removal_seconds"] {
+            let phase = entry["timing"][key].as_f64().unwrap();
+            assert!(phase > 0.0 && phase < total);
+        }
+    }
+}
+
+#[test]
 fn cleanup_internal_worker_requires_supervisor_descriptors() {
     let out = env(&mut Command::new(BIN))
         .args([
