@@ -919,7 +919,7 @@ impl Session<'_> {
         Ok(after)
     }
 }
-#[derive(PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 struct Snapshot {
     head: String,
     status: Vec<u8>,
@@ -1045,21 +1045,25 @@ fn execute(
         session.publication(candidate, &first.head)?;
     }
     if args.apply {
-        let second = session.inspect(candidate, discard, discard_ignored)?;
-        if first != second {
-            return Err("worktree changed during inspection; refusing removal".into());
-        }
-        if !preserve_commits {
+        let immediate = if preserve_commits {
+            // Local recovery is followed by a full inspection below. There is
+            // no remote I/O to justify additional scans before saving the ref.
+            first.clone()
+        } else {
+            let second = session.inspect(candidate, discard, discard_ignored)?;
+            if first != second {
+                return Err("worktree changed during inspection; refusing removal".into());
+            }
             session.publication(candidate, &second.head)?;
-        }
-        // Remote I/O may take time. Finish with local ownership, lock, HEAD and
-        // file revalidation so native removal follows the last local inspection.
-        let immediate = session.inspect(candidate, discard, discard_ignored)?;
-        if second != immediate {
-            return Err(
-                "worktree changed during publication verification; refusing removal".into(),
-            );
-        }
+            // Remote I/O may take time. Revalidate before native removal.
+            let immediate = session.inspect(candidate, discard, discard_ignored)?;
+            if second != immediate {
+                return Err(
+                    "worktree changed during publication verification; refusing removal".into(),
+                );
+            }
+            immediate
+        };
         if preserve_commits {
             let recovery = format!("refs/workctl/cleanup/{}", first.head);
             // Atomic create-or-verify: never overwrite an existing recovery ref.

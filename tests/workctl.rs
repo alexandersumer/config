@@ -2427,6 +2427,249 @@ fn pragmatic_recovery_deadlines_and_cancellation_preserve_work_and_release_locks
 }
 
 #[test]
+fn local_recovery_cleanup_scans_dependency_trees_twice_and_preserves_history() {
+    for (strict, existing) in [(false, false), (true, false), (false, true), (true, true)] {
+        let f = Fixture::new();
+        fs::write(f.repo.join(".git/info/exclude"), "node_modules/\n").unwrap();
+        for n in 0..256 {
+            let dependency = f.worktree.join(format!("node_modules/package-{n}/lib"));
+            fs::create_dir_all(&dependency).unwrap();
+            fs::write(dependency.join("index.js"), "generated dependency").unwrap();
+        }
+        git(&f.worktree, &["checkout", "--detach"]);
+        fs::write(f.worktree.join("file"), "unpublished recoverable work").unwrap();
+        git(&f.worktree, &["add", "file"]);
+        git(&f.worktree, &["commit", "-m", "unpublished work"]);
+        git(&f.repo, &["remote", "remove", "origin"]);
+        let head = git(&f.worktree, &["rev-parse", "HEAD"]);
+        let recovery = format!("refs/workctl/cleanup/{head}");
+        if existing {
+            git(&f.repo, &["update-ref", &recovery, &head]);
+        }
+        let count = f.temp.path().join("scan-count");
+        let statuses = f.temp.path().join("status-count");
+        let updates = f.temp.path().join("update-count");
+        let shim = f.shim(
+            r#"
+    case " $* " in
+      *' ls-files --stage -z '*) printf 'scan\n' >> "$PROBE_COUNT";;
+      *' status --porcelain=v1 '*) printf 'status\n' >> "$PROBE_STATUSES";;
+      *' update-ref '*) printf 'update\n' >> "$PROBE_UPDATES";;
+    esac
+    "#,
+        );
+        let mut command = Command::new(BIN);
+        env(&mut command);
+        command
+            .args(["git", "worktree", "clean", "--apply", "--json"])
+            .arg(&f.worktree)
+            .env("PROBE_COUNT", &count)
+            .env("PROBE_STATUSES", &statuses)
+            .env("PROBE_UPDATES", &updates);
+        if strict {
+            command.args([
+                "--strict",
+                "--preserve-commits",
+                f.worktree.to_str().unwrap(),
+                "--discard-ignored",
+                f.worktree.to_str().unwrap(),
+            ]);
+        }
+        with_shim(&mut command, &shim);
+        let out = command.output().unwrap();
+        assert!(out.status.success(), "{}", text(&out));
+        let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(result["summary"]["removed"], 1);
+        assert!(!f.worktree.exists());
+        assert_eq!(
+            updates.exists(),
+            !existing,
+            "strict={strict}, existing={existing}"
+        );
+        if !existing {
+            assert_eq!(fs::read_to_string(updates).unwrap().lines().count(), 1);
+        }
+        assert_eq!(fs::read_to_string(count).unwrap().lines().count(), 2);
+        assert_eq!(fs::read_to_string(statuses).unwrap().lines().count(), 4);
+        assert_eq!(
+            git(
+                &f.repo,
+                &["rev-parse", &format!("refs/workctl/cleanup/{head}")]
+            ),
+            head
+        );
+        assert_eq!(
+            git(&f.repo, &["worktree", "list", "--porcelain"])
+                .lines()
+                .filter(|line| line.starts_with("worktree "))
+                .count(),
+            1
+        );
+        assert!(git(&f.repo, &["status", "--porcelain"]).is_empty());
+        let restored = f.temp.path().join("restored");
+        git(
+            &f.repo,
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                restored.to_str().unwrap(),
+                &recovery,
+            ],
+        );
+        assert_eq!(
+            fs::read_to_string(restored.join("file")).unwrap(),
+            "unpublished recoverable work"
+        );
+    }
+}
+
+#[test]
+fn local_recovery_cleanup_preserves_changes_created_while_saving_history() {
+    for (strict, existing) in [(false, false), (true, false), (false, true), (true, true)] {
+        for kind in [
+            "nested",
+            "bare",
+            "tracked",
+            "untracked",
+            "masked",
+            "operation",
+            "modules",
+            "registration",
+        ] {
+            let f = Fixture::new();
+            fs::write(f.repo.join(".git/info/exclude"), "ignored/\n").unwrap();
+            fs::create_dir(f.worktree.join("ignored")).unwrap();
+            let head = git(&f.worktree, &["rev-parse", "HEAD"]);
+            let recovery = format!("refs/workctl/cleanup/{head}");
+            if existing {
+                git(&f.repo, &["update-ref", &recovery, &head]);
+            }
+            let injected = f.temp.path().join("injected");
+            let shim = f.shim(r#"
+trigger=0
+case " $* " in
+  *' update-ref '*) [ "$PROBE_EXISTING" = false ] && trigger=1;;
+  *" rev-parse --verify $PROBE_RECOVERY "*) [ "$PROBE_EXISTING" = true ] && trigger=1;;
+esac
+if [ "$trigger" = 1 ] && [ ! -f "$PROBE_INJECTED" ]; then
+  touch "$PROBE_INJECTED"
+  case "$PROBE_KIND" in
+    nested) mkdir -p "$PROBE_WORKTREE/ignored/nested/.git"; printf precious > "$PROBE_WORKTREE/ignored/nested/.git/config";;
+    bare) mkdir -p "$PROBE_WORKTREE/ignored/bare/objects"; printf precious > "$PROBE_WORKTREE/ignored/bare/HEAD";;
+    tracked) printf precious > "$PROBE_WORKTREE/file";;
+    untracked) printf precious > "$PROBE_WORKTREE/new-work";;
+    masked) "$REAL_GIT" -C "$PROBE_WORKTREE" update-index --assume-unchanged file || exit $?; printf precious > "$PROBE_WORKTREE/file";;
+    operation) touch "$PROBE_GIT_DIR/index.lock";;
+    modules) mkdir -p "$PROBE_GIT_DIR/modules/local/objects"; printf precious > "$PROBE_GIT_DIR/modules/local/HEAD";;
+    registration) "$REAL_GIT" -C "$PROBE_WORKTREE" worktree lock "$PROBE_WORKTREE" || exit $?;;
+  esac
+fi
+"#);
+            let real = Command::new("sh")
+                .args(["-c", "command -v git"])
+                .output()
+                .unwrap();
+            let mut command = Command::new(BIN);
+            env(&mut command);
+            command
+                .args(["git", "worktree", "clean", "--apply", "--json"])
+                .arg(&f.worktree)
+                .env("PROBE_KIND", kind)
+                .env("PROBE_EXISTING", existing.to_string())
+                .env("PROBE_RECOVERY", &recovery)
+                .env("PROBE_INJECTED", &injected)
+                .env("PROBE_WORKTREE", &f.worktree)
+                .env(
+                    "PROBE_GIT_DIR",
+                    git(&f.worktree, &["rev-parse", "--absolute-git-dir"]),
+                )
+                .env("REAL_GIT", String::from_utf8(real.stdout).unwrap().trim());
+            if strict {
+                command.args([
+                    "--strict",
+                    "--preserve-commits",
+                    f.worktree.to_str().unwrap(),
+                    "--discard-ignored",
+                    f.worktree.to_str().unwrap(),
+                ]);
+            }
+            with_shim(&mut command, &shim);
+            let out = command.output().unwrap();
+            assert!(
+                injected.exists(),
+                "mutation was not reached: {kind}, strict={strict}, existing={existing}: {}",
+                text(&out)
+            );
+            let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+            let protected = !strict && matches!(kind, "tracked" | "untracked" | "masked");
+            assert_eq!(
+                out.status.code(),
+                Some(if protected { 0 } else { 1 }),
+                "{kind}, strict={strict}, existing={existing}: {}",
+                text(&out)
+            );
+            assert_eq!(
+                result["summary"][if protected {
+                    "protected_worktrees"
+                } else {
+                    "blocked"
+                }],
+                1
+            );
+            assert_eq!(result["results"][0]["evidence"]["recovery_saved"], true);
+            assert_eq!(
+                result["summary"]["removed"],
+                0,
+                "{kind}, strict={strict}, existing={existing}: {}",
+                text(&out)
+            );
+            assert!(
+                text(&out).contains("recovery ref retained"),
+                "{kind}, strict={strict}, existing={existing}: {}",
+                text(&out)
+            );
+            f.unchanged();
+            assert_eq!(
+                git(
+                    &f.repo,
+                    &["rev-parse", &format!("refs/workctl/cleanup/{head}")]
+                ),
+                head
+            );
+            let preserved = match kind {
+                "nested" => "ignored/nested/.git/config",
+                "bare" => "ignored/bare/HEAD",
+                "untracked" => "new-work",
+                "modules" => {
+                    let own = git(&f.worktree, &["rev-parse", "--absolute-git-dir"]);
+                    assert_eq!(
+                        fs::read_to_string(Path::new(&own).join("modules/local/HEAD")).unwrap(),
+                        "precious"
+                    );
+                    continue;
+                }
+                "registration" => {
+                    assert!(git(&f.repo, &["worktree", "list", "--porcelain"]).contains("locked"));
+                    continue;
+                }
+                "operation" => {
+                    let own = git(&f.worktree, &["rev-parse", "--absolute-git-dir"]);
+                    assert!(Path::new(&own).join("index.lock").exists());
+                    continue;
+                }
+                _ => "file",
+            };
+            assert_eq!(
+                fs::read_to_string(f.worktree.join(preserved)).unwrap(),
+                "precious",
+                "{kind}"
+            );
+        }
+    }
+}
+
+#[test]
 fn cleanup_revalidates_state_after_the_final_filesystem_scan() {
     for kind in ["commit", "masked", "operation"] {
         let f = Fixture::new();
@@ -2436,7 +2679,7 @@ fn cleanup_revalidates_state_after_the_final_filesystem_scan() {
 case " $* " in *' ls-files --stage -z '*)
   n=0; [ ! -f "$PROBE_COUNT" ] || n=$(cat "$PROBE_COUNT")
   n=$((n+1)); printf '%s' "$n" > "$PROBE_COUNT"
-  if [ "$n" = 4 ]; then
+  if [ "$n" = 2 ]; then
     case "$PROBE_KIND" in
       commit) "$REAL_GIT" -C "$PROBE_WORKTREE" -c user.name=Probe -c user.email=probe@example.test commit --allow-empty -m late-committed-work >/dev/null || exit $?;;
       masked) "$REAL_GIT" -C "$PROBE_WORKTREE" update-index --assume-unchanged file || exit $?; printf precious > "$PROBE_WORKTREE/file";;
@@ -2527,13 +2770,33 @@ fn git_services_run_without_leaking_the_coordination_lock() {
             );
             git(&f.repo, &["config", "core.fsmonitorHookVersion", "2"]);
         }
+        if kind == "removal-filter" {
+            // Cached index entries must not invoke the filter through timestamp races.
+            let index =
+                PathBuf::from(git(&f.worktree, &["rev-parse", "--absolute-git-dir"])).join("index");
+            fs::File::open(index)
+                .unwrap()
+                .set_times(
+                    fs::FileTimes::new()
+                        .set_modified(std::time::SystemTime::now() + Duration::from_secs(3600)),
+                )
+                .unwrap();
+        }
         let release = f.temp.path().join("release-hook");
         let done = f.temp.path().join("hook-done");
         let ready = f.temp.path().join("hook-ready");
         let removing = f.temp.path().join("removing");
         let invoked = f.temp.path().join("hook-invoked");
-        let shim =
-            f.shim("case \" $* \" in *' worktree remove '*) touch \"$PROBE_REMOVING\";; esac");
+        let shim = f.shim(
+            r#"
+case " $* " in *' worktree remove '*)
+  touch "$PROBE_REMOVING"
+  if [ "$PROBE_HOOK_KIND" = removal-filter ]; then
+    touch -t 200001010000 "$PROBE_FILE" || exit $?
+  fi;;
+esac
+"#,
+        );
         struct HookCleanup {
             release: PathBuf,
             done: PathBuf,
@@ -2599,7 +2862,11 @@ if trigger and not os.path.exists(os.environ['PROBE_READY']):
             .output()
             .unwrap();
         assert!(out.status.success(), "{}", text(&out));
-        wait(&ready);
+        assert!(
+            ready.exists(),
+            "{kind}: hook readiness was not signaled: {}",
+            text(&out)
+        );
         if kind != "reference-transaction" {
             assert!(invoked.exists());
         }
@@ -2740,7 +3007,7 @@ fn cleanup_preserves_nested_data_created_during_final_git_probes() {
 case " $* " in *' ls-files -v -z '*)
   n=0; [ ! -f "$PROBE_COUNT" ] || n=$(cat "$PROBE_COUNT")
   n=$((n+1)); printf '%s' "$n" > "$PROBE_COUNT"
-  if [ "$n" = 8 ]; then
+  if [ "$n" = 4 ]; then
     mkdir -p "$PROBE_WORKTREE/ignored/new/.git"
     printf precious > "$PROBE_WORKTREE/ignored/new/.git/config"
   fi;;
