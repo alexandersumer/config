@@ -10,7 +10,7 @@ use std::io::Write;
     about = "Personal workstation maintenance",
     propagate_version = true,
     args_override_self = true,
-    after_help = "Examples:\n  workctl git reset /path/to/work /path/to/oss\n  workctl git worktree clean /path/to/work\n  workctl doctor\n  workctl completions zsh\n\nExit codes: 0 success, 1 failed or blocked, 2 invalid usage, 130 interrupted."
+    after_help = "Examples:\n  workctl git reset /path/to/work /path/to/oss\n  workctl git worktree clean /path/to/work\n  workctl auth preflight\n  workctl auth exec --profile code -- bb pr list\n  workctl doctor\n  workctl completions zsh\n\nExit codes: 0 success, 1 failed or blocked, 2 invalid usage, 130 interrupted."
 )]
 struct Cli {
     /// Emit a single schema-versioned JSON result on stdout
@@ -21,6 +21,11 @@ struct Cli {
 }
 #[derive(Subcommand, Debug)]
 enum Operation {
+    /// Verify and refresh declared service credentials, or wrap a command
+    Auth {
+        #[command(subcommand)]
+        command: Auth,
+    },
     /// Maintain Git checkouts and linked worktrees
     #[command(after_help = "Examples:\n  workctl git reset .\n  workctl git worktree clean .")]
     Git {
@@ -35,6 +40,24 @@ enum Operation {
     Completions {
         #[arg(value_enum)]
         shell: clap_complete::Shell,
+    },
+}
+#[derive(Subcommand, Debug)]
+enum Auth {
+    /// Check caches, refresh once when needed, and independently recheck readiness
+    #[command(
+        after_long_help = "Profiles: work = Bitbucket + TWG + Splunk; code = Bitbucket + TWG; logs = Splunk.\nProvider CLIs own all credentials. --check makes no explicit refresh/login.\n--non-interactive allows silent OAuth refresh but never browser/MFA issuance.\nExpiry is reported when available; no command can guarantee future access.\nExamples:\n  workctl auth preflight\n  workctl auth preflight --profile code --json\n  workctl auth preflight --profile logs --check\n  workctl auth preflight --config auth.json --profile staging"
+    )]
+    Preflight(crate::auth::Options),
+    /// Preflight automatically, then execute argv directly with the child's exit status
+    #[command(
+        after_long_help = "Preflight failure prevents command execution. No shell interpolation occurs.\nChild stdin, stdout, TTY, environment, signals and exit status are preserved.\nPreflight reports go to stderr. --json is unsupported here.\nExamples:\n  workctl auth exec --profile code -- bb pr list\n  workctl auth exec --profile work -- codex exec 'continue acceptance'"
+    )]
+    Exec {
+        #[command(flatten)]
+        options: crate::auth::Options,
+        #[arg(required = true, num_args = 1.., last = true)]
+        command: Vec<OsString>,
     },
 }
 #[derive(Subcommand, Debug)]
@@ -85,6 +108,12 @@ pub(crate) fn run(args: Vec<OsString>) -> u8 {
         }
     };
     match cli.command {
+        Operation::Auth {
+            command: Auth::Preflight(options),
+        } => crate::auth::run(options, cli.json, None),
+        Operation::Auth {
+            command: Auth::Exec { options, command },
+        } => crate::auth::run(options, cli.json, Some(command)),
         Operation::Git {
             command: Git::Reset(args),
         } => crate::git_domain::run(args, cli.json),

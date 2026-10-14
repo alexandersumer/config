@@ -4,7 +4,7 @@ Personal configuration and agent-skill registry.
 
 ## Workstation CLI
 
-`workctl` is the public workstation tool. Git maintenance is its first domain;
+`workctl` is the public workstation tool. Git maintenance and authentication readiness are its public domains;
 configuration installation and CI remain internal `config-tools` commands.
 There are no standalone checkout-reset or worktree-cleanup aliases.
 
@@ -12,6 +12,8 @@ There are no standalone checkout-reset or worktree-cleanup aliases.
 workctl git reset ~/atlassian ~/oss ~/src ~/stable
 workctl git worktree clean ~/atlassian ~/oss ~/src ~/stable
 workctl git worktree clean --apply ~/atlassian ~/oss ~/src ~/stable
+workctl auth preflight
+workctl auth exec --profile code -- bb pr list
 workctl doctor
 workctl completions zsh
 ```
@@ -214,16 +216,138 @@ temporary storage, and relevant process/lock capabilities without repairs. It su
 standalone executables and does not certify managed installation or shell configuration;
 use `config-tools check-install` for managed installation checks.
 
+### Authentication readiness
+
+`workctl auth preflight` checks the declared credential targets, refreshes only
+missing or short-lived credentials, and then rechecks the provider's normal cache.
+`workctl auth exec` does that automatically before starting another command:
+
+```sh
+workctl auth preflight
+workctl auth preflight --profile code --check --json
+workctl auth preflight --profile logs --non-interactive
+workctl auth exec --profile work -- codex exec 'continue the staging acceptance run'
+workctl auth exec --profile code -- bb pr list
+```
+
+The built-in `work` profile contains Bitbucket OAuth, TWG OAuth, and production
+Splunk SLAuth (`splunk.paas-inf.net`, `atlassian-all`, MFA). `code` contains
+Bitbucket and TWG; `logs` contains Splunk only. Select the narrowest profile for the
+work. These are explicit requirements, not guesses about other running chats.
+Splunk issuance also warms the underlying Atlas login, but does not prove access
+to every Atlas service or refresh service-signed runtime credentials.
+
+Provider CLIs retain ownership of credential storage, account selection, and
+renewal. workctl never copies credentials, changes home/config locations, starts a
+background renewal daemon, or stores tokens in its own files. `--check` makes no
+explicit refresh/login calls; provider CLIs may still perform their normal
+transparent renewal during status checks. `--non-interactive` permits silent
+Bitbucket/TWG OAuth refresh, but never starts Bitbucket browser login or SLAuth
+issuance that could require browser/MFA. Missing TWG refresh authorization reports
+an actionable `twg login` requirement: the installed TWG login requires a
+controlling terminal for account/site selection. TWG's separate optional Bitbucket
+token is reported by `twg doctor`, but does not invalidate a working TWG OAuth
+credential; workctl verifies the separate `bb` CLI credential for Bitbucket use.
+It does not repair TWG's optional Bitbucket API token or claim `twg bb` is ready.
+
+The default refresh threshold is 300 seconds. `--min-valid-for SECONDS` applies to
+known expiry, not to providers with unknown expiry. Bitbucket's supported OAuth
+status formats report a conservative lifetime; an authenticated, read-only workspace
+list also detects revoked tokens before handoff. Named Bitbucket accounts must be
+active for this proof, since the API command has no account override; workctl does
+not silently switch accounts. Unknown formats fail closed.
+TWG doctor proves API connectivity but exposes no credential expiry, so its result
+explicitly reports unknown lifetime. SLAuth parses the provider's cached JWT for
+requested audience, expiry and not-before claims; Atlas owns token issuance and
+validation. SLAuth TTL is capped by policy at one hour or the remaining underlying
+login lifetime. Asking for two hours therefore blocks, even after successful
+issuance. No preflight can guarantee future access after revocation or future MFA.
+Earlier credentials are aged again at handoff in case a later MFA flow took time.
+For long commands, use the provider's supported renewal mechanism inside that
+command; `auth exec` checks readiness before launch, not throughout execution.
+
+Status/silent refresh commands have a 30-second deadline (`--timeout`); browser/MFA
+commands have a 180-second deadline (`--login-timeout`). Each target gets at most
+one refresh sequence, with Bitbucket silent renewal before a browser fallback.
+Permission, malformed-output, installation and connectivity failures do not cause
+login loops. After inconclusive issuance, the normal cache is checked once without reissuing.
+Independent targets continue after a failure. Cancellation returns
+130, timeout/access failures return 1, and invalid CLI usage returns 2. Auth
+subprocesses run in supervised process groups; descendants are cleaned even after
+a successful leader exit. Captures use bounded in-memory pipes, not temporary
+credential files. Only a narrowly validated Okta activation URL can be forwarded
+from provider output; provider diagnostics and credential output are never printed.
+Complete the browser opened by Bitbucket if it needs a new login.
+
+Concurrent workctl preflights coordinate through an owned, private regular lock in
+the OS temporary directory, wait for a bounded interval, and recheck caches after
+acquiring it. The lock does not coordinate unrelated tools or invocations using a
+different temporary directory. Unsafe symlink/FIFO/public lock files are refused.
+The persistent lock contains no credentials and is not deleted on release.
+
+`auth preflight --json` emits one schema-versioned result with per-target status,
+remaining lifetime where known, expiry/check timestamps, actions, and honest
+unknown-expiry notes. No provider output is embedded. `auth exec` sends its report
+to stderr and replaces itself with the supplied argv, preserving stdin, terminal,
+environment, stdout, signals and exact child exit status. It never invokes a shell
+unless you explicitly supply one. Failed preflight prevents the child from running.
+`--json` is rejected for `auth exec`, keeping child stdout intact. One preflight is
+performed per invocation; existing sessions must invoke this wrapper or the command
+from their launcher to receive automatic preflight.
+
+Custom profiles contain only credential descriptors, never tokens or commands:
+
+```json
+{
+  "schema_version": 1,
+  "profiles": {
+    "staging": [
+      {"provider": "bitbucket", "account": "default"},
+      {"provider": "twg"},
+      {"provider": "slauth", "audience": "micros-log-insight", "environment": "prod", "groups": [], "mfa": false}
+    ]
+  }
+}
+```
+
+Use `workctl auth preflight --config /path/to/auth.json --profile staging` or pass
+the same options to `auth exec`. Config is explicit; workctl does not search home
+credential stores. Files must be regular and at most 64 KiB. Schema versions,
+unknown fields, empty profiles, duplicate credential descriptors, invalid audiences,
+groups and environments are rejected before calling any provider.
+
+```sh
+# Deterministic CLI/OS contracts with external provider simulators (CI, no secrets):
+cargo test --locked --test auth_cli
+# Actual installed providers, network, shared caches, and browser/MFA (explicit):
+cargo test --locked --test auth_live -- --ignored --nocapture
+# Narrow service-specific live proof; this does not prove Splunk MFA:
+WORKCTL_AUTH_LIVE_CONFIG=/path/to/auth.json WORKCTL_AUTH_LIVE_PROFILE=staging \
+  cargo test --locked --test auth_live real_slauth -- --ignored --nocapture
+```
+
+The required Linux/macOS CI lane runs the auth CLI suite alongside the existing
+Git contracts. It covers cache reuse, refresh/recheck, stale caches, unknown expiry,
+TTL limits, account preservation, exact descriptors, noninteractive/check-only
+behavior, partial failure, malformed responses, secret suppression, live activation
+prompts, output bounds, unsafe files, concurrency, deadlines, cancellation,
+descendant cleanup, and command argv/stdin/exit behavior. These simulator-backed
+adapter tests are distinct from real account acceptance. The explicit live lane
+fails if a required provider, credential, network or browser/MFA step is unavailable;
+it verifies real preflight, cached reuse, wrapped output/exit, and the impossible
+SLAuth lifetime case. Ordinary CI skips this account-dependent lane explicitly.
+
 ### Architecture and verification
 
 `src/workctl.rs` owns the public command hierarchy. `src/runtime.rs` owns process
-capture, deadlines, cancellation, and group lifetime. `src/presentation.rs` owns shared
+capture, deadlines, cancellation, and group lifetime. `src/auth/` owns validated
+credential profiles, provider adapters, bounded secret captures, and auth coordination. `src/presentation.rs` owns shared
 rendering and JSON conventions. `src/git_domain/` owns topology, common-directory locks,
 publication, and separate reset/cleanup policies. No plugin registry or command DSL
 is involved.
 
 ```sh
-cargo test --locked --lib --test reset_cli --test reset_e2e --test workctl
+cargo test --locked --lib --test reset_cli --test reset_e2e --test workctl --test auth_cli
 # Real protocol E2E only (requires Git and loopback networking):
 cargo test --locked --test reset_e2e
 cargo run -- check

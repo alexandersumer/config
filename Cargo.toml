@@ -16,6 +16,8 @@ walkdir = "2"
 clap_complete = "4"
 console = "0.16"
 indicatif = { version = "0.18", features = ["in_memory"] }
+serde = { version = "1.0.228", features = ["derive"] }
+base64 = "0.22.1"
 
 [[bin]]
 name = "workctl"
