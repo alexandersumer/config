@@ -88,6 +88,19 @@ acquiring it. The lock does not coordinate unrelated tools or invocations using 
 different temporary directory. Unsafe symlink/FIFO/public lock files are refused.
 The persistent lock contains no credentials and is not deleted on release.
 
+## Human-readable output
+
+Human output identifies the selected profile and renewal mode on stderr before
+waiting for the coordination lock. Each target is announced before its provider
+check, so browser/MFA waits have context. The final report lists aligned statuses,
+verified accounts, remaining lifetime or explicitly unknown expiry, and labeled
+reasons and recovery actions. It ends with the ready count and elapsed time.
+Failed checks say access is not ready rather than implying a verified credential
+with unknown expiry. Color follows the Git commands: terminal-only, with
+`NO_COLOR`, `CLICOLOR=0`, and `TERM=dumb` respected. Redirected output contains no
+terminal escape sequences. JSON omits human progress; provider authentication
+prompts still go to stderr when interaction is necessary.
+
 ## JSON and command execution
 
 `auth preflight --json` emits one schema-versioned result with per-target status,

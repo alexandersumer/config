@@ -38,6 +38,7 @@ impl Fixture {
             .env("TMPDIR", self.root.path())
             .env("TERM", "dumb")
             .env("NO_COLOR", "1")
+            .env("COLUMNS", "80")
             .stdin(Stdio::null());
         c
     }
@@ -471,6 +472,8 @@ fn activation_prompt_is_visible_before_provider_completes_and_no_secret_leaks() 
         }
         all
     });
+    // Measure forwarding after the provider emits its prompt, not cold CLI startup.
+    wait_file(&f.root.path().join("started"));
     let visible = rx.recv_timeout(Duration::from_secs(3));
     fs::write(f.root.path().join("release"), "").unwrap();
     let out = child.wait_with_output().unwrap();
@@ -825,4 +828,85 @@ fn forced_twg_requires_confirmed_renewal_not_a_skipped_refresh() {
             1
         );
     }
+}
+
+#[test]
+fn human_report_identifies_mode_account_readiness_and_unknown_expiry() {
+    let f = Fixture::new(json!({}));
+    let out = f
+        .command(&["auth", "preflight", "--profile", "code", "--check"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("profile code · check only"), "{stderr}");
+    assert!(
+        stderr.contains("[1/2] Checking bitbucket:active"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("[2/2] Checking twg"), "{stderr}");
+    for expected in [
+        "Authentication preflight: ready",
+        "valid        bitbucket:active",
+        "Account: office",
+        "expiry unknown",
+        "Note: Access verified now",
+        "2/2 credentials ready",
+        "Elapsed ",
+    ] {
+        assert!(stdout.contains(expected), "missing {expected}: {stdout}");
+    }
+    assert!(!text(&out).contains(SECRET));
+    assert!(!text(&out).contains('\u{1b}'));
+}
+
+#[test]
+fn human_blocked_report_labels_recovery_and_does_not_imply_unknown_expiry() {
+    let f = Fixture::new(json!({"atlas_valid":false}));
+    let out = f
+        .command(&["auth", "preflight", "--profile", "logs", "--check"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    for expected in [
+        "Authentication preflight: blocked",
+        "access not ready",
+        "Reason: ",
+        "Action: ",
+        "0/1 credentials ready",
+    ] {
+        assert!(stdout.contains(expected), "missing {expected}: {stdout}");
+    }
+    assert!(!stdout.contains("expiry unknown"));
+    assert!(!text(&out).contains(SECRET));
+}
+
+#[test]
+fn json_check_has_no_human_progress_and_invalid_profile_has_clear_error() {
+    let f = Fixture::new(json!({}));
+    let out = f
+        .command(&[
+            "auth",
+            "preflight",
+            "--profile",
+            "code",
+            "--check",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    assert!(out.stderr.is_empty(), "{}", text(&out));
+    let result: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(result["status"], "completed");
+    let out = f
+        .command(&["auth", "preflight", "--profile", "unknown"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("Authentication preflight: failed"));
+    assert!(stdout.contains("Error: Unknown built-in auth profile"));
 }
