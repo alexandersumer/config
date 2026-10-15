@@ -28,6 +28,11 @@ fn reuse_and_exec(options: &[&str], targets: usize) {
     args.push("--json");
     let refresh = result(&args, 0);
     assert_eq!(refresh["status"], "completed");
+    assert!(refresh["targets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|t| t["status"] == "refreshed"));
     assert_eq!(refresh["targets"].as_array().unwrap().len(), targets);
     args.push("--check");
     let cached = result(&args, 0);

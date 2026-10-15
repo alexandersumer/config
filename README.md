@@ -218,8 +218,14 @@ use `config-tools check-install` for managed installation checks.
 
 ### Authentication readiness
 
-`workctl auth preflight` checks the declared credential targets, refreshes only
-missing or short-lived credentials, and then rechecks the provider's normal cache.
+`workctl auth preflight` force-renews every declared credential target, even when
+its cached credential is still valid, and then verifies the provider's normal cache.
+Run it before leaving and complete the browser/MFA prompts. Bitbucket uses browser
+OAuth login for the selected account because its CLI has no force-refresh command;
+TWG uses forced OAuth refresh and SLAuth uses forced issuance. Each target is
+attempted once. Failed renewal is reported even when an older token still works.
+Use `--reuse-valid` to renew only missing or short-lived credentials, or `--check`
+to check access without explicitly renewing.
 `workctl auth exec` does that automatically before starting another command:
 
 ```sh
@@ -242,7 +248,8 @@ renewal. workctl never copies credentials, changes home/config locations, starts
 background renewal daemon, or stores tokens in its own files. `--check` makes no
 explicit refresh/login calls; provider CLIs may still perform their normal
 transparent renewal during status checks. `--non-interactive` permits silent
-Bitbucket/TWG OAuth refresh, but never starts Bitbucket browser login or SLAuth
+TWG OAuth refresh (and Bitbucket silent refresh with `--reuse-valid`), but never
+starts Bitbucket browser login or SLAuth
 issuance that could require browser/MFA. Missing TWG refresh authorization reports
 an actionable `twg login` requirement: the installed TWG login requires a
 controlling terminal for account/site selection. TWG's separate optional Bitbucket
@@ -250,7 +257,7 @@ token is reported by `twg doctor`, but does not invalidate a working TWG OAuth
 credential; workctl verifies the separate `bb` CLI credential for Bitbucket use.
 It does not repair TWG's optional Bitbucket API token or claim `twg bb` is ready.
 
-The default refresh threshold is 300 seconds. `--min-valid-for SECONDS` applies to
+With `--reuse-valid`, the default refresh threshold is 300 seconds. `--min-valid-for SECONDS` applies to
 known expiry, not to providers with unknown expiry. Bitbucket's supported OAuth
 status formats report a conservative lifetime; an authenticated, read-only workspace
 list also detects revoked tokens before handoff. Named Bitbucket accounts must be
@@ -268,9 +275,11 @@ command; `auth exec` checks readiness before launch, not throughout execution.
 
 Status/silent refresh commands have a 30-second deadline (`--timeout`); browser/MFA
 commands have a 180-second deadline (`--login-timeout`). Each target gets at most
-one refresh sequence, with Bitbucket silent renewal before a browser fallback.
+one refresh sequence. In `--reuse-valid` mode, Bitbucket tries silent renewal
+before a browser fallback.
 Permission, malformed-output, installation and connectivity failures do not cause
-login loops. After inconclusive issuance, the normal cache is checked once without reissuing.
+login loops. In `--reuse-valid` mode, inconclusive issuance checks the cache once without
+reissuing. Forced renewal requires a successful provider response and a cache check.
 Independent targets continue after a failure. Cancellation returns
 130, timeout/access failures return 1, and invalid CLI usage returns 2. Auth
 subprocesses run in supervised process groups; descendants are cleaned even after

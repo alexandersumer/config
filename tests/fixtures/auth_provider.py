@@ -112,7 +112,7 @@ elif name == 'twg':
         if not state.get('refresh_stale'):
             state['twg_valid'] = True
             save()
-        print(json.dumps({'data': {'status': 'refreshed', 'secret': secret}}))
+        print(json.dumps({'data': {'status': state.get('twg_refresh_status', 'refreshed'), 'secret': secret}}))
     else:
         raise RuntimeError('Unexpected TWG command')
 elif name == 'atlas':

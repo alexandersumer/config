@@ -49,7 +49,7 @@ impl Fixture {
             .collect()
     }
     fn run(&self, extra: &[&str], expected: i32) -> Value {
-        let mut c = self.command(&["auth", "preflight", "--json"]);
+        let mut c = self.command(&["auth", "preflight", "--reuse-valid", "--json"]);
         let out = c.args(extra).output().unwrap();
         assert_eq!(out.status.code(), Some(expected), "{}", text(&out));
         assert!(!text(&out).contains(SECRET), "{}", text(&out));
@@ -408,14 +408,28 @@ fn successful_leader_exit_still_cleans_descendants() {
 fn coordination_serializes_refreshes_and_rechecks_after_waiting() {
     let f = Fixture::new(json!({"atlas_valid":false,"prompt":true}));
     let first = f
-        .command(&["auth", "preflight", "--profile", "logs", "--json"])
+        .command(&[
+            "auth",
+            "preflight",
+            "--reuse-valid",
+            "--profile",
+            "logs",
+            "--json",
+        ])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
     wait_file(&f.root.path().join("started"));
     let mut second = f
-        .command(&["auth", "preflight", "--profile", "logs", "--json"])
+        .command(&[
+            "auth",
+            "preflight",
+            "--reuse-valid",
+            "--profile",
+            "logs",
+            "--json",
+        ])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -711,4 +725,104 @@ fn issuance_outage_is_not_mislabeled_as_missing_human_mfa() {
         .unwrap()
         .contains("issuance failed"));
     assert_eq!(f.calls().len(), 3);
+}
+
+#[test]
+fn default_preflight_forces_every_valid_provider_once_on_every_invocation() {
+    let f = Fixture::new(json!({}));
+    for _ in 0..2 {
+        let out = f
+            .command(&["auth", "preflight", "--json"])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(0), "{}", text(&out));
+        assert!(!text(&out).contains(SECRET));
+        let result: Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert!(result["targets"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|v| v["status"] == "refreshed"));
+    }
+    for provider in ["bb", "twg", "atlas"] {
+        let calls = f.calls();
+        let renewals: Vec<_> = calls
+            .iter()
+            .filter(|c| {
+                c[0] == provider
+                    && (c[1][1] == "login"
+                        || c[1][1] == "refresh"
+                        || c[1].as_array().unwrap().contains(&json!("--force")))
+            })
+            .collect();
+        assert_eq!(
+            renewals.len(),
+            2,
+            "{provider} must renew exactly once per invocation"
+        );
+    }
+    assert!(f
+        .calls()
+        .iter()
+        .filter(|c| c[0] == "bb" && c[1][1] == "login")
+        .all(|c| c[1] == json!(["auth", "login", "--account", "office"])));
+}
+#[test]
+fn forced_preflight_does_not_hide_failed_renewal_behind_valid_cache() {
+    let f = Fixture::new(json!({"refresh_fails":true}));
+    let out = f
+        .command(&["auth", "preflight", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(!text(&out).contains(SECRET));
+    let result: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(result["targets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|v| v["status"] != "refreshed" && v["status"] != "valid"));
+    assert_eq!(
+        f.calls()
+            .iter()
+            .filter(|c| c[0] == "atlas" && c[1].as_array().unwrap().contains(&json!("--force")))
+            .count(),
+        1
+    );
+}
+#[test]
+fn forced_noninteractive_does_not_claim_existing_credentials_were_renewed() {
+    let f = Fixture::new(json!({}));
+    let out = f
+        .command(&["auth", "preflight", "--non-interactive", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let result: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(result["targets"][0]["status"], "failed");
+    assert_eq!(result["targets"][1]["status"], "refreshed");
+    assert_eq!(result["targets"][2]["status"], "blocked");
+    assert!(!f.calls().iter().any(|c| c[1][1] == "login"
+        || c[1].as_array().unwrap().contains(&json!("--force")) && c[0] == "atlas"));
+}
+
+#[test]
+fn forced_twg_requires_confirmed_renewal_not_a_skipped_refresh() {
+    for status in ["not_due", "skipped", "fresh", "unknown"] {
+        let f = Fixture::new(json!({"twg_refresh_status":status}));
+        let out = f
+            .command(&["auth", "preflight", "--profile", "code", "--json"])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1), "{status}");
+        let result: Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(result["targets"][1]["status"], "blocked", "{status}");
+        assert_eq!(
+            f.calls()
+                .iter()
+                .filter(|c| c[0] == "twg" && c[1][1] == "refresh")
+                .count(),
+            1
+        );
+    }
 }

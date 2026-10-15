@@ -323,21 +323,27 @@ fn refresh(
     match target {
         Target::Bitbucket { account } => {
             // Token retrieval performs the provider's supported silent OAuth refresh.
+            let force = !options.reuse_valid;
+            if force && options.non_interactive {
+                return Err("Bitbucket forced renewal requires browser login; rerun interactively or use --reuse-valid".into());
+            }
             let mut c = command("bb", &["auth", "token"]);
             if let Some(account) = account {
                 c.args(["--account", account]);
             }
-            let output = call(c, options, false)?;
-            if output.code != 0 && !auth_error(&output) {
-                return Err("Bitbucket silent refresh failed with a non-auth error".into());
-            }
-            if let Probe::Valid(e) = probe(target, options)? {
-                if enough(&e, options) {
-                    return Ok(true);
+            if !force {
+                let output = call(c, options, false)?;
+                if output.code != 0 && !auth_error(&output) {
+                    return Err("Bitbucket silent refresh failed with a non-auth error".into());
                 }
-            }
-            if options.non_interactive {
-                return Ok(false);
+                if let Probe::Valid(e) = probe(target, options)? {
+                    if enough(&e, options) {
+                        return Ok(true);
+                    }
+                }
+                if options.non_interactive {
+                    return Ok(false);
+                }
             }
             let selected = account
                 .as_ref()
@@ -367,7 +373,10 @@ fn refresh(
             Ok(value
                 .pointer("/data/status")
                 .and_then(Value::as_str)
-                .is_some_and(|s| ["refreshed", "fresh", "not_due", "skipped"].contains(&s)))
+                .is_some_and(|s| {
+                    s == "refreshed"
+                        || (options.reuse_valid && ["fresh", "not_due", "skipped"].contains(&s))
+                }))
         }
         Target::Slauth { .. } => {
             if options.non_interactive {
@@ -425,7 +434,9 @@ pub(crate) fn check(target: &Target, options: &Options) -> Value {
     let run = || -> Result<Value, String> {
         let initial = probe(target, options)?;
         let evidence = match initial {
-            Probe::Valid(e) if enough(&e, options) => return Ok(ready(target, e, false)),
+            Probe::Valid(e) if enough(&e, options) && (options.check || options.reuse_valid) => {
+                return Ok(ready(target, e, false))
+            }
             Probe::Valid(e) => Some(e),
             Probe::Missing => None,
             Probe::MissingForAccount(account) => Some(Evidence {
@@ -454,7 +465,7 @@ pub(crate) fn check(target: &Target, options: &Options) -> Value {
             Err(error) => {
                 // Issuance can finish writing its normal cache just before a
                 // timeout or provider error. Check once; never repeat issuance.
-                if !crate::runtime::cancelled() {
+                if options.reuse_valid && !crate::runtime::cancelled() {
                     if let Ok(Probe::Valid(cached)) = probe(target, options) {
                         if enough(&cached, options) {
                             return Ok(ready(target, cached, true));
@@ -464,6 +475,9 @@ pub(crate) fn check(target: &Target, options: &Options) -> Value {
                 return Err(error);
             }
         };
+        if !options.reuse_valid && !refreshed {
+            return Ok(blocked(target, "Provider did not confirm forced renewal; existing cached access is not proof of renewal", action));
+        }
         // A successful issuance is not proof. Recheck the provider's normal cache.
         match probe(target, options)? {
             Probe::Valid(e) if enough(&e, options) => Ok(ready(target, e, true)),
