@@ -1,556 +1,84 @@
 # config
 
-Personal configuration and agent-skill registry.
+Personal workstation configuration, shared agent skills, and the `workctl` CLI.
 
-## Workstation CLI
+## Set up
 
-`workctl` is the public workstation tool. Git maintenance and authentication readiness are its public domains;
-configuration installation and CI remain internal `config-tools` commands.
-There are no standalone checkout-reset or worktree-cleanup aliases.
+Run from this checkout with Rust and Cargo installed:
 
 ```sh
-workctl git reset ~/atlassian ~/oss ~/src ~/stable
-workctl git worktree clean ~/atlassian ~/oss ~/src ~/stable
-workctl git worktree clean --apply ~/atlassian ~/oss ~/src ~/stable
-workctl auth preflight
-workctl auth exec --profile code -- bb pr list
-workctl doctor
-workctl completions zsh
-```
-
-Build with `cargo build --locked --release`. Install only the workstation CLI with
-`cargo run --release -- install-workctl`; use `--home PATH` for an isolated home.
-The full configuration installer also installs it. New completion directories use permissions accepted by zsh’s security checks,
-including when the shell has a group-writable umask. Both update the internal managed
-`config-tools` installer and install the compiled binary
-atomically at `~/.local/bin/workctl` and generated zsh completion at
-`~/.local/share/zsh/site-functions/_workctl`. The tracked zsh configuration adds
-that directory to `fpath` before Oh My Zsh initializes completions. For another
-zsh configuration, add it to `fpath` before `compinit` yourself.
-
-The migration removes `~/.local/bin/reset_to_origin` only when it is an executable
-regular file byte-identical to the current installer or the previously installed
-managed `config-tools` binary. Unknown files and symlinks block migration and
-remain untouched. No shell startup files are rewritten by `install-workctl`.
-Use a fresh shell or reload your shell configuration after cutover; the tracked zsh
-configuration removes the retired function and alias and refreshes command hashes.
-
-Every public command has Clap-generated help, version information, and examples.
-Use `--` before paths beginning with a dash. Git options belong to their operation:
-`--jobs` applies to reset and cleanup, and `--apply` belongs to cleanup. No paths means `.`;
-there are no hardcoded workspace roots. Help and completions require no Git access.
-Exit codes are 0 for success, 1 for operational failure or blocked cleanup,
-2 for invalid usage, and 130 for interruption.
-
-### Checkout reset
-
-```sh
-workctl git reset --list .
-workctl git reset --jobs 4 --attempts 3 --timeout 300 /path/to/workspace
-workctl git reset --remote upstream --branch release /path/to/repository
-workctl git reset --json /path/to/workspace
-```
-
-Reset and cleanup announce discovery before probing repositories. Interactive terminals
-show discovery elapsed time; redirected output includes periodic discovery updates.
-The final elapsed time includes discovery as well as execution.
-
-A checkout or directory inside it selects its primary checkout. Containers recursively
-select primary checkouts, stopping at repositories and skipping directory symlinks.
-Overlapping scopes are deduplicated. Linked worktrees encountered in containers are
-excluded; explicit linked-worktree reset targets are refused. Invalid scope prevents
-all resets. `--list` is inspection only and does not fetch.
-
-The existing reset policy is preserved: tracked/index changes, dirty submodules,
-unfinished Git operations, masked tracked paths, and untracked/ignored paths that
-collide with either the fetched target or local target branch cause refusal.
-The remote's advertised HEAD determines the default branch. Fetch mappings must
-resolve it unambiguously, match the fetched tip, and never replace local branches.
-Hooks are followed by branch, commit, and tracked-file verification. Other branches,
-linked worktree files, and noncolliding local files remain intact. Replaced target
-branch tips are retained under `refs/home-reset-backups/`. Detached-HEAD commits
-receive no additional backup. Successful runs summarize saved recovery refs;
-`--verbose` shows individual recovery commands. Failed checkouts show their recovery
-commands by default, and JSON always includes the exact backup refs.
-
-The measured existing default remains 32 workers, bounded by checkout count;
-this migration introduces no new performance claim. `--jobs` accepts 1–32,
-`--attempts` accepts 1–10 total attempts, and `--timeout` accepts 1–86400 seconds
-per attempt. Transient failures use bounded backoff. Authentication, locks, and
-safety refusals are not retried. There is no transaction or rollback across checkouts:
-fetches, backups, switches, and upstream changes may persist after later failure.
-
-### Linked-worktree cleanup
-
-Cleanup runs up to four worktrees concurrently by default; `--jobs N` accepts 1–32.
-Worktrees from the same repository share one exclusive coordination lock for the
-invocation. Recovery-ref writes are serialized within each repository; inspections
-and native Git removals run concurrently. Other workctl invocations remain excluded
-until the batch finishes. Each removal still performs its own final safety inspection.
-JSON reports the worker count and per-worktree inspection, recovery, and removal
-timings; `--verbose` prints those timings. JSON results retain discovery order even
-when worktrees finish out of order.
-
-Measure complete cleanup on dependency-heavy disposable worktrees with:
-
-```sh
-python3 examples/cleanup_benchmark.py --candidate target/release/workctl \
-  --baseline /path/to/previous/workctl --output /tmp/cleanup-benchmark.json
-```
-
-The benchmark compares worker counts on fresh worktrees sharing one repository and
-verifies recovery refs, protected local work, primary checkout state, and removal.
-
-The default is an exact removal plan. `--apply` executes eligible removals without
-an interactive question. A container scope selects registered linked worktrees
-beneath it. A primary checkout selects all its registered linked worktrees, including
-paths outside the checkout directory; those full paths are shown. An explicit linked
-worktree selects only itself. Primary checkouts always remain protected.
-
-Cleanup protects tracked changes, untracked files, masked tracked paths, ongoing Git
-operations, locked worktrees, and unverifiable ownership. These are signs of work
-that must stay in place. These worktrees are reported as `protected`; leaving active
-work in place is a successful cleanup outcome, not an error. Ignored files do not block an otherwise idle worktree:
-`--apply` removes them with the worktree. Preview reports their counts and full
-worktree paths. Ignored files can include local configuration and secrets; inspect
-the preview before applying a container-wide cleanup.
-
-Committed history does not have to be pushed before cleanup. Application first
-atomically saves HEAD as `refs/workctl/cleanup/<HEAD>` in the protected primary
-repository and verifies that ref. Preview never writes it. Local branches also
-remain. Cleanup works offline and never pushes commits. To restore committed files:
-
-```sh
-git -C /path/to/primary worktree add --detach /path/to/restored refs/workctl/cleanup/<HEAD>
-```
-
-Recovery refs preserve committed history, not discarded ignored files. A failure to
-save or verify the recovery ref blocks deletion. These refs are intentional retained
-deliverables, not temporary files.
-
-Use `--strict` for the original publication policy: all local files including ignored
-files are protected, and every reachable commit must be proven published against a
-fresh isolated fetch of current remote heads and tags. Cached tracking refs are not
-proof. Source URL rewrite rules, shallow repositories, case-colliding refs, and
-commit-only filtered evidence fetches are supported without changing source refs or
-shallow boundaries. Remote verification remains bounded by `--timeout`.
-In strict mode, repeat `--discard-ignored PATH` to authorize ignored-file loss and
-`--preserve-commits PATH` to use local recovery instead of remote publication at an
-exact selected worktree.
-
-For a worktree whose **all local files** may be lost, explicit per-path approval is
-still required:
-
-```sh
-workctl git worktree clean --apply \
-  --discard-local /path/to/work/feature /path/to/work
-```
-
-No option authorizes removing main checkouts, locks, missing paths, nested
-repositories, populated submodule paths, private submodule object stores, or
-unverifiable registrations/ownership.
-Empty or absent uninitialized gitlink paths are supported, including gitlinks with
-no `.gitmodules` mapping. Normal cleanup and ignored-only approval use native
-`git worktree remove`; `--force` is used only with `--discard-local`. Cleanup never
-retries removal.
-`--timeout` bounds each candidate's inspection, remote verification, removal, and
-final verification together. Discovery Git probes have independent 15-second bounds.
-
-Application rechecks files, locks, topology, HEAD, and registration before removal.
-Strict mode also rechecks publication and then local state after remote I/O. Success requires both the
-path and its Git registration to be absent. Outcomes are `would remove`, `removed`,
-`protected`, `blocked`, or `interrupted`. Active local work stays protected with exit 0;
-actual safety blockers or deletion errors cause exit 1.
-A removed worktree's local branch is retained. Stale registrations with missing
-filesystem paths remain blockers, rather than being pruned speculatively.
-
-Both operations share process supervision and common-directory locks. These locks
-coordinate workctl and the former reset runner, not editors or unrelated Git commands;
-preview may create the persistent `repo-batch.lock` coordination file in the common
-Git directory. It does not change refs, tracked files, or worktree registrations.
-Publication checks access the remote and use automatically removed temporary object
-stores. The coordination file remains in place so concurrent callers lock the same inode;
-run while repositories are otherwise idle. Cancellation/deadlines terminate process
-groups before locks are released. Descendants inherit the lock so forced supervisor
-termination cannot release it while they run. Interrupted Git writes may leave native
-locks requiring investigation; workctl never removes those locks.
-
-### Presentation and machine output
-
-Human output names the operation, scope/counts, current activity, and final outcome.
-Indicatif updates an interactive progress row; permanent failures remain visible above
-it. Redirected stderr uses plain progress lines at most once every 15 seconds.
-Full paths remain visible, with terminal wrapping rather than truncation. Durations
-are readable. Status color includes the equivalent words, respects `NO_COLOR`,
-`CLICOLOR=0`, and `TERM=dumb`, and is disabled on redirected streams.
-Stdout contains requested results; stderr contains progress and diagnostics.
-
-Detailed Git logs require `--verbose` or an actionable failure. Reset retains private
-diagnostics on failure/interruption or `--keep-logs`, including `results.json` and
-`excluded-worktrees.json`. Successful default runs remove them. Cleanup's temporary
-publication repositories and captures are removed automatically.
-
-`--json` works before or after a subcommand and produces one undecorated JSON document
-on stdout. Reset and doctor use schema version 1; cleanup uses version 2. Each has `schema_version`, `operation`, and `status`; operational
-errors have `error`. Reset and cleanup include scope, per-target `results`, and summary
-counts with `elapsed_seconds`. Reset additionally reports excluded worktrees,
-recovery refs, attempts, and retained diagnostics. Cleanup reports protected primary
-checkouts, discard decisions, and publication/local-data evidence for eligible targets.
-Cleanup version 2 reports `policy` (`pragmatic` or `strict`) and `protected_worktrees`
-in the summary. Pragmatic local-work skips have target status `protected` and do not
-make the command fail. Strict mode retains `blocked` and exit 1 for these refusals.
-Evidence includes planned/saved recovery refs and explicitly distinguishes local
-recovery from verified remote publication. Other pre-removal refusals use `blocked`. After removal starts,
-`removed` requires verified absence of both the path and registration; `failed` means
-one remains; `unverified` means the final state could not be checked. Inspected evidence
-is retained for these outcomes. A verified removal following a Git error still counts
-as removed, carries a reason, and exits unsuccessfully. Summary `failed` and `unverified`
-count those outcomes; `errors` also includes verified removals with Git errors. These
-errors produce operation status `failed` and exit 1 (SIGINT remains exit 130).
-Consumers of cleanup version 1 must handle these statuses and summary fields before
-accepting version 2. No failed deletion is retried.
-Per-target `path` is a display string; `path_bytes` is the exact Unix path as an array
-of byte values, preserving non-UTF-8 filenames. Help, version, and usage errors follow
-Clap conventions even when `--json` is present. Doctor checks Git 2.36+, the executable,
-temporary storage, and relevant process/lock capabilities without repairs. It supports
-standalone executables and does not certify managed installation or shell configuration;
-use `config-tools check-install` for managed installation checks.
-
-### Authentication readiness
-
-`workctl auth preflight` force-renews every declared credential target, even when
-its cached credential is still valid, and then verifies the provider's normal cache.
-Run it before leaving and complete the browser/MFA prompts. Bitbucket uses browser
-OAuth login for the selected account because its CLI has no force-refresh command;
-TWG uses forced OAuth refresh and SLAuth uses forced issuance. Each target is
-attempted once. Failed renewal is reported even when an older token still works.
-Use `--reuse-valid` to renew only missing or short-lived credentials, or `--check`
-to check access without explicitly renewing.
-`workctl auth exec` does that automatically before starting another command:
-
-```sh
-workctl auth preflight
-workctl auth preflight --profile code --check --json
-workctl auth preflight --profile logs --non-interactive
-workctl auth exec --profile work -- codex exec 'continue the staging acceptance run'
-workctl auth exec --profile code -- bb pr list
-```
-
-The built-in `work` profile contains Bitbucket OAuth, TWG OAuth, and production
-Splunk SLAuth (`splunk.paas-inf.net`, `atlassian-all`, MFA). `code` contains
-Bitbucket and TWG; `logs` contains Splunk only. Select the narrowest profile for the
-work. These are explicit requirements, not guesses about other running chats.
-Splunk issuance also warms the underlying Atlas login, but does not prove access
-to every Atlas service or refresh service-signed runtime credentials.
-
-Provider CLIs retain ownership of credential storage, account selection, and
-renewal. workctl never copies credentials, changes home/config locations, starts a
-background renewal daemon, or stores tokens in its own files. `--check` makes no
-explicit refresh/login calls; provider CLIs may still perform their normal
-transparent renewal during status checks. `--non-interactive` permits silent
-TWG OAuth refresh (and Bitbucket silent refresh with `--reuse-valid`), but never
-starts Bitbucket browser login or SLAuth
-issuance that could require browser/MFA. Missing TWG refresh authorization reports
-an actionable `twg login` requirement: the installed TWG login requires a
-controlling terminal for account/site selection. TWG's separate optional Bitbucket
-token is reported by `twg doctor`, but does not invalidate a working TWG OAuth
-credential; workctl verifies the separate `bb` CLI credential for Bitbucket use.
-It does not repair TWG's optional Bitbucket API token or claim `twg bb` is ready.
-
-With `--reuse-valid`, the default refresh threshold is 300 seconds. `--min-valid-for SECONDS` applies to
-known expiry, not to providers with unknown expiry. Bitbucket's supported OAuth
-status formats report a conservative lifetime; an authenticated, read-only workspace
-list also detects revoked tokens before handoff. Named Bitbucket accounts must be
-active for this proof, since the API command has no account override; workctl does
-not silently switch accounts. Unknown formats fail closed.
-TWG doctor proves API connectivity but exposes no credential expiry, so its result
-explicitly reports unknown lifetime. SLAuth parses the provider's cached JWT for
-requested audience, expiry and not-before claims; Atlas owns token issuance and
-validation. SLAuth TTL is capped by policy at one hour or the remaining underlying
-login lifetime. Asking for two hours therefore blocks, even after successful
-issuance. No preflight can guarantee future access after revocation or future MFA.
-Earlier credentials are aged again at handoff in case a later MFA flow took time.
-For long commands, use the provider's supported renewal mechanism inside that
-command; `auth exec` checks readiness before launch, not throughout execution.
-
-Status/silent refresh commands have a 30-second deadline (`--timeout`); browser/MFA
-commands have a 180-second deadline (`--login-timeout`). Each target gets at most
-one refresh sequence. In `--reuse-valid` mode, Bitbucket tries silent renewal
-before a browser fallback.
-Permission, malformed-output, installation and connectivity failures do not cause
-login loops. In `--reuse-valid` mode, inconclusive issuance checks the cache once without
-reissuing. Forced renewal requires a successful provider response and a cache check.
-Independent targets continue after a failure. Cancellation returns
-130, timeout/access failures return 1, and invalid CLI usage returns 2. Auth
-subprocesses run in supervised process groups; descendants are cleaned even after
-a successful leader exit. Captures use bounded in-memory pipes, not temporary
-credential files. Only a narrowly validated Okta activation URL can be forwarded
-from provider output; provider diagnostics and credential output are never printed.
-Complete the browser opened by Bitbucket if it needs a new login.
-
-Concurrent workctl preflights coordinate through an owned, private regular lock in
-the OS temporary directory, wait for a bounded interval, and recheck caches after
-acquiring it. The lock does not coordinate unrelated tools or invocations using a
-different temporary directory. Unsafe symlink/FIFO/public lock files are refused.
-The persistent lock contains no credentials and is not deleted on release.
-
-`auth preflight --json` emits one schema-versioned result with per-target status,
-remaining lifetime where known, expiry/check timestamps, actions, and honest
-unknown-expiry notes. No provider output is embedded. `auth exec` sends its report
-to stderr and replaces itself with the supplied argv, preserving stdin, terminal,
-environment, stdout, signals and exact child exit status. It never invokes a shell
-unless you explicitly supply one. Failed preflight prevents the child from running.
-`--json` is rejected for `auth exec`, keeping child stdout intact. One preflight is
-performed per invocation; existing sessions must invoke this wrapper or the command
-from their launcher to receive automatic preflight.
-
-Custom profiles contain only credential descriptors, never tokens or commands:
-
-```json
-{
-  "schema_version": 1,
-  "profiles": {
-    "staging": [
-      {"provider": "bitbucket", "account": "default"},
-      {"provider": "twg"},
-      {"provider": "slauth", "audience": "micros-log-insight", "environment": "prod", "groups": [], "mfa": false}
-    ]
-  }
-}
-```
-
-Use `workctl auth preflight --config /path/to/auth.json --profile staging` or pass
-the same options to `auth exec`. Config is explicit; workctl does not search home
-credential stores. Files must be regular and at most 64 KiB. Schema versions,
-unknown fields, empty profiles, duplicate credential descriptors, invalid audiences,
-groups and environments are rejected before calling any provider.
-
-```sh
-# Deterministic CLI/OS contracts with external provider simulators (CI, no secrets):
-cargo test --locked --test auth_cli
-# Actual installed providers, network, shared caches, and browser/MFA (explicit):
-cargo test --locked --test auth_live -- --ignored --nocapture
-# Narrow service-specific live proof; this does not prove Splunk MFA:
-WORKCTL_AUTH_LIVE_CONFIG=/path/to/auth.json WORKCTL_AUTH_LIVE_PROFILE=staging \
-  cargo test --locked --test auth_live real_slauth -- --ignored --nocapture
-```
-
-The required Linux/macOS CI lane runs the auth CLI suite alongside the existing
-Git contracts. It covers cache reuse, refresh/recheck, stale caches, unknown expiry,
-TTL limits, account preservation, exact descriptors, noninteractive/check-only
-behavior, partial failure, malformed responses, secret suppression, live activation
-prompts, output bounds, unsafe files, concurrency, deadlines, cancellation,
-descendant cleanup, and command argv/stdin/exit behavior. These simulator-backed
-adapter tests are distinct from real account acceptance. The explicit live lane
-fails if a required provider, credential, network or browser/MFA step is unavailable;
-it verifies real preflight, cached reuse, wrapped output/exit, and the impossible
-SLAuth lifetime case. Ordinary CI skips this account-dependent lane explicitly.
-
-### Architecture and verification
-
-`src/workctl.rs` owns the public command hierarchy. `src/runtime.rs` owns process
-capture, deadlines, cancellation, and group lifetime. `src/auth/` owns validated
-credential profiles, provider adapters, bounded secret captures, and auth coordination. `src/presentation.rs` owns shared
-rendering and JSON conventions. `src/git_domain/` owns topology, common-directory locks,
-publication, and separate reset/cleanup policies. No plugin registry or command DSL
-is involved.
-
-```sh
-cargo test --locked --lib --test reset_cli --test reset_e2e --test workctl --test auth_cli
-# Real protocol E2E only (requires Git and loopback networking):
-cargo test --locked --test reset_e2e
-cargo run -- check
-cargo run -- pre-commit
-```
-
-Real-Git tests cover dirty files, hooks, backup refs, custom fetch mappings,
-publication, deleted remote branches, scope protection, discard decisions, nested
-repositories, locks, revalidation, cancellation, deadlines, concurrency, partial
-failure, and resulting registrations/filesystem state. Presentation checks cover
-narrow/normal terminal widths, redirected progress, JSON, disabled color, and broken
-pipes. Installation tests use temporary homes and fresh sh/zsh shells, verify
-completion files, and preserve unrelated legacy files. The Git protocol E2E starts a
-loopback daemon and checks reset backups, cleanup previews and partial application,
-stale remote references, explicit local-data discard, and persisted registrations.
-Missing Git or loopback networking fails the lane instead of skipping it.
-The CI workflow runs the public CLI
-contracts on Linux and macOS; configured CI is distinct from a completed hosted run.
-
-A disposable worker benchmark remains available:
-
-```sh
-cargo run --release --example reset_benchmark -- \
-  --binary target/release/workctl --output /tmp/reset-worker-benchmark.json
-```
-
-## Tooling
-
-Config tooling is implemented in Rust via the `config-tools` binary.
-
-```bash
-cargo run -- check
-cargo run -- check-codex-skills
-cargo run -- check-claude-skills
-cargo run -- check-install
-cargo run -- prepare
-cargo run -- pre-commit
-cargo run -- repair-codex-config
-cargo run -- validate
-cargo run -- test-validate
 cargo run -- install
+cargo run -- install-git-hooks
 ```
 
-Command roles:
+`install` links the managed shell, Ghostty, Relay, and agent configuration into
+this user's home directory. It also installs `config-tools` and `workctl` in
+`~/.local/bin`. Existing non-managed files are preserved. Use `--home PATH` to
+install into an isolated home instead.
 
-- `check`: non-mutating verification for formatting, build, unit tests, skill validation, and regression tests.
-- `check-codex-skills`: non-mutating verification that `~/.codex/skills` mirrors custom skills from `.agents/skills`, Codex config has no deprecated/disabled skill-discovery flags, and Codex prompt input sees the managed skills from both this checkout and the home directory.
-- `check-claude-skills`: non-mutating verification that `~/.claude/skills` mirrors custom skills from `.agents/skills`, with every managed link resolving to its registry-validated source and no stale managed links left behind.
-- `check-install`: non-mutating verification that all managed home config links, Codex skills/config, Claude Code skills, and the managed config-tools binary match this checkout.
-- `repair-codex-config`: removes deprecated/disabled Codex feature flags from `~/.codex/config.toml`.
-- `prepare`: runs the same verification as `check`.
-- `pre-commit`: validates an isolated snapshot of the Git index, so unstaged and untracked work cannot affect the commit checks. Outside Git, runs `prepare` on the supplied checkout. No home installation is required.
-- `install`: intentional home-directory mutation for `~/.agents`, custom `~/.codex/skills` and `~/.claude/skills` symlinks, Codex config flag repair, `~/.local/bin/config-tools` and `~/.local/bin/workctl`. Codex itself is installed and updated through its official distribution; this installer does not create a Codex launcher.
-- `install-git-hooks`: intentional local Git config mutation for `core.hooksPath`.
+Open a fresh shell after installation. To verify the installed configuration:
 
-## Custom skills
+```sh
+cargo run -- check-install
+```
 
-This checkout is the single source of truth for custom skills. One `SKILL.md` per skill is shared by every consumer; install only adds per-consumer symlinks that point back at it:
+See [Configuration and skills](docs/configuration.md) for managed paths,
+individual checks, and skill updates.
 
-- Source: `.agents/skills/<name>/SKILL.md`
-- Agent runtime: `~/.agents -> <checkout>/.agents`
-- Codex link: `~/.codex/skills/<name> -> <checkout>/.agents/skills/<name>`
-- Claude Code link: `~/.claude/skills/<name> -> <checkout>/.agents/skills/<name>`
+## Everyday commands
 
-The same discovery rule applies to every consumer: a top-level, non-hidden `.agents/skills/<name>` directory containing `SKILL.md` is linked; hidden directories and directories without `SKILL.md` are skipped. Linking is idempotent, never clobbers an existing non-managed entry, and removes managed links whose source skill no longer exists.
+`workctl` handles Git maintenance and authentication readiness. Use `--help`
+after any command to see its options.
 
-### Codex
+| Task | Command |
+| --- | --- |
+| Inspect reset targets without fetching | `workctl git reset --list ~/src` |
+| Reset primary checkouts to their remote default branch | `workctl git reset ~/src` |
+| Preview linked-worktree cleanup | `workctl git worktree clean ~/src` |
+| Apply linked-worktree cleanup | `workctl git worktree clean --apply ~/src` |
+| Renew and verify work credentials | `workctl auth preflight` |
+| Check code credentials, then run a command | `workctl auth exec --profile code -- bb pr list` |
+| Check CLI prerequisites | `workctl doctor` |
 
-Codex v0.131 does not expose custom skills as `/skill-name` slash commands. The `/` menu is for built-in TUI commands such as `/skills` and `/subagents`. Invoke these custom skills with the skill mention surface instead, for example:
+Replace `~/src` with a repository or workspace directory. With no path, Git
+commands use the current directory.
+
+Reset refuses tracked changes and other unsafe states. Cleanup previews by
+default. With `--apply`, it protects active local work, saves committed history
+in recovery refs, and removes eligible worktrees **including their ignored
+files**. Review the preview before applying cleanup across a workspace.
+See [Git maintenance](docs/workctl.md) for the full policies and recovery commands.
+
+## Use custom skills
+
+Custom skills live in [`.agents/skills`](.agents/skills). Installation links the
+same source directories into `~/.codex/skills` and `~/.claude/skills`.
+
+In Codex, invoke a skill with a skill mention, for example:
 
 ```text
 $surgical-edit
 $review-solo
-$review-deep
 $git-publish-to-origin
-$one-clear-sentence
 ```
 
-Do not add `register_cmd` to skill front matter. Current Codex ignores that legacy key, so this repo rejects it to avoid implying that custom skills appear as slash commands.
+For discovery checks and TWG refresh instructions, see
+[Configuration and skills](docs/configuration.md#custom-skills).
 
-### Claude Code
+## Change this repository
 
-Claude Code discovers personal skills from `~/.claude/skills/<name>/SKILL.md`, which is the same `SKILL.md` format the registry already validates (`name`, `description`, `allowed-tools`). Install links every custom skill into `~/.claude/skills`, creating the directory if it does not exist. Discoverability is proven deterministically: `check-claude-skills` asserts each `~/.claude/skills/<name>` resolves to its registry-validated source, which is exactly the contract Claude Code's loader requires.
+Enable the Git hook with `cargo run -- install-git-hooks`. Each commit then runs
+`cargo run -- pre-commit` against an isolated snapshot of the staged files.
+This checks formatting, compilation, tests, and skill validation. Installation
+drift is checked separately and does not block commits.
 
-## TWG CLI skills
+See [Development and verification](docs/development.md) for check commands,
+architecture, and reset benchmarks. For isolated installation verification, see
+[Configuration and skills](docs/configuration.md#verify-installation).
 
-The tracked `twg*` skills are the workflow layer for the TWG CLI. They teach agents to use live CLI help instead of guessing command grammar, route Jira, Confluence, Bitbucket, and cross-product requests to focused workflows, prefer machine-readable output, and distinguish PATH, authentication, authorization, and command errors.
+## Reference
 
-TWG remains the source of the bundle. Because `~/.agents` links into this checkout, an upstream skill refresh overwrites files here and can remove skills omitted by a newer release. Save existing changes before updating, review the resulting diff, and preserve local OAuth recovery, review-context behavior, and the benchmark helper before publishing. Keep unrelated config changes out of the refresh commit. The updater can also replace managed agent links with TWG-owned copies. Back up those copies before restoring links to this checkout, and preserve unrelated skill directories. Then reconcile the managed Codex and Claude Code links:
-
-```bash
-twg update --refresh-skills
-cargo run -- validate
-cargo run -- install
-```
-
-Use these read-only checks when diagnosing access or discovery:
-
-```bash
-twg doctor -o json
-twg help discover-skills "<intent>" -o json
-twg help describe "<command-or-skill>" -o json
-cargo run -- check-codex-skills
-cargo run -- check-claude-skills
-```
-
-Do not copy TWG's full command catalog into `AGENTS.md`: command details change with the CLI, while the installed skills use progressive disclosure and query live help. If a new Codex session does not show the skills, run `cargo run -- install`, verify with `check-codex-skills`, and restart Codex so it rebuilds its skill inventory.
-
-## Git hooks
-
-This config checkout uses Git's native tracked-hooks convention: `.githooks/pre-commit` is tracked, and the local checkout is configured with:
-
-```bash
-git config core.hooksPath .githooks
-```
-
-Use the Rust helper to configure that for this checkout:
-
-```bash
-cargo run -- install-git-hooks
-```
-
-The pre-commit hook delegates to Rust:
-
-```bash
-cargo run -- pre-commit
-```
-
-Git intentionally does not auto-enable arbitrary hooks from a freshly cloned checkout for security reasons. A fresh checkout therefore needs one local setup step (`cargo run -- install-git-hooks`) before hooks will run. After that, hooks are enabled for that checkout.
-
-## Acceptance criteria
-
-Repository changes must pass these checks locally:
-
-```bash
-cargo run -- pre-commit
-```
-
-The hook runs formatting, compilation, unit and integration tests, skill validation, and regression tests against the staged snapshot. It preserves the working tree and index. Installation regression tests use temporary homes. The pre-commit integration test checks an uninstalled checkout and verifies that invalid skills and failing tests still block commits.
-
-To diagnose the current user's installation, run these explicit checks separately. Installation drift does not block repository commits:
-
-```bash
-cargo run -- check-codex-skills
-cargo run -- check-claude-skills
-cargo run -- check-install
-```
-
-For manual verification of install behavior, use a temporary home without touching the real home directory:
-
-```bash
-cargo run -- prepare
-
-tmp_home="$(mktemp -d)"
-for skill in skill-creator skill-installer; do
-  mkdir -p "$tmp_home/.codex/skills/.system/$skill"
-  printf 'fixture\n' > "$tmp_home/.codex/skills/.system/$skill/SKILL.md"
-done
-cargo run -- install --home "$tmp_home"
-find "$tmp_home" -maxdepth 4 -type l -exec ls -la {} \;
-rm -rf "$tmp_home"
-```
-
-Expected symlink behavior:
-
-- `~/.agents` links to this config checkout's `.agents` directory.
-- `~/.zsh` links to this config checkout's `zsh` directory.
-- `~/.zshrc` links to this config checkout's `zsh/zshrc` file.
-- `~/.config/ghostty/config` links to this config checkout's `ghostty/config` file.
-- `~/Library/Application Support/com.mitchellh.ghostty/config` is absent so Ghostty loads the managed config only once.
-- `~/.config/relay/config.toml` links to this config checkout's `relay/config.toml` file.
-- `~/.local/bin/config-tools` and `~/.local/bin/workctl` are runnable copies of the Rust multicall executable.
-- Codex runs directly from the official Homebrew installation. The shell prefers `/opt/homebrew/bin` over older `/usr/local/bin` tools; no config-repair wrapper is installed.
-- `~/.codex/skills/.system` remains a Codex-owned directory with Codex system skills.
-- Each custom top-level `.agents/skills/<name>/SKILL.md` directory links into `~/.codex/skills/<name>` and `~/.claude/skills/<name>`.
-- `~/.claude/skills` is created if missing; the directory itself is not symlinked, only the per-skill entries inside it.
-- Hidden skill directories and directories without `SKILL.md` are not linked into Codex or Claude Code.
-- Existing non-empty files/directories or unrelated symlinks are not replaced automatically.
-
-## Executable-code check
-
-Tracked non-Rust executables should be limited to repository wiring scripts and skill-owned helper scripts that are invoked directly by their skill documentation.
-
-Verify with:
-
-```bash
-find . -path './.git' -prune -o -path './target' -prune -o -type f -perm -111 -print | sort
-git grep -n -E '^#!|python3|/usr/bin/env|cargo run --quiet --manifest-path' -- ':!README.md'
-```
-
-The executable-file check should print only:
-
-```text
-./.githooks/pre-commit
-```
-
-`.githooks/pre-commit` delegates to Rust and should contain no config-tool logic beyond `cargo run -- pre-commit`.
+- [Configuration and skills](docs/configuration.md): installers, managed links, Codex and Claude Code skills, TWG updates.
+- [Git maintenance](docs/workctl.md): installation, reset, cleanup, recovery, output, and JSON contracts.
+- [Authentication readiness](docs/authentication.md): profiles, renewal, MFA, command execution, and custom configuration.
+- [Development and verification](docs/development.md): hooks, acceptance checks, architecture, and CLI tests.
