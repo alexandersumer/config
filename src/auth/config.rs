@@ -53,6 +53,33 @@ fn production() -> String {
     "prod".into()
 }
 impl Target {
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Self::Bitbucket { .. } => "Bitbucket",
+            Self::Twg {} => "TWG",
+            Self::Slauth { .. } => "SLAuth",
+        }
+    }
+    pub fn scope(&self) -> Option<String> {
+        match self {
+            Self::Slauth {
+                audience,
+                environment,
+                groups,
+                mfa,
+            } => {
+                let mut parts = vec![environment.clone(), audience.clone()];
+                if !groups.is_empty() {
+                    parts.push(format!("groups: {}", groups.join(", ")));
+                }
+                if *mfa {
+                    parts.push("MFA".into());
+                }
+                Some(parts.join(" · "))
+            }
+            _ => None,
+        }
+    }
     pub fn label(&self) -> String {
         match self {
             Self::Bitbucket { account } => {

@@ -91,9 +91,9 @@ The persistent lock contains no credentials and is not deleted on release.
 ## Human-readable output
 
 Human output identifies the selected profile and renewal mode on stderr before
-waiting for the coordination lock. Each target is announced before its provider
+checking credentials. Each target is announced before its provider
 check, so browser/MFA waits have context. The final report lists aligned statuses,
-verified accounts, remaining lifetime or explicitly unknown expiry, and labeled
+verified accounts, readable scope details, remaining lifetime or explicitly unknown expiry, and labeled
 reasons and recovery actions. It ends with the ready count and elapsed time.
 Failed checks say access is not ready rather than implying a verified credential
 with unknown expiry. Color follows the Git commands: terminal-only, with

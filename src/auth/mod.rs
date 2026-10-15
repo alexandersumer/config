@@ -24,12 +24,6 @@ fn result(options: &Options, human: bool) -> Value {
                 inline(&options.profile)
             )
             .map_err(|_| "Cannot display authentication progress")?;
-            writeln!(
-                std::io::stderr(),
-                "  Waiting for authentication lock (up to {}s)…",
-                options.timeout
-            )
-            .map_err(|_| "Cannot display authentication progress")?;
         }
         let _lock = process::Lock::acquire(options.timeout)?;
         let mut results = Vec::new();
@@ -41,14 +35,26 @@ fn result(options: &Options, human: bool) -> Value {
             if human {
                 writeln!(
                     std::io::stderr(),
-                    "  [{}/{}] Checking {}…",
+                    "  [{}/{}] {} {}…",
                     index + 1,
                     total,
-                    target.label()
+                    if options.check {
+                        "Checking"
+                    } else if options.reuse_valid {
+                        "Preparing"
+                    } else {
+                        "Renewing"
+                    },
+                    target.display_name()
                 )
                 .map_err(|_| "Cannot display authentication progress")?;
             }
-            results.push(providers::check(&target, options));
+            let mut checked = providers::check(&target, options);
+            if human {
+                checked["display_name"] = json!(target.display_name());
+                checked["scope"] = json!(target.scope());
+            }
+            results.push(checked);
         }
         // Earlier targets may age while a later MFA flow waits. Evaluate
         // readiness at handoff, not only when each individual check started.
@@ -93,6 +99,23 @@ fn code(result: &Value) -> u8 {
 }
 fn inline(text: &str) -> String {
     crate::presentation::safe_text(text).replace(['\n', '\t'], " ")
+}
+fn lifetime(seconds: u64) -> String {
+    let mut parts = Vec::new();
+    for (value, unit) in [
+        (seconds / 3600, "h"),
+        (seconds % 3600 / 60, "m"),
+        (seconds % 60, "s"),
+    ] {
+        if value > 0 {
+            parts.push(format!("{value}{unit}"));
+        }
+    }
+    if parts.is_empty() {
+        "0s".into()
+    } else {
+        parts.join(" ")
+    }
 }
 fn write_detail(output: &mut dyn Write, label: &str, text: &str) -> std::io::Result<()> {
     let width = std::env::var("COLUMNS")
@@ -139,12 +162,9 @@ fn render(result: &Value, stderr: bool, elapsed: std::time::Duration) -> std::io
         let state = target["status"].as_str().unwrap_or("failed");
         let valid = matches!(state, "valid" | "refreshed");
         ready += usize::from(valid);
-        let ttl = target["remaining_seconds"].as_u64().map(|s| {
-            format!(
-                "{} remaining",
-                crate::presentation::duration(std::time::Duration::from_secs(s))
-            )
-        });
+        let ttl = target["remaining_seconds"]
+            .as_u64()
+            .map(|s| format!("{} remaining", lifetime(s)));
         let detail = ttl.as_deref().unwrap_or(if valid {
             "expiry unknown"
         } else {
@@ -152,14 +172,17 @@ fn render(result: &Value, stderr: bool, elapsed: std::time::Duration) -> std::io
         });
         writeln!(
             output,
-            "  {}  {}  ({detail})",
-            crate::presentation::status(&format!("{state:<11}"), !valid, stderr),
-            inline(target["target"].as_str().unwrap_or("unknown"))
+            "  {:<9}  {}  {detail}",
+            inline(target["display_name"].as_str().unwrap_or("unknown")),
+            crate::presentation::status(&format!("{state:<11}"), !valid, stderr)
         )?;
+        if let Some(scope) = target["scope"].as_str() {
+            write_detail(&mut output, "Scope", scope)?;
+        }
         if let Some(account) = target["account"].as_str() {
             write_detail(&mut output, "Account", account)?;
         }
-        for (key, label) in [("reason", "Reason"), ("action", "Action"), ("note", "Note")] {
+        for (key, label) in [("reason", "Reason"), ("action", "Action")] {
             if let Some(text) = target[key].as_str() {
                 write_detail(&mut output, label, text)?;
             }
@@ -173,12 +196,6 @@ fn render(result: &Value, stderr: bool, elapsed: std::time::Duration) -> std::io
         "  Elapsed {}",
         crate::presentation::duration(elapsed)
     )?;
-    if result["note"].is_string() {
-        writeln!(
-            output,
-            "\nReadiness checked at handoff; future access is not guaranteed."
-        )?;
-    }
     output.flush()
 }
 pub(crate) fn run(options: Options, json_output: bool, child: Option<Vec<OsString>>) -> u8 {

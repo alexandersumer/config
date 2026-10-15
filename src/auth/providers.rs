@@ -352,8 +352,12 @@ fn refresh(
             if let Some(account) = selected {
                 login.args(["--account", account]);
             }
-            writeln!(std::io::stderr(), "Bitbucket requires browser login; complete the browser prompt (bounded by --login-timeout).")
-                .map_err(|_| "Cannot display authentication requirement")?;
+            writeln!(
+                std::io::stderr(),
+                "    Complete Bitbucket sign-in in your browser ({}s timeout).",
+                options.login_timeout
+            )
+            .map_err(|_| "Cannot display authentication requirement")?;
             Ok(call(login, options, true)?.code == 0)
         }
         Target::Twg {} => {
@@ -382,8 +386,12 @@ fn refresh(
             if options.non_interactive {
                 return Ok(false);
             }
-            writeln!(std::io::stderr(), "SLAuth refresh may require browser/MFA; complete any prompt before the login deadline.")
-                .map_err(|_| "Cannot display authentication requirement")?;
+            writeln!(
+                std::io::stderr(),
+                "    Complete browser sign-in or MFA if prompted ({}s timeout).",
+                options.login_timeout
+            )
+            .map_err(|_| "Cannot display authentication requirement")?;
             let output = call(slauth_command(target, false), options, true)?;
             if output.code != 0 {
                 let diagnostics = format!(

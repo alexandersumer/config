@@ -841,22 +841,21 @@ fn human_report_identifies_mode_account_readiness_and_unknown_expiry() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("profile code · check only"), "{stderr}");
-    assert!(
-        stderr.contains("[1/2] Checking bitbucket:active"),
-        "{stderr}"
-    );
-    assert!(stderr.contains("[2/2] Checking twg"), "{stderr}");
+    assert!(stderr.contains("[1/2] Checking Bitbucket"), "{stderr}");
+    assert!(stderr.contains("[2/2] Checking TWG"), "{stderr}");
     for expected in [
         "Authentication preflight: ready",
-        "valid        bitbucket:active",
+        "Bitbucket  valid",
         "Account: office",
         "expiry unknown",
-        "Note: Access verified now",
+        "1h remaining",
         "2/2 credentials ready",
         "Elapsed ",
     ] {
         assert!(stdout.contains(expected), "missing {expected}: {stdout}");
     }
+    assert!(!stdout.contains("guarantee"));
+    assert!(!stdout.contains("bitbucket:active"));
     assert!(!text(&out).contains(SECRET));
     assert!(!text(&out).contains('\u{1b}'));
 }
@@ -876,6 +875,8 @@ fn human_blocked_report_labels_recovery_and_does_not_imply_unknown_expiry() {
         "Reason: ",
         "Action: ",
         "0/1 credentials ready",
+        "SLAuth",
+        "Scope: prod · splunk.paas-inf.net · groups: atlassian-all · MFA",
     ] {
         assert!(stdout.contains(expected), "missing {expected}: {stdout}");
     }
