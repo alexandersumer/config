@@ -1,6 +1,6 @@
 # Authentication readiness
 
-[Back to README](../README.md)
+[workctl guide](workctl.md) · [README](../README.md)
 
 Use `workctl auth preflight` before a work session, or `workctl auth exec` to check credentials before launching a command.
 

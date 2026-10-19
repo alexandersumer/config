@@ -79,6 +79,7 @@ architecture, and reset benchmarks. For isolated installation verification, see
 ## Reference
 
 - [Configuration and skills](docs/configuration.md): installers, managed links, Codex and Claude Code skills, TWG updates.
-- [workctl](docs/workctl.md): authentication, Git operations, installation, doctor, completions, and output contracts.
+- [workctl guide](docs/workctl.md): installation, commands, authentication, Git operations, output, and exit status.
+- [Git reference](docs/git.md): reset and cleanup policies, recovery, coordination, and JSON fields.
 - [Authentication readiness](docs/authentication.md): profiles, renewal, MFA, command execution, and custom configuration.
 - [Development and verification](docs/development.md): hooks, acceptance checks, architecture, and CLI tests.

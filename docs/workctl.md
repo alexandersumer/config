@@ -1,258 +1,204 @@
 # workctl
 
-[Back to README](../README.md)
+`workctl` is a Rust CLI for work credentials, Git checkouts, and linked worktrees.
 
-`workctl` is a Rust CLI for renewing work credentials, resetting Git checkouts,
-and cleaning up linked worktrees. It reports progress and failures, bounds
-external commands with deadlines, and checks local work before Git changes.
+[Install](#install) · [Commands](#commands) · [Authentication](#authentication) ·
+[Git operations](#git-operations) · [Output](#output) · [Exit status](#exit-status)
+
+## Install
+
+From a checkout of this repository, with Rust and Cargo installed:
+
+```sh
+cargo run --locked --release -- install-workctl
+workctl doctor
+```
+
+Add `~/.local/bin` to `PATH` if needed. For zsh completion, add
+`~/.local/share/zsh/site-functions` to `fpath` before `compinit`. The repository's
+zsh configuration already does this. Open a fresh shell after installation.
+
+Git operations require Git 2.36 or later. Authentication uses the installed `bb`,
+`twg`, and `atlas` provider CLIs; each provider keeps its own credentials.
+`workctl doctor` checks runtime prerequisites without repairs. It does not verify
+service credentials or managed installation; use `auth preflight --check` and
+`config-tools check-install` for those checks.
+
+<details>
+<summary>Managed files and installation behavior</summary>
+
+The installer updates these managed files:
+
+| File | Purpose |
+| --- | --- |
+| `~/.local/bin/workctl` | Public CLI |
+| `~/.local/bin/config-tools` | Configuration installer and repository checks |
+| `~/.local/share/zsh/site-functions/_workctl` | Generated zsh completions |
+
+Binary replacement is atomic. The installer checks managed-file ownership before
+replacing files and creates completion directories with permissions accepted by
+zsh. Use `--home PATH` to install into an isolated home.
+
+The retired `~/.local/bin/reset_to_origin` is removed only when its bytes match
+the current installer or the previous managed `config-tools` binary. Unknown files
+and symlinks block migration and remain untouched. The installer does not rewrite
+shell startup files. The repository's zsh configuration removes retired aliases
+and functions and refreshes command hashes when loaded.
+
+</details>
 
 ## Commands
 
-| Task | Command |
+| Command | Purpose |
 | --- | --- |
-| Renew and verify Bitbucket, TWG, and Splunk credentials | `workctl auth preflight` |
-| Check credentials without explicitly renewing them | `workctl auth preflight --check` |
-| Prepare code credentials, then run a command | `workctl auth exec --profile code -- bb pr list` |
-| Inspect checkout reset targets without fetching | `workctl git reset --list ~/src` |
-| Reset primary checkouts to their remote default branch | `workctl git reset ~/src` |
-| Preview linked-worktree cleanup | `workctl git worktree clean ~/src` |
-| Remove eligible linked worktrees | `workctl git worktree clean --apply ~/src` |
-| Check runtime prerequisites | `workctl doctor` |
-| Generate shell completions | `workctl completions zsh` |
+| `workctl auth preflight` | Renew credentials and verify access |
+| `workctl auth exec -- COMMAND` | Run preflight, then launch a command |
+| `workctl git reset [PATH ...]` | Reset primary checkouts to a verified remote branch |
+| `workctl git worktree clean [PATH ...]` | Preview linked-worktree removal; `--apply` removes eligible worktrees |
+| `workctl doctor` | Check Git, executable, temporary storage, process groups, and locks |
+| `workctl completions SHELL` | Generate shell completions |
 
-Replace `~/src` with your repository or workspace directory. Git commands use the
-current directory when no path is supplied. Use `--help` after any command for options.
+Use `--help` after any command for options and examples. Help and completion
+generation do not access repositories. Git paths default to the current directory;
+use `--` before paths that begin with a dash.
 
 ## Authentication
 
-`workctl auth preflight` renews each credential once, then verifies access.
-Complete browser or MFA prompts when required. The report shows each provider's
-result and remaining lifetime, or explicitly says the expiry is unknown.
-`--reuse-valid` reuses credentials that meet the validity threshold; `--check`
-makes no explicit refresh or login calls.
-
-The default `work` profile covers Bitbucket, TWG, and production Splunk.
-Use `--profile code` for Bitbucket and TWG, or `--profile logs` for Splunk.
-Provider CLIs own credential storage and renewal.
-
-`workctl auth exec -- COMMAND` runs preflight before launching a command.
-Failed preflight prevents launch. The child keeps its stdin, stdout, environment,
-signals, and exit status. Credentials are checked before launch, not continuously
-during execution.
-
-See [Authentication readiness](authentication.md) for profiles, expiry limits,
-noninteractive use, custom configuration, and the JSON contract.
-
-## Install workctl
-
-Build with `cargo build --locked --release`. Install only the workstation CLI with
-`cargo run --release -- install-workctl`; use `--home PATH` for an isolated home.
-The full configuration installer also installs it. New completion directories use permissions accepted by zsh’s security checks,
-including when the shell has a group-writable umask. Both update the internal managed
-`config-tools` installer and install the compiled binary
-atomically at `~/.local/bin/workctl` and generated zsh completion at
-`~/.local/share/zsh/site-functions/_workctl`. The tracked zsh configuration adds
-that directory to `fpath` before Oh My Zsh initializes completions. For another
-zsh configuration, add it to `fpath` before `compinit` yourself.
-
-The migration removes `~/.local/bin/reset_to_origin` only when it is an executable
-regular file byte-identical to the current installer or the previously installed
-managed `config-tools` binary. Unknown files and symlinks block migration and
-remain untouched. No shell startup files are rewritten by `install-workctl`.
-Use a fresh shell or reload your shell configuration after cutover; the tracked zsh
-configuration removes the retired function and alias and refreshes command hashes.
-
-## Command conventions
-
-Every public command has Clap-generated help, version information, and examples.
-Use `--` before paths beginning with a dash. Git options belong to their operation:
-`--jobs` applies to reset and cleanup, and `--apply` belongs to cleanup. No paths means `.`;
-there are no hardcoded workspace roots. Help and completions require no Git access.
-Exit codes are 0 for success, 1 for operational failure or blocked cleanup,
-2 for invalid usage, and 130 for interruption.
-
-## Reset checkouts
-
 ```sh
-workctl git reset --list .
-workctl git reset --jobs 4 --attempts 3 --timeout 300 /path/to/workspace
-workctl git reset --remote upstream --branch release /path/to/repository
-workctl git reset --json /path/to/workspace
+workctl auth preflight
+workctl auth preflight --profile code --check
+workctl auth exec --profile code -- bb pr list
 ```
 
-Reset and cleanup announce discovery before probing repositories. Interactive terminals
-show discovery elapsed time; redirected output includes periodic discovery updates.
-The final elapsed time includes discovery as well as execution.
+### Profiles
 
-A checkout or directory inside it selects its primary checkout. Containers recursively
-select primary checkouts, stopping at repositories and skipping directory symlinks.
-Overlapping scopes are deduplicated. Linked worktrees encountered in containers are
-excluded; explicit linked-worktree reset targets are refused. Invalid scope prevents
-all resets. `--list` is inspection only and does not fetch.
+| Profile | Credentials |
+| --- | --- |
+| `work` (default) | Bitbucket, TWG, and production Splunk |
+| `code` | Bitbucket and TWG |
+| `logs` | Production Splunk |
 
-The existing reset policy is preserved: tracked/index changes, dirty submodules,
-unfinished Git operations, masked tracked paths, and untracked/ignored paths that
-collide with either the fetched target or local target branch cause refusal.
-The remote's advertised HEAD determines the default branch. Fetch mappings must
-resolve it unambiguously, match the fetched tip, and never replace local branches.
-Hooks are followed by branch, commit, and tracked-file verification. Other branches,
-linked worktree files, and noncolliding local files remain intact. Replaced target
-branch tips are retained under `refs/home-reset-backups/`. Detached-HEAD commits
-receive no additional backup. Successful runs summarize saved recovery refs;
-`--verbose` shows individual recovery commands. Failed checkouts show their recovery
-commands by default, and JSON always includes the exact backup refs.
+Splunk uses SLAuth for `splunk.paas-inf.net`, group `atlassian-all`, with MFA.
+Use `--config FILE --profile NAME` for an explicit custom profile.
 
-Reset uses up to 32 workers by default, bounded by checkout count. `--jobs` accepts 1–32,
-`--attempts` accepts 1–10 total attempts, and `--timeout` accepts 1–86400 seconds
-per attempt. Transient failures use bounded backoff. Authentication, locks, and
-safety refusals are not retried. There is no transaction or rollback across checkouts:
-fetches, backups, switches, and upstream changes may persist after later failure.
+### Renewal modes
 
-## Clean up linked worktrees
+| Mode | Behavior |
+| --- | --- |
+| Default | Request one renewal per target, then verify access; failed renewal remains a failure even if an older credential works |
+| `--reuse-valid` | Reuse credentials that meet the validity threshold; renew missing or short-lived credentials |
+| `--check` | Check access without explicit refresh or login calls; providers may still renew transparently |
 
-The default is an exact removal plan. `--apply` executes eligible removals without
-an interactive question. A container scope selects registered linked worktrees
-beneath it. A primary checkout selects all its registered linked worktrees, including
-paths outside the checkout directory; those full paths are shown. An explicit linked
-worktree selects only itself. Primary checkouts always remain protected.
+Complete browser or MFA prompts when requested. `--non-interactive` permits
+silent refresh but prevents browser/MFA issuance. Known expiry must meet
+`--min-valid-for` (default: 300 seconds). Unknown expiry is reported explicitly.
+Access is checked at handoff; future access is not guaranteed.
 
-Cleanup protects tracked changes, untracked files, masked tracked paths, ongoing Git
-operations, locked worktrees, and unverifiable ownership. These are signs of work
-that must stay in place. These worktrees are reported as `protected`; leaving active
-work in place is a successful cleanup outcome, not an error. Ignored files do not block an otherwise idle worktree:
-`--apply` removes them with the worktree. Preview reports their counts and full
-worktree paths. Ignored files can include local configuration and secrets; inspect
-the preview before applying a container-wide cleanup.
+`auth exec` launches its child only after successful preflight. It preserves argv,
+stdin, stdout, environment, signals, and child exit status. The preflight report
+goes to stderr. It does not monitor or renew credentials during child execution.
 
-### Recover committed files
+[Authentication reference](authentication.md): provider behavior, deadlines,
+credential ownership, custom profiles, and failure handling.
 
-Committed history does not have to be pushed before cleanup. Application first
-atomically saves HEAD as `refs/workctl/cleanup/<HEAD>` in the protected primary
-repository and verifies that ref. Preview never writes it. Local branches also
-remain. Cleanup works offline and never pushes commits. To restore committed files:
+## Git operations
+
+### Reset checkouts
+
+Inspect targets before resetting:
 
 ```sh
-git -C /path/to/primary worktree add --detach /path/to/restored refs/workctl/cleanup/<HEAD>
+workctl git reset --list ~/src
+workctl git reset ~/src
 ```
 
-Recovery refs preserve committed history, not discarded ignored files. A failure to
-save or verify the recovery ref blocks deletion. These refs are intentional retained
-deliverables, not temporary files.
+Reset fetches and verifies the remote target, then resets the selected primary
+checkouts. The default target comes from the remote's advertised HEAD. Use
+`--remote NAME --branch NAME` to select a target explicitly.
 
-### Strict policy and explicit discard
+Dirty tracked files, unsafe index state, unfinished Git operations, and local-file
+collisions block reset. Replaced branch tips are backed up under
+`refs/home-reset-backups/`; detached-HEAD commits receive no additional backup.
+Other local branches and linked worktrees are preserved. A batch has no automatic
+rollback: earlier changes may remain when a later checkout fails.
 
-Use `--strict` for the original publication policy: all local files including ignored
-files are protected, and every reachable commit must be proven published against a
-fresh isolated fetch of current remote heads and tags. Cached tracking refs are not
-proof. Source URL rewrite rules, shallow repositories, case-colliding refs, and
-commit-only filtered evidence fetches are supported without changing source refs or
-shallow boundaries. Remote verification remains bounded by `--timeout`.
-In strict mode, repeat `--discard-ignored PATH` to authorize ignored-file loss and
-`--preserve-commits PATH` to use local recovery instead of remote publication at an
-exact selected worktree.
+### Clean up linked worktrees
 
-For a worktree whose **all local files** may be lost, explicit per-path approval is
-still required:
+Preview first, then apply:
 
 ```sh
-workctl git worktree clean --apply \
-  --discard-local /path/to/work/feature /path/to/work
+workctl git worktree clean ~/src
+workctl git worktree clean --apply ~/src
 ```
 
-### Removal safeguards and outcomes
+Cleanup protects active tracked and untracked work and retains local branches.
+Before removal, it saves and verifies committed HEAD in
+`refs/workctl/cleanup/<HEAD>`. Default cleanup works offline and never pushes.
 
-No option authorizes removing main checkouts, locks, missing paths, nested
-repositories, populated submodule paths, private submodule object stores, or
-unverifiable registrations/ownership.
-Empty or absent uninitialized gitlink paths are supported, including gitlinks with
-no `.gitmodules` mapping. Normal cleanup and ignored-only approval use native
-`git worktree remove`; `--force` is used only with `--discard-local`. Cleanup never
-retries removal.
-`--timeout` bounds each candidate's inspection, remote verification, removal, and
-final verification together. Discovery Git probes have independent 15-second bounds.
+**Applying cleanup removes ignored files in eligible worktrees.** Those files can
+include local configuration and secrets. Preview shows the affected paths and
+counts. Recovery refs preserve commits, not removed ignored files.
 
-Application rechecks files, locks, topology, HEAD, and registration before removal.
-Strict mode also rechecks publication and then local state after remote I/O. Success requires both the
-path and its Git registration to be absent. Outcomes are `would remove`, `removed`,
-`protected`, `blocked`, or `interrupted`. Active local work stays protected with exit 0;
-actual safety blockers or deletion errors cause exit 1.
-A removed worktree's local branch is retained. Stale registrations with missing
-filesystem paths remain blockers, rather than being pruned speculatively.
+Use `--strict` to require fresh remote-publication proof and protect ignored files.
+Explicit discard options apply only to the named worktrees. Locks, nested
+repositories, populated submodules, missing paths, and uncertain ownership still
+block removal. Primary checkouts are always protected.
 
-### Coordination and cancellation
+### Scope and execution
 
-Both operations share process supervision and common-directory locks. These locks
-coordinate workctl and the former reset runner, not editors or unrelated Git commands;
-preview may create the persistent `repo-batch.lock` coordination file in the common
-Git directory. It does not change refs, tracked files, or worktree registrations.
-Publication checks access the remote and use automatically removed temporary object
-stores. The coordination file remains in place so concurrent callers lock the same inode;
-run while repositories are otherwise idle. Cancellation/deadlines terminate process
-groups before locks are released. Descendants inherit the lock so forced supervisor
-termination cannot release it while they run. Interrupted Git writes may leave native
-locks requiring investigation; workctl never removes those locks.
+| Supplied path | Reset selects | Cleanup selects |
+| --- | --- | --- |
+| Workspace directory | Primary checkouts found beneath it | Registered linked worktrees beneath it |
+| Primary checkout | That checkout | All its registered linked worktrees, including paths outside it |
+| Linked worktree | Refused | That linked worktree only |
 
-### Cleanup concurrency and benchmarks
+Reset defaults to at most 32 workers; cleanup defaults to at most four. Both accept
+`--jobs N`, where `N` is 1 through 32. Run Git operations while repositories are otherwise idle. Workctl
+locks coordinate its own invocations, not editors or unrelated Git commands.
 
-Cleanup runs up to four worktrees concurrently by default; `--jobs N` accepts 1–32.
-Worktrees from the same repository share one exclusive coordination lock for the
-invocation. Recovery-ref writes are serialized within each repository; inspections
-and native Git removals run concurrently. Other workctl invocations remain excluded
-until the batch finishes. Each removal still performs its own final safety inspection.
-JSON reports the worker count and per-worktree inspection, recovery, and removal
-timings; `--verbose` prints those timings. JSON results retain discovery order even
-when worktrees finish out of order.
+[Git reference](git.md): exact selection rules, recovery commands, discard
+options, revalidation, concurrency, deadlines, and JSON fields.
 
-Measure complete cleanup on dependency-heavy disposable worktrees with:
+## Output
 
-```sh
-python3 examples/cleanup_benchmark.py --candidate target/release/workctl \
-  --baseline /path/to/previous/workctl --output /tmp/cleanup-benchmark.json
-```
+Results go to stdout. Progress and diagnostics go to stderr. Git operations show
+interactive progress or periodic plain updates when redirected. Auth reports each
+provider's status, account or scope, remaining lifetime, and any recovery action.
+Status words remain readable without color. `NO_COLOR`, `CLICOLOR=0`, and
+`TERM=dumb` disable color; redirected streams contain no terminal decoration.
 
-The benchmark compares worker counts on fresh worktrees sharing one repository and
-verifies recovery refs, protected local work, primary checkout state, and removal.
+`--json` works before or after a subcommand and emits one JSON document on stdout.
+Results include `schema_version`, `operation`, and `status`. Field details belong
+to the relevant command's reference.
 
-## Output and JSON
+| Command | JSON schema |
+| --- | --- |
+| `auth preflight` | 1 |
+| `git reset` | 1 |
+| `git worktree clean` | 2 |
+| `doctor` | 1 |
+| `completions` | 1; generated script is in `script` |
+| `auth exec` | Unsupported; child stdout is preserved |
 
-Human output names the operation, scope/counts, current activity, and final outcome.
-Git operations update an interactive progress row; permanent failures remain visible
-above it. Redirected Git progress is reported at most once every 15 seconds.
-Auth announces each credential check and reports provider status, lifetime, and
-any recovery action.
-Full paths remain visible, with terminal wrapping rather than truncation. Durations
-are readable. Status color includes the equivalent words, respects `NO_COLOR`,
-`CLICOLOR=0`, and `TERM=dumb`, and is disabled on redirected streams.
-Stdout contains requested results; stderr contains progress and diagnostics.
+Help, version, and usage errors follow normal CLI conventions even with `--json`.
 
-Detailed Git logs require `--verbose` or an actionable failure. Reset retains private
-diagnostics on failure/interruption or `--keep-logs`, including `results.json` and
-`excluded-worktrees.json`. Successful default runs remove them. Cleanup's temporary
-publication repositories and captures are removed automatically.
+## Exit status
 
-`--json` works before or after a subcommand and produces one undecorated JSON document
-on stdout. Auth preflight, reset, and doctor use schema version 1; cleanup uses version 2.
-All JSON results include `schema_version`, `operation`, and `status`; operational
-errors include `error`. `auth exec` rejects `--json` to preserve child stdout. Reset and cleanup include scope, per-target `results`, and summary
-counts with `elapsed_seconds`. Reset additionally reports excluded worktrees,
-recovery refs, attempts, and retained diagnostics. Cleanup reports protected primary
-checkouts, discard decisions, and publication/local-data evidence for eligible targets.
-Cleanup version 2 reports `policy` (`pragmatic` or `strict`) and `protected_worktrees`
-in the summary. Pragmatic local-work skips have target status `protected` and do not
-make the command fail. Strict mode retains `blocked` and exit 1 for these refusals.
-Evidence includes planned/saved recovery refs and explicitly distinguishes local
-recovery from verified remote publication. Other pre-removal refusals use `blocked`. After removal starts,
-`removed` requires verified absence of both the path and registration; `failed` means
-one remains; `unverified` means the final state could not be checked. Inspected evidence
-is retained for these outcomes. A verified removal following a Git error still counts
-as removed, carries a reason, and exits unsuccessfully. Summary `failed` and `unverified`
-count those outcomes; `errors` also includes verified removals with Git errors. These
-errors produce operation status `failed` and exit 1 (SIGINT remains exit 130).
-Consumers of cleanup version 1 must handle these statuses and summary fields before
-accepting version 2. No failed deletion is retried.
-Per-target `path` is a display string; `path_bytes` is the exact Unix path as an array
-of byte values, preserving non-UTF-8 filenames. Help, version, and usage errors follow
-Clap conventions even when `--json` is present. Doctor checks Git 2.36+, the executable,
-temporary storage, and relevant process/lock capabilities without repairs. It supports
-standalone executables and does not certify managed installation or shell configuration;
-use `config-tools check-install` for managed installation checks.
+| Code | Meaning |
+| --- | --- |
+| `0` | Success, including cleanup that protects active local work |
+| `1` | Failed operation, blocked authentication, or cleanup safety blocker |
+| `2` | Invalid usage |
+| `130` | Interrupted |
+
+After successful preflight, `auth exec` preserves the child's exit status or
+termination signal. Launch failures return `127` for a missing command or `126`
+for another launch error.
+
+## Reference
+
+- [Authentication](authentication.md)
+- [Git operations](git.md)
+- [Configuration and installation](configuration.md)
+- [Development and verification](development.md)
+- [Repository README](../README.md)
