@@ -83,6 +83,7 @@ const REQUIRED_CUSTOM_SKILL_NAMES: &[&str] = &[
     "twg-status-rollups",
     "understand-system",
     "update-agi-essay",
+    "workctl",
     "write-up",
 ];
 

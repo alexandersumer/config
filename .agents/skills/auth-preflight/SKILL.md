@@ -26,6 +26,18 @@ For log-search work, infer the logs backend from the intended query path. In Atl
 
 Ask one concise question only when multiple plausible targets remain after using the current task, selected tool, and local instructions, and those targets require materially different credentials. Do not ask the user to approve browser/MFA or to restate an auth backend that is already implied.
 
+## workctl
+
+When installed, use `workctl` for matching credential sets: `code` (Bitbucket +
+TWG), `logs` (production Splunk), or `work` (both). Use `--config FILE --profile NAME`
+for an exact descriptor. Keep other services on their provider-specific path.
+
+Run `workctl auth preflight --profile PROFILE --check --json` for status-only
+requests, `--reuse-valid --json` for productive work, or `--json` for explicit
+renewal. These are alternative modes of the same command. Use only the credential
+set needed by the task. Treat its result as preflight evidence and continue the
+productive call without repeating provider checks.
+
 ## Preflight algorithm
 
 1. Build the exact credential descriptor: service/tool, audience, account, group, token type, auth environment, MFA requirement, and the read/write scope needed.
