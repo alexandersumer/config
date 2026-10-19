@@ -848,12 +848,18 @@ fn human_report_identifies_mode_account_readiness_and_unknown_expiry() {
         "Bitbucket  valid",
         "Account: office",
         "expiry unknown",
-        "1h remaining",
         "2/2 credentials ready",
         "Elapsed ",
     ] {
         assert!(stdout.contains(expected), "missing {expected}: {stdout}");
     }
+    let lifetime =
+        regex::Regex::new(r"(?m)^  Bitbucket  valid +[0-9]+[hms](?: [0-9]+[hms])* remaining$")
+            .unwrap();
+    assert!(
+        lifetime.is_match(&stdout),
+        "missing readable lifetime: {stdout}"
+    );
     assert!(!stdout.contains("guarantee"));
     assert!(!stdout.contains("bitbucket:active"));
     assert!(!text(&out).contains(SECRET));

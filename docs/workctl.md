@@ -1,22 +1,47 @@
-# Git maintenance with workctl
+# workctl
 
 [Back to README](../README.md)
 
-Install the workstation CLI, reset primary checkouts, and preview or remove idle linked worktrees. For credential checks, see [Authentication readiness](authentication.md).
+`workctl` is a Rust CLI for renewing work credentials, resetting Git checkouts,
+and cleaning up linked worktrees. It reports progress and failures, bounds
+external commands with deadlines, and checks local work before Git changes.
 
-`workctl` is the public workstation tool. Git maintenance and authentication readiness are its public domains;
-configuration installation and CI remain internal `config-tools` commands.
-There are no standalone checkout-reset or worktree-cleanup aliases.
+## Commands
 
-```sh
-workctl git reset ~/atlassian ~/oss ~/src ~/stable
-workctl git worktree clean ~/atlassian ~/oss ~/src ~/stable
-workctl git worktree clean --apply ~/atlassian ~/oss ~/src ~/stable
-workctl auth preflight
-workctl auth exec --profile code -- bb pr list
-workctl doctor
-workctl completions zsh
-```
+| Task | Command |
+| --- | --- |
+| Renew and verify Bitbucket, TWG, and Splunk credentials | `workctl auth preflight` |
+| Check credentials without explicitly renewing them | `workctl auth preflight --check` |
+| Prepare code credentials, then run a command | `workctl auth exec --profile code -- bb pr list` |
+| Inspect checkout reset targets without fetching | `workctl git reset --list ~/src` |
+| Reset primary checkouts to their remote default branch | `workctl git reset ~/src` |
+| Preview linked-worktree cleanup | `workctl git worktree clean ~/src` |
+| Remove eligible linked worktrees | `workctl git worktree clean --apply ~/src` |
+| Check runtime prerequisites | `workctl doctor` |
+| Generate shell completions | `workctl completions zsh` |
+
+Replace `~/src` with your repository or workspace directory. Git commands use the
+current directory when no path is supplied. Use `--help` after any command for options.
+
+## Authentication
+
+`workctl auth preflight` renews each credential once, then verifies access.
+Complete browser or MFA prompts when required. The report shows each provider's
+result and remaining lifetime, or explicitly says the expiry is unknown.
+`--reuse-valid` reuses credentials that meet the validity threshold; `--check`
+makes no explicit refresh or login calls.
+
+The default `work` profile covers Bitbucket, TWG, and production Splunk.
+Use `--profile code` for Bitbucket and TWG, or `--profile logs` for Splunk.
+Provider CLIs own credential storage and renewal.
+
+`workctl auth exec -- COMMAND` runs preflight before launching a command.
+Failed preflight prevents launch. The child keeps its stdin, stdout, environment,
+signals, and exit status. Credentials are checked before launch, not continuously
+during execution.
+
+See [Authentication readiness](authentication.md) for profiles, expiry limits,
+noninteractive use, custom configuration, and the JSON contract.
 
 ## Install workctl
 
@@ -77,8 +102,7 @@ receive no additional backup. Successful runs summarize saved recovery refs;
 `--verbose` shows individual recovery commands. Failed checkouts show their recovery
 commands by default, and JSON always includes the exact backup refs.
 
-The measured existing default remains 32 workers, bounded by checkout count;
-this migration introduces no new performance claim. `--jobs` accepts 1–32,
+Reset uses up to 32 workers by default, bounded by checkout count. `--jobs` accepts 1–32,
 `--attempts` accepts 1–10 total attempts, and `--timeout` accepts 1–86400 seconds
 per attempt. Transient failures use bounded backoff. Authentication, locks, and
 safety refusals are not retried. There is no transaction or rollback across checkouts:
@@ -192,8 +216,10 @@ verifies recovery refs, protected local work, primary checkout state, and remova
 ## Output and JSON
 
 Human output names the operation, scope/counts, current activity, and final outcome.
-Indicatif updates an interactive progress row; permanent failures remain visible above
-it. Redirected stderr uses plain progress lines at most once every 15 seconds.
+Git operations update an interactive progress row; permanent failures remain visible
+above it. Redirected Git progress is reported at most once every 15 seconds.
+Auth announces each credential check and reports provider status, lifetime, and
+any recovery action.
 Full paths remain visible, with terminal wrapping rather than truncation. Durations
 are readable. Status color includes the equivalent words, respects `NO_COLOR`,
 `CLICOLOR=0`, and `TERM=dumb`, and is disabled on redirected streams.
@@ -205,8 +231,9 @@ diagnostics on failure/interruption or `--keep-logs`, including `results.json` a
 publication repositories and captures are removed automatically.
 
 `--json` works before or after a subcommand and produces one undecorated JSON document
-on stdout. Reset and doctor use schema version 1; cleanup uses version 2. Each has `schema_version`, `operation`, and `status`; operational
-errors have `error`. Reset and cleanup include scope, per-target `results`, and summary
+on stdout. Auth preflight, reset, and doctor use schema version 1; cleanup uses version 2.
+All JSON results include `schema_version`, `operation`, and `status`; operational
+errors include `error`. `auth exec` rejects `--json` to preserve child stdout. Reset and cleanup include scope, per-target `results`, and summary
 counts with `elapsed_seconds`. Reset additionally reports excluded worktrees,
 recovery refs, attempts, and retained diagnostics. Cleanup reports protected primary
 checkouts, discard decisions, and publication/local-data evidence for eligible targets.

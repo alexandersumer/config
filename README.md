@@ -47,7 +47,7 @@ Reset refuses tracked changes and other unsafe states. Cleanup previews by
 default. With `--apply`, it protects active local work, saves committed history
 in recovery refs, and removes eligible worktrees **including their ignored
 files**. Review the preview before applying cleanup across a workspace.
-See [Git maintenance](docs/workctl.md) for the full policies and recovery commands.
+See the [workctl guide](docs/workctl.md) for authentication, Git policies, and recovery commands.
 
 ## Use custom skills
 
@@ -79,6 +79,6 @@ architecture, and reset benchmarks. For isolated installation verification, see
 ## Reference
 
 - [Configuration and skills](docs/configuration.md): installers, managed links, Codex and Claude Code skills, TWG updates.
-- [Git maintenance](docs/workctl.md): installation, reset, cleanup, recovery, output, and JSON contracts.
+- [workctl](docs/workctl.md): authentication, Git operations, installation, doctor, completions, and output contracts.
 - [Authentication readiness](docs/authentication.md): profiles, renewal, MFA, command execution, and custom configuration.
 - [Development and verification](docs/development.md): hooks, acceptance checks, architecture, and CLI tests.
