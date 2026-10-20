@@ -1,34 +1,50 @@
 ---
 name: write-review-request
-description: Draft a concise message asking someone to review a pull request, adapted to the change and grounded in available evidence. Use for review requests, not performing a review or writing the pull request description.
+description: Write a short, plain message asking someone to review an existing pull request. Use for review-request messages, not performing reviews, writing pull request descriptions, or requesting reviewers through a provider.
 ---
 
-Write a ready-to-copy review request in plain, natural language. Draft only; do not post or send it.
+Write the message only. Do not send it, create a pull request, or assign reviewers.
 
-## Ground the message
+## Establish the facts
 
-Use the supplied pull request, diff, and relevant conversation evidence. If needed, inspect the target pull request or local changes with read-only tools. Describe the whole change being reviewed, not just the latest edit. Do not include unrelated local work in a request for an existing pull request.
+Use the supplied pull request, diff, and relevant conversation evidence. Read the target with read-only tools when needed. Cover its main purpose, not just the latest edit, and exclude unrelated local work. If the target or essential context is missing, ask one focused question.
 
-Identify the main reason for the change, its observable effect, and the evidence available. Adapt to that purpose rather than mechanically classifying files or assigning a template to each change type. For mixed changes, lead with the main purpose and mention secondary changes only when they affect review.
+Never invent motivation, repros, measurements, test results, rollout status, or unchanged behavior. A test in the diff does not mean it passed. Verification must apply to the version and behavior described. Mention an unverified claim as an expectation only when needed; otherwise leave it out.
 
-Do not invent motivation, reproduction steps, measurements, test results, rollout status, or preserved behavior. Distinguish observed results from expectations. A test in the diff is coverage, not evidence that it passed. Use verification evidence only when it applies to the version and behavior being described. If an important check is still pending, say so briefly; omit empty verification claims. If the target or essential context cannot be established, ask one focused question instead of fabricating a finished request.
+## Output
 
-## Keep a recognizable shape
+Start with `Could someone please review [#<number>](<URL>)?`, then a blank line and three bullets in this order:
 
-Open with: `Could someone please review [#<number>](<URL>)?`
+1. The problem or reason: what breaks, is missing, or makes the current code difficult to change.
+2. The change: what this does to address that problem.
+3. The evidence: the smallest useful repro and result, example, measurement, or relevant check. State a material verification gap here if there is one.
 
-Follow with roughly three short bullets, usually in this order:
+Use one short sentence per bullet by default. A second sentence is fine when it adds an essential fact. Omit the evidence bullet if there is no useful evidence or material gap to report. Keep the order; do not add headings, labels such as "Problem:" or "Validation:", nested bullets, or a closing pitch.
 
-- Why the change is needed: the broken behavior, missing capability, or concrete problem with the current approach.
-- The evidence or example that makes it understandable: a repro and before/after behavior for a bug; a usage example for a feature; the structural problem and behavior-preservation checks for a refactor; measured results and conditions for a performance change.
-- What changes: the fix or approach, with any limitation, compatibility concern, or rollout detail that affects review.
+Aim for 50–90 words for the whole message; stay under 110 unless the user requests more detail. Shorter is fine. Select the facts that explain the change rather than compressing every detail into dense sentences.
 
-Keep those questions consistent, but combine, reorder, or omit bullets when that reads better. Reliability, security, dependency updates, tests, and cleanup follow the same questions; do not force a repro or a benchmark where neither helps. For a refactor, explain why the current structure causes trouble rather than claiming it is simply cleaner. For a feature, explain what someone can now do. Include an explicit request to examine a particular decision only when there is a concrete reason.
+Adapt the content, not the format. For a bug, name the failing behavior and give the trigger and before/after result. For a refactor, name the concrete difficulty and what was checked to preserve behavior. For a feature, say what someone can now do. For performance, use measured results and conditions when available. Other changes use the same problem, change, evidence order.
 
-## Wording
+## Voice
 
-Use direct factual sentences and familiar words. Start with the behavior or problem, not "This PR," "The goal is," or a change-type label. Prefer "A blocked read can outlast the deadline" to "The bug is that a blocked read can outlast the deadline." Name implementation details only when they help the reviewer understand the change.
+Write as a colleague asking for a quick look. Use concrete subjects and ordinary verbs: "A blocked read outlasts the deadline" and "The fix times out the read." Avoid "This PR introduces," "ensures," "streamlines," "improves maintainability," and generic claims of safety or quality. Explain the actual effect instead. Do not add enthusiasm, fake urgency, em dashes, review-report language, or commentary about your writing process.
 
-Keep the message short enough to read at a glance. Use nested before/after bullets when they make a repro easier to scan. Avoid headings, checklists, generic benefits, promotional language, fake urgency, em dashes, and claims such as "robust," "seamless," or "improves maintainability" without a concrete explanation. Mention flags only when their scope or state matters. Do not pad the message to reach a bullet count.
+Leave out file lists, internal identifiers, test-command inventories, and rollout mechanics unless a particular detail changes how the reviewer should assess the work. Include a limitation when omitting it would misrepresent the change. Do not add a generic request to check correctness or edge cases.
 
-Reread it as one message: the reason, evidence, and approach should be clear without opening the diff. Remove repetition and anything that does not help someone assess the change. Return only the review request, without a preamble, explanation, or surrounding code fence.
+Before returning, cut repeated facts and sentences that could describe almost any change. Each bullet should make one clear point, understandable on the first read. Return only the message, without a code fence.
+
+## Examples
+
+Use these as style examples, not facts to reuse.
+
+Could someone please review [#4328](https://example.com/pull/4328)?
+
+- A stalled output read can keep a prompt waiting past its deadline.
+- The fix enforces the deadline while the read is blocked. The command may continue running after output following stops.
+- Pausing Valkey for 3 seconds with a 250 ms deadline previously returned a late completion; it now returns a timeout. Verified with real Valkey.
+
+Could someone please review [#1234](https://example.com/pull/1234)?
+
+- Three callers handle deadlines separately, so each fix needs the same change in three places.
+- They now share one deadline handler, with no intended behavior change.
+- The existing timeout and cancellation tests pass for all three callers.
