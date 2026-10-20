@@ -1,5 +1,5 @@
 ---
-name: request-review
+name: write-review-request
 description: Draft a concise message asking someone to review a pull request, adapted to the change and grounded in available evidence. Use for review requests, not performing a review or writing the pull request description.
 ---
 

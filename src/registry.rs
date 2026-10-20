@@ -58,7 +58,6 @@ const REQUIRED_CUSTOM_SKILL_NAMES: &[&str] = &[
     "e2e-automated-tests",
     "e2e-live-check",
     "reconcile-plan",
-    "request-review",
     "resolve-conflict",
     "resume-branch-work",
     "review-deep",
@@ -85,6 +84,7 @@ const REQUIRED_CUSTOM_SKILL_NAMES: &[&str] = &[
     "understand-system",
     "update-agi-essay",
     "workctl",
+    "write-review-request",
     "write-up",
 ];
 
