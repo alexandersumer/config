@@ -2,7 +2,7 @@
 use super::git::{self, Git};
 use super::status::Status;
 use std::collections::BTreeSet;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::os::fd::FromRawFd;
 use std::os::unix::{ffi::OsStringExt, fs::MetadataExt};
@@ -84,13 +84,23 @@ impl Operation {
     }
     fn tree(&self, target: &str) -> Result<(), String> {
         self.clean()?;
+        let ignore_case = filesystem_ignores_case(&self.git.cwd)?;
+        let key = |path: &[u8]| {
+            if ignore_case {
+                String::from_utf8_lossy(path).to_lowercase().into_bytes()
+            } else {
+                path.to_vec()
+            }
+        };
         let tracked_bytes = self
             .git
             .call(&["ls-tree", "-r", "--name-only", "-z", target])?;
-        let tracked: BTreeSet<&[u8]> = tracked_bytes
+        let tracked_paths: Vec<_> = tracked_bytes
             .split(|b| *b == 0)
             .filter(|p| !p.is_empty())
+            .map(key)
             .collect();
+        let tracked: BTreeSet<&[u8]> = tracked_paths.iter().map(Vec::as_slice).collect();
         // Deliberately omit --exclude-standard: ignored paths need protection too.
         for entry in self
             .git
@@ -98,69 +108,73 @@ impl Operation {
             .split(|b| *b == 0)
             .filter(|p| !p.is_empty())
         {
-            let path = entry.strip_suffix(b"/").unwrap_or(entry);
-            let prefix = [path, b"/"].concat();
-            let parent_collision = path
-                .iter()
-                .enumerate()
-                .filter(|(_, b)| **b == b'/')
-                .map(|(i, _)| &path[..i])
-                .chain(std::iter::once(path))
-                .any(|p| tracked.contains(p));
-            let descendant_collision = tracked
-                .range(prefix.as_slice()..)
-                .next()
-                .is_some_and(|p| p.starts_with(&prefix));
-            if parent_collision || descendant_collision {
+            if !tree_collision(&tracked, &key(entry)) {
+                continue;
+            }
+            // --directory collapses an entire untracked directory to one entry.
+            // Sharing a directory is safe; only overlapping contents collide.
+            // Expand just this candidate, keeping unrelated caches inexpensive.
+            // Git leaves nested repositories opaque and does not follow symlinks.
+            let collision = if let Some(path) = entry.strip_suffix(b"/") {
+                if tracked.contains(key(path).as_slice()) {
+                    Some(entry.to_vec())
+                } else {
+                    let pathspec = OsString::from_vec([b":(literal)".as_slice(), path].concat());
+                    self.git
+                        .call_os(&[
+                            OsStr::new("ls-files"),
+                            OsStr::new("--others"),
+                            OsStr::new("-z"),
+                            OsStr::new("--"),
+                            &pathspec,
+                        ])?
+                        .split(|b| *b == 0)
+                        .find(|p| !p.is_empty() && tree_collision(&tracked, &key(p)))
+                        .map(<[u8]>::to_vec)
+                }
+            } else {
+                Some(entry.to_vec())
+            };
+            if let Some(path) = collision {
                 return Err(format!(
                     "Untracked or ignored path would be overwritten: {}",
-                    super::display(OsString::from(String::from_utf8_lossy(entry).into_owned()))
+                    super::display(OsString::from_vec(path))
                 ));
             }
         }
         Ok(())
     }
-    fn check_case_collisions(&self, fetch_head: &[u8]) -> Result<(), String> {
-        let names: BTreeSet<_> = String::from_utf8_lossy(fetch_head)
-            .lines()
-            .filter_map(|line| {
-                line.splitn(3, '\t')
-                    .nth(2)?
-                    .strip_prefix("branch '")?
-                    .split_once("' of ")
-                    .map(|(name, _)| name.to_owned())
-            })
-            .collect();
-        let folded: BTreeSet<_> = names.iter().map(|name| name.to_lowercase()).collect();
-        if folded.len() == names.len()
-            || self.git.text(&["rev-parse", "--show-ref-format"])? == "reftable"
-        {
+    fn check_target_refs(&self, targets: &[&str]) -> Result<(), String> {
+        for target in targets {
+            if self
+                .git
+                .optional(&["symbolic-ref", "--quiet", target])?
+                .is_some()
+            {
+                return Err(format!(
+                    "Target ref is symbolic: {target}; refusing to replace another branch"
+                ));
+            }
+        }
+        if self.git.text(&["rev-parse", "--show-ref-format"])? == "reftable" {
             return Ok(());
         }
+        let refs = self.git.text(&["for-each-ref", "--format=%(refname)"])?;
+        let alias = refs.lines().find(|name| {
+            targets
+                .iter()
+                .any(|target| name != target && name.to_lowercase() == target.to_lowercase())
+        });
+        let Some(alias) = alias else {
+            return Ok(());
+        };
         let common = self.git.cwd.join(git::path_output(
             &self.git.call(&["rev-parse", "--git-common-dir"])?,
         ));
-        let probe = tempfile::Builder::new()
-            .prefix("reset-case-")
-            .tempfile_in(common)
-            .map_err(|e| e.to_string())?;
-        let upper = probe.path().with_file_name(
-            probe
-                .path()
-                .file_name()
-                .unwrap()
-                .to_string_lossy()
-                .to_uppercase(),
-        );
-        match fs::metadata(upper) {
-            Ok(metadata) => {
-                let original = probe.as_file().metadata().map_err(|e| e.to_string())?;
-                if metadata.dev() == original.dev() && metadata.ino() == original.ino() {
-                    return Err("Remote branches differ only by case on this filesystem; reset was not performed and fetch configuration was left unchanged".into());
-                }
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(e.to_string()),
+        if filesystem_ignores_case(&common)? {
+            return Err(format!(
+                "Target ref conflicts by case with {alias} on this filesystem; refusing reset without changing refs"
+            ));
         }
         Ok(())
     }
@@ -216,41 +230,57 @@ impl Operation {
             .git
             .text(&["config", "--get-all", &format!("remote.{remote}.fetch")])?;
         let destination = fetch_destination(&specs, &full)?;
+        let local_ref = format!("refs/heads/{branch}");
+        self.check_target_refs(&[&destination, &local_ref])?;
         self.status.target = Some(format!("{remote}/{branch} ({})", &oid[..oid.len().min(12)]));
         self.status.write(&self.status_path)?;
         println!("Target: {}", self.status.target.as_deref().unwrap());
         self.stage("fetch")?;
+        // A prior fetch is not evidence for this attempt, even if Git exits zero
+        // without writing FETCH_HEAD (for example through a wrapper).
+        match fs::remove_file(self.git.metadata("FETCH_HEAD")) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(format!("Cannot clear previous FETCH_HEAD: {e}")),
+        }
+        let refspec = format!("+{full}:{destination}");
         let output = self.git.call(&[
             "-c",
             "maintenance.auto=false",
             "-c",
             "gc.auto=0",
             "fetch",
-            "--prune",
+            "--atomic",
+            "--write-fetch-head",
+            "--no-tags",
+            "--no-prune",
+            "--no-prune-tags",
+            "--no-recurse-submodules",
+            "--refmap=",
             remote,
+            &refspec,
         ])?;
         print!("{}", String::from_utf8_lossy(&output));
         // A stale preexisting tracking ref is not proof that this fetch included it.
         let fetch_head = fs::read(self.git.metadata("FETCH_HEAD"))
             .map_err(|e| format!("Cannot inspect FETCH_HEAD: {e}"))?;
-        self.check_case_collisions(&fetch_head)?;
-        if !fetch_head
-            .split(|b| *b == b'\n')
-            .any(|line| line.split(|b| *b == b'\t').next() == Some(oid.as_bytes()))
-        {
-            return Err("Target was not fetched at its advertised tip; remote may have changed. Retry explicitly".into());
-        }
+        let oid = fetched_tip(&fetch_head, &branch)?;
         let fetched = self.git.text(&["rev-parse", "--verify", &destination])?;
         if fetched != oid {
             return Err(
-                "Fetched tracking ref differs from advertised target; refusing stale reset".into(),
+                "Fetched tracking ref differs from FETCH_HEAD; refusing stale reset".into(),
             );
         }
         self.git
             .call(&["cat-file", "-e", &format!("{oid}^{{commit}}")])?;
+        self.status.target = Some(format!("{remote}/{branch} ({})", &oid[..oid.len().min(12)]));
+        self.status.write(&self.status_path)?;
+        println!(
+            "Verified target: {}",
+            self.status.target.as_deref().unwrap()
+        );
         self.stage("check trees and backup")?;
         self.tree(&oid)?;
-        let local_ref = format!("refs/heads/{branch}");
         let old = self
             .git
             .optional(&["rev-parse", "--verify", "--quiet", &local_ref])?
@@ -316,6 +346,63 @@ impl Operation {
         println!("State: reset completed at {oid}");
         Ok(())
     }
+}
+
+fn filesystem_ignores_case(directory: &std::path::Path) -> Result<bool, String> {
+    let probe = tempfile::Builder::new()
+        .prefix(".workctl-case-")
+        .tempfile_in(directory)
+        .map_err(|e| e.to_string())?;
+    let upper = probe.path().with_file_name(
+        probe
+            .path()
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_uppercase(),
+    );
+    match fs::metadata(upper) {
+        Ok(metadata) => {
+            let original = probe.as_file().metadata().map_err(|e| e.to_string())?;
+            Ok(metadata.dev() == original.dev() && metadata.ino() == original.ino())
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+fn tree_collision(tracked: &BTreeSet<&[u8]>, entry: &[u8]) -> bool {
+    let path = entry.strip_suffix(b"/").unwrap_or(entry);
+    let prefix = [path, b"/"].concat();
+    let parent_collision = path
+        .iter()
+        .enumerate()
+        .filter(|(_, b)| **b == b'/')
+        .map(|(i, _)| &path[..i])
+        .chain(std::iter::once(path))
+        .any(|p| tracked.contains(p));
+    parent_collision
+        || tracked
+            .range(prefix.as_slice()..)
+            .next()
+            .is_some_and(|p| p.starts_with(&prefix))
+}
+
+fn fetched_tip(fetch_head: &[u8], branch: &str) -> Result<String, String> {
+    let text = std::str::from_utf8(fetch_head).map_err(|_| "Invalid FETCH_HEAD text")?;
+    let mut lines = text.lines();
+    let fields: Vec<_> = lines.next().unwrap_or_default().splitn(3, '\t').collect();
+    if lines.next().is_some()
+        || fields.len() != 3
+        || !fields[2].starts_with(&format!("branch '{branch}' of "))
+        || !matches!(fields[0].len(), 40 | 64)
+        || !fields[0].bytes().all(|c| c.is_ascii_hexdigit())
+    {
+        return Err(
+            "FETCH_HEAD does not identify the selected branch; refusing stale reset".into(),
+        );
+    }
+    Ok(fields[0].to_owned())
 }
 
 fn matches(pattern: &str, value: &str) -> Option<String> {

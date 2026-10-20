@@ -28,8 +28,16 @@ all resets. `--list` is inspection only and does not fetch.
 The existing reset policy is preserved: tracked/index changes, dirty submodules,
 unfinished Git operations, masked tracked paths, and untracked/ignored paths that
 collide with either the fetched target or local target branch cause refusal.
-The remote's advertised HEAD determines the default branch. Fetch mappings must
-resolve it unambiguously, match the fetched tip, and never replace local branches.
+The remote's advertised HEAD determines the default branch. Reset fetches only
+that branch into its configured tracking ref, without pruning or updating unrelated
+branches or tags. Fetch mappings must resolve it unambiguously and never replace
+local branches. Symbolic target refs and case aliases of the selected refs on
+case-insensitive filesystems are refused before fetch; unrelated case-colliding
+refs remain untouched. The commit returned by this fetch is authoritative, even
+when the branch moved after discovery. Fresh branch-specific `FETCH_HEAD` evidence
+must match the tracking ref before reset. Cached fetch evidence cannot authorize
+a reset. Sharing a directory with untracked or ignored files is safe when the
+individual paths do not collide; nested repositories and symlinks remain protected.
 Hooks are followed by branch, commit, and tracked-file verification. Other branches,
 linked worktree files, and noncolliding local files remain intact. Replaced target
 branch tips are retained under `refs/home-reset-backups/`. Detached-HEAD commits
@@ -40,7 +48,10 @@ commands by default, and JSON always includes the exact backup refs.
 Reset uses up to 32 workers by default, bounded by checkout count. `--jobs` accepts 1–32,
 `--attempts` accepts 1–10 total attempts, and `--timeout` accepts 1–86400 seconds
 per attempt. Transient failures use bounded backoff. Authentication, locks, and
-safety refusals are not retried. There is no transaction or rollback across checkouts:
+safety refusals are not retried. Failures show the number of attempts and a bounded,
+readable error summary; retained logs and JSON contain the complete diagnostic.
+Persistent connection failures remain failures after the retry limit. Use fewer
+workers with `--jobs N` on constrained networks. There is no transaction or rollback across checkouts:
 fetches, backups, switches, and upstream changes may persist after later failure.
 
 ## Clean up linked worktrees

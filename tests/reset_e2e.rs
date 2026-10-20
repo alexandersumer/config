@@ -443,10 +443,36 @@ fn standalone_cli_resets_over_git_protocol_and_preserves_dirty_batch_member() {
     rt.git(&single, &["commit", "-m", "divergent local commit"]);
     let local = rt.git(&single, &["rev-parse", "HEAD"]);
     fs::write(single.join("scratch"), "preserve\n").unwrap();
+    fs::create_dir_all(single.join(".claude/.cc-writes")).unwrap();
+    fs::write(single.join(".claude/.cc-writes/local"), "preserve\n").unwrap();
+    fs::create_dir(seed.join(".claude")).unwrap();
+    fs::write(seed.join(".claude/settings.json"), "{}\n").unwrap();
     fs::write(seed.join("file"), "advanced\n").unwrap();
+    rt.git(&seed, &["add", "."]);
     rt.git(&seed, &["commit", "-am", "advance remote"]);
     rt.git(&seed, &["push", "origin", "trunk"]);
     let new = rt.git(&seed, &["rev-parse", "HEAD"]);
+    for name in ["NOISSUE/topic", "noissue/topic"] {
+        rt.git(
+            &origin,
+            &["update-ref", &format!("refs/heads/{name}"), &new],
+        );
+        rt.git(&origin, &["pack-refs", "--all"]);
+        rt.git(
+            &single,
+            &["update-ref", &format!("refs/remotes/origin/{name}"), &old],
+        );
+        rt.git(&single, &["pack-refs", "--all"]);
+    }
+    let unrelated = rt.git(
+        &single,
+        &[
+            "for-each-ref",
+            "--format=%(refname) %(objectname)",
+            "refs/remotes/origin/NOISSUE",
+            "refs/remotes/origin/noissue",
+        ],
+    );
 
     rt.reset(&single, &["--version"], 0);
     let listing = rt.reset(rt.root(), &["--list", "first", "second"], 0);
@@ -467,6 +493,26 @@ fn standalone_cli_resets_over_git_protocol_and_preserves_dirty_batch_member() {
         "trunk"
     );
     assert_eq!(rt.git(&single, &["rev-parse", "feature"]), old);
+    assert_eq!(
+        rt.git(
+            &single,
+            &[
+                "for-each-ref",
+                "--format=%(refname) %(objectname)",
+                "refs/remotes/origin/NOISSUE",
+                "refs/remotes/origin/noissue"
+            ]
+        ),
+        unrelated
+    );
+    assert_eq!(
+        fs::read_to_string(single.join(".claude/.cc-writes/local")).unwrap(),
+        "preserve\n"
+    );
+    assert_eq!(
+        fs::read_to_string(single.join(".claude/settings.json")).unwrap(),
+        "{}\n"
+    );
     assert_eq!(
         fs::read_to_string(single.join("scratch")).unwrap(),
         "preserve\n"

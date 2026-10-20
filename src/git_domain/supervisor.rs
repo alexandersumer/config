@@ -350,7 +350,7 @@ fn run_inner(options: &Options, selection: Selection, started: Instant) -> Resul
                     active.remove(&index);
                     if record.code != 0 {
                         rendering.message(&format!(
-                            "\n  {} {}\n{}\n    Log: {}",
+                            "\n  {} {} ({} {})\n{}\n    Log: {}",
                             crate::presentation::status(
                                 if record.code == 130 {
                                     "Cancelled:"
@@ -361,7 +361,13 @@ fn run_inner(options: &Options, selection: Selection, started: Instant) -> Resul
                                 true
                             ),
                             display(&record.path),
-                            output::wrap(&display(&record.detail)),
+                            record.attempts,
+                            if record.attempts == 1 {
+                                "attempt"
+                            } else {
+                                "attempts"
+                            },
+                            output::failure(&record.detail),
                             display(&record.log)
                         ))?;
                     }

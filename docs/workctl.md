@@ -115,6 +115,8 @@ workctl git reset ~/src
 Reset fetches and verifies the remote target, then resets the selected primary
 checkouts. The default target comes from the remote's advertised HEAD. Use
 `--remote NAME --branch NAME` to select a target explicitly.
+Only the selected branch is fetched; unrelated tracking refs and tags are left
+alone. The verified fetched commit is used if the branch moves during discovery.
 
 Dirty tracked files, unsafe index state, unfinished Git operations, and local-file
 collisions block reset. Replaced branch tips are backed up under

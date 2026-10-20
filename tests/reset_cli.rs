@@ -486,7 +486,8 @@ fn default_rename_and_explicit_remote_branch_are_authoritative() {
     assert_eq!(git(&f.repo, &["branch", "--show-current"]), "main");
     assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), upstream_main);
     assert_eq!(git(&f.repo, &["rev-parse", "trunk"]), trunk);
-    assert_eq!(git(&f.repo, &["rev-parse", "origin/main"]), f.new);
+    // Only the selected trunk was fetched; unrelated main is unchanged.
+    assert_eq!(git(&f.repo, &["rev-parse", "origin/main"]), f.old);
     assert_eq!(
         git(
             &f.repo,
@@ -912,42 +913,61 @@ fn broken_output_cancels_running_workers_instead_of_leaving_fetches() {
 }
 
 #[test]
-fn case_collisions_never_trigger_implicit_ref_or_config_repair() {
+fn reset_regression_unrelated_case_collisions_do_not_block_target_fetch() {
     let f = Fixture::new();
-    git(
-        &f.origin,
-        &["update-ref", "refs/heads/NOISSUE/topic", &f.old],
-    );
-    git(&f.origin, &["pack-refs", "--all"]);
-    git(
-        &f.origin,
-        &["update-ref", "refs/heads/noissue/topic", &f.new],
-    );
-    git(&f.origin, &["pack-refs", "--all"]);
-    let before = git(&f.repo, &["config", "--get-all", "remote.origin.fetch"]);
-    let out = f.run(&f.repo, &[]);
-    let probe = f.repo.join(".git/case-probe");
-    fs::write(&probe, "probe").unwrap();
-    let insensitive = f.repo.join(".git/CASE-PROBE").exists();
-    fs::remove_file(probe).unwrap();
-    if insensitive {
-        failure(&out, "fetch");
-        assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.old);
-    } else {
-        success(&out);
+    git(&f.repo, &["fetch", "origin"]);
+    for (name, oid) in [("NOISSUE/topic", &f.old), ("noissue/topic", &f.new)] {
+        git(
+            &f.origin,
+            &["update-ref", &format!("refs/heads/{name}"), oid],
+        );
+        git(&f.origin, &["pack-refs", "--all"]);
+        // Reproduce stale case-colliding tracking refs as well as remote branches.
+        git(
+            &f.repo,
+            &["update-ref", &format!("refs/remotes/origin/{name}"), oid],
+        );
+        git(&f.repo, &["pack-refs", "--all"]);
     }
+    git(&f.origin, &["update-ref", "refs/tags/unrelated", &f.new]);
+    git(&f.repo, &["config", "remote.origin.prune", "true"]);
+    git(&f.repo, &["config", "fetch.pruneTags", "true"]);
+    git(&f.repo, &["config", "remote.origin.tagOpt", "--tags"]);
+    let before = git(&f.repo, &["config", "--get-all", "remote.origin.fetch"]);
+    let refs_before = git(
+        &f.repo,
+        &[
+            "for-each-ref",
+            "--format=%(refname) %(objectname)",
+            "refs/remotes/origin/NOISSUE",
+            "refs/remotes/origin/noissue",
+        ],
+    );
+    success(&f.run(&f.repo, &[]));
+    assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.new);
     assert_eq!(
         git(&f.repo, &["config", "--get-all", "remote.origin.fetch"]),
         before
     );
     assert_eq!(
-        git(&f.origin, &["rev-parse", "refs/heads/NOISSUE/topic"]),
-        f.old
+        git(
+            &f.repo,
+            &[
+                "for-each-ref",
+                "--format=%(refname) %(objectname)",
+                "refs/remotes/origin/NOISSUE",
+                "refs/remotes/origin/noissue"
+            ]
+        ),
+        refs_before
     );
-    assert_eq!(
-        git(&f.origin, &["rev-parse", "refs/heads/noissue/topic"]),
-        f.new
-    );
+    assert!(git(&f.repo, &["tag", "--list"]).is_empty());
+    for (name, oid) in [("NOISSUE/topic", &f.old), ("noissue/topic", &f.new)] {
+        assert_eq!(
+            git(&f.origin, &["rev-parse", &format!("refs/heads/{name}")]),
+            *oid
+        );
+    }
 }
 
 #[test]
@@ -1046,21 +1066,30 @@ fn fetch_mappings_cannot_replace_unrelated_local_branches() {
 }
 
 #[test]
-fn remote_movement_between_advertisement_and_fetch_refuses_stale_reset() {
-    let f = Fixture::new();
-    let real = String::from_utf8(
-        Command::new("sh")
-            .args(["-c", "command -v git"])
-            .output()
-            .unwrap()
-            .stdout,
-    )
-    .unwrap();
-    let dir=f.shim(&format!("for arg in \"$@\"; do if [ \"$arg\" = fetch ]; then '{}' --git-dir '{}' update-ref refs/heads/main '{}'; fi; done",real.trim(),f.origin.display(),f.old));
-    let mut cmd = f.cli(&f.repo, &[]);
-    f.with_shim(&mut cmd, &dir);
-    failure(&cmd.output().unwrap(), "Target was not fetched");
-    assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.old);
+fn reset_regression_remote_movement_uses_the_verified_fetched_tip() {
+    for rewind in [false, true] {
+        let f = Fixture::new();
+        f.push_file("later");
+        let latest = git(&f.seed, &["rev-parse", "HEAD"]);
+        git(&f.origin, &["update-ref", "refs/heads/main", &f.new]);
+        let fetched = if rewind { &f.old } else { &latest };
+        let real = real_git();
+        let dir = f.shim(&format!(
+            "for arg in \"$@\"; do if [ \"$arg\" = fetch ]; then '{}' --git-dir '{}' update-ref refs/heads/main '{}'; fi; done",
+            real, f.origin.display(), fetched));
+        let mut cmd = f.cli(&f.repo, &[]);
+        f.with_shim(&mut cmd, &dir);
+        let out = cmd.output().unwrap();
+        success(&out);
+        assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), *fetched);
+        assert_eq!(git(&f.repo, &["rev-parse", "origin/main"]), *fetched);
+        let records = records(&out);
+        assert_eq!(records[0]["attempts"], 1);
+        assert_eq!(
+            records[0]["target"],
+            format!("origin/main ({})", &fetched[..12])
+        );
+    }
 }
 
 #[test]
@@ -1594,6 +1623,318 @@ fn optimized_default_pool_is_bounded_and_preserves_each_checkout() {
                 ]
             ),
             f.old
+        );
+    }
+}
+
+fn real_git() -> String {
+    String::from_utf8(
+        Command::new("sh")
+            .args(["-c", "command -v git"])
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap()
+    .trim()
+    .into()
+}
+
+fn records(out: &Output) -> serde_json::Value {
+    serde_json::from_slice(&fs::read(logs(out).join("results.json")).unwrap()).unwrap()
+}
+
+#[test]
+fn reset_regression_shared_untracked_directories_preserve_local_contents() {
+    for kind in ["empty", "untracked", "ignored", "nested"] {
+        let f = Fixture::new();
+        fs::create_dir(f.seed.join(".claude")).unwrap();
+        f.push_file(".claude/settings.json");
+        let local = f.repo.join(".claude/.cc-writes");
+        fs::create_dir_all(&local).unwrap();
+        if kind != "empty" {
+            fs::write(local.join("precious"), "local contents").unwrap();
+        }
+        if kind == "ignored" {
+            fs::write(f.repo.join(".git/info/exclude"), ".claude/\n").unwrap();
+        }
+        if kind == "nested" {
+            git(&local, &["init", "-b", "main"]);
+            git(&local, &["add", "."]);
+            git(&local, &["commit", "-m", "nested work"]);
+        }
+        let out = f.run(&f.repo, &[]);
+        success(&out);
+        assert!(local.is_dir(), "{kind}");
+        if kind != "empty" {
+            assert_eq!(
+                fs::read_to_string(local.join("precious")).unwrap(),
+                "local contents"
+            );
+        }
+        if kind == "nested" {
+            assert_eq!(git(&local, &["log", "-1", "--format=%s"]), "nested work");
+        }
+        assert_eq!(
+            fs::read_to_string(f.repo.join(".claude/settings.json")).unwrap(),
+            "remote"
+        );
+        assert_eq!(
+            git(&f.repo, &["rev-parse", "HEAD"]),
+            git(&f.seed, &["rev-parse", "HEAD"])
+        );
+    }
+}
+
+#[test]
+fn reset_regression_shared_directories_still_protect_real_collisions() {
+    for kind in ["file", "ignored", "symlink", "nested"] {
+        let f = Fixture::new();
+        fs::create_dir(f.seed.join(".claude")).unwrap();
+        f.push_file(".claude/settings.json");
+        let local = f.repo.join(".claude");
+        fs::create_dir(&local).unwrap();
+        fs::write(local.join("settings.json"), "precious").unwrap();
+        if kind == "ignored" {
+            fs::write(f.repo.join(".git/info/exclude"), ".claude/\n").unwrap();
+        }
+        if kind == "symlink" {
+            let outside = f.temp.path().join("outside");
+            fs::rename(&local, &outside).unwrap();
+            symlink(outside, &local).unwrap();
+        }
+        if kind == "nested" {
+            git(&local, &["init", "-b", "main"]);
+            git(&local, &["add", "."]);
+            git(&local, &["commit", "-m", "nested work"]);
+        }
+        let out = f.run(&f.repo, &[]);
+        failure(&out, "would be overwritten");
+        assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.old);
+        assert_eq!(
+            fs::read_to_string(local.join("settings.json")).unwrap(),
+            "precious"
+        );
+    }
+}
+
+#[test]
+fn reset_regression_stale_or_mismatched_fetch_evidence_cannot_reset() {
+    for kind in ["stale", "wrong-branch", "wrong-tip"] {
+        let f = Fixture::new();
+        git(&f.repo, &["fetch", "origin"]);
+        let real = real_git();
+        let action = match kind {
+            "stale" => "exit 0".to_owned(),
+            "wrong-branch" => format!("'{}' \"$@\" || exit $?; printf '{}\\t\\tbranch '\\''other'\\'' of nowhere\\n' > .git/FETCH_HEAD; exit 0", real, f.new),
+            _ => format!("'{}' \"$@\" || exit $?; '{}' update-ref refs/remotes/origin/main '{}'; exit 0", real, real, f.old),
+        };
+        let dir = f.shim(&format!(
+            "for arg in \"$@\"; do if [ \"$arg\" = fetch ]; then {action}; fi; done"
+        ));
+        let mut cmd = f.cli(&f.repo, &[]);
+        f.with_shim(&mut cmd, &dir);
+        let out = cmd.output().unwrap();
+        failure(&out, "fetch");
+        assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.old);
+        assert!(records(&out)[0]["backups"].as_array().unwrap().is_empty());
+    }
+}
+
+#[test]
+fn reset_regression_symbolic_fetch_destination_cannot_replace_local_branch() {
+    let f = Fixture::new();
+    git(&f.repo, &["branch", "precious"]);
+    git(
+        &f.repo,
+        &[
+            "symbolic-ref",
+            "refs/remotes/origin/main",
+            "refs/heads/precious",
+        ],
+    );
+    let out = f.run(&f.repo, &[]);
+    failure(&out, "symbolic");
+    assert_eq!(git(&f.repo, &["rev-parse", "precious"]), f.old);
+    assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.old);
+}
+
+#[test]
+fn reset_regression_selected_case_alias_is_refused_without_ref_changes() {
+    let f = Fixture::new();
+    let probe = f.repo.join(".git/case-probe");
+    fs::write(&probe, "").unwrap();
+    let insensitive = f.repo.join(".git/CASE-PROBE").exists();
+    fs::remove_file(probe).unwrap();
+    git(&f.repo, &["update-ref", "-d", "refs/remotes/origin/main"]);
+    git(&f.repo, &["update-ref", "refs/remotes/origin/MAIN", &f.old]);
+    let before = git(
+        &f.repo,
+        &["for-each-ref", "--format=%(refname) %(objectname)"],
+    );
+    let out = f.run(&f.repo, &[]);
+    if insensitive {
+        failure(&out, "case");
+        assert_eq!(
+            git(
+                &f.repo,
+                &["for-each-ref", "--format=%(refname) %(objectname)"]
+            ),
+            before
+        );
+        assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.old);
+    } else {
+        success(&out);
+        assert_eq!(
+            git(&f.repo, &["rev-parse", "refs/remotes/origin/MAIN"]),
+            f.old
+        );
+        assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.new);
+    }
+}
+
+#[test]
+fn reset_regression_errors_are_bounded_readable_and_keep_full_diagnostics() {
+    let f = Fixture::new();
+    let dir = f.shim(r#"
+for arg in "$@"; do
+    if [ "$arg" = fetch ]; then
+        printf 'error: cannot lock ref\nlock diagnostic\033[31m\n' >&2
+        n=0; while [ "$n" -lt 100 ]; do printf ' - [deleted] (none) -> origin/noisy-branch-%s\n' "$n" >&2; n=$((n+1)); done
+        echo 'END-OF-DIAGNOSTIC' >&2
+        exit 1
+    fi
+done"#);
+    let mut cmd = f.cli(&f.repo, &[]);
+    f.with_shim(&mut cmd, &dir);
+    let out = cmd.output().unwrap();
+    failure(&out, "cannot lock ref");
+    let rendered = text(&out);
+    assert!(!rendered.contains("\\u{a}"), "{rendered}");
+    assert!(!rendered.contains('\x1b'), "{rendered}");
+    assert!(
+        rendered.len() < 2200,
+        "unbounded error output: {}",
+        rendered.len()
+    );
+    assert!(!rendered.contains("END-OF-DIAGNOSTIC"));
+    let log = fs::read_to_string(logs(&out).join("0001.log")).unwrap();
+    assert!(log.contains("END-OF-DIAGNOSTIC"));
+    assert!(records(&out)[0]["detail"]
+        .as_str()
+        .unwrap()
+        .contains("END-OF-DIAGNOSTIC"));
+}
+
+#[test]
+fn reset_regression_network_exhaustion_is_bounded_and_reports_attempts() {
+    for stage in ["ls-remote", "fetch"] {
+        let f = Fixture::new();
+        let count = f.temp.path().join("count");
+        let dir = f.shim(&format!(
+            "for arg in \"$@\"; do if [ \"$arg\" = '{stage}' ]; then echo attempt >> '{}'; echo 'Failed to connect to github.com port 443' >&2; exit 128; fi; done",
+            count.display()));
+        let mut cmd = f.cli(&f.repo, &[OsStr::new("--attempts=2")]);
+        f.with_shim(&mut cmd, &dir);
+        let out = cmd.output().unwrap();
+        failure(&out, "Failed to connect");
+        assert_eq!(fs::read_to_string(count).unwrap().lines().count(), 2);
+        assert_eq!(records(&out)[0]["attempts"], 2);
+        assert!(text(&out).contains("2 attempts"), "{}", text(&out));
+        assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.old);
+        assert!(records(&out)[0]["backups"].as_array().unwrap().is_empty());
+    }
+}
+
+#[test]
+fn reset_regression_shared_directory_pathspecs_preserve_literal_non_utf8_names() {
+    let f = Fixture::new();
+    let name = OsString::from_vec(if cfg!(target_os = "linux") {
+        b"[literal]*-\n\xff".to_vec()
+    } else {
+        "[literal]*-\né".as_bytes().to_vec()
+    });
+    fs::create_dir(f.seed.join(&name)).unwrap();
+    fs::write(f.seed.join(&name).join("remote"), "remote").unwrap();
+    git(&f.seed, &["add", "."]);
+    git(&f.seed, &["commit", "-m", "literal directory"]);
+    git(&f.seed, &["push", "origin", "main"]);
+    fs::create_dir(f.repo.join(&name)).unwrap();
+    fs::write(f.repo.join(&name).join("local"), "precious").unwrap();
+    success(&f.run(&f.repo, &[]));
+    assert_eq!(
+        fs::read(f.repo.join(&name).join("local")).unwrap(),
+        b"precious"
+    );
+    assert_eq!(
+        fs::read(f.repo.join(&name).join("remote")).unwrap(),
+        b"remote"
+    );
+}
+
+#[test]
+fn reset_regression_selected_local_branch_case_alias_is_preserved() {
+    let f = Fixture::new();
+    let probe = f.repo.join(".git/case-probe");
+    fs::write(&probe, "").unwrap();
+    let insensitive = f.repo.join(".git/CASE-PROBE").exists();
+    fs::remove_file(probe).unwrap();
+    git(&f.repo, &["branch", "-m", "temporary"]);
+    git(&f.repo, &["branch", "-m", "MAIN"]);
+    let out = f.run(&f.repo, &[]);
+    if insensitive {
+        failure(&out, "case");
+        assert_eq!(git(&f.repo, &["branch", "--show-current"]), "MAIN");
+        assert_eq!(git(&f.repo, &["rev-parse", "origin/main"]), f.old);
+    } else {
+        success(&out);
+        assert_eq!(git(&f.repo, &["branch", "--show-current"]), "main");
+    }
+    assert_eq!(git(&f.repo, &["rev-parse", "MAIN"]), f.old);
+}
+
+#[test]
+fn reset_regression_explicit_branch_names_are_verified_literally() {
+    let f = Fixture::new();
+    for branch in ["feature/topic", "feature/o'hare", "feature/café"] {
+        git(
+            &f.origin,
+            &["update-ref", &format!("refs/heads/{branch}"), &f.new],
+        );
+        success(&f.run(&f.repo, &["--branch", branch]));
+        assert_eq!(git(&f.repo, &["branch", "--show-current"]), branch);
+        assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.new);
+    }
+}
+
+#[test]
+fn reset_regression_shared_directories_protect_case_aliases() {
+    for ignored in [false, true] {
+        let f = Fixture::new();
+        fs::create_dir(f.seed.join(".claude")).unwrap();
+        f.push_file(".claude/settings.json");
+        fs::create_dir(f.repo.join(".claude")).unwrap();
+        fs::write(f.repo.join(".claude/SETTINGS.json"), "precious").unwrap();
+        let insensitive = f.repo.join(".claude/settings.json").exists();
+        if ignored {
+            fs::write(f.repo.join(".git/info/exclude"), ".claude/\n").unwrap();
+        }
+        // Probe the filesystem itself, not a potentially stale Git setting.
+        git(&f.repo, &["config", "core.ignorecase", "false"]);
+        let out = f.run(&f.repo, &[]);
+        if insensitive {
+            failure(&out, "would be overwritten");
+            assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.old);
+        } else {
+            success(&out);
+            assert_eq!(
+                fs::read_to_string(f.repo.join(".claude/settings.json")).unwrap(),
+                "remote"
+            );
+        }
+        assert_eq!(
+            fs::read_to_string(f.repo.join(".claude/SETTINGS.json")).unwrap(),
+            "precious"
         );
     }
 }

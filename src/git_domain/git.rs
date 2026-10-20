@@ -124,7 +124,10 @@ impl Git {
     }
     pub fn call(&self, args: &[&str]) -> Result<Vec<u8>, String> {
         let args: Vec<_> = args.iter().map(OsStr::new).collect();
-        let (code, out, err) = capture(&self.cwd, &args, false)?;
+        self.call_os(&args)
+    }
+    pub fn call_os(&self, args: &[&OsStr]) -> Result<Vec<u8>, String> {
+        let (code, out, err) = capture(&self.cwd, args, false)?;
         // Logs contain stderr from successful hooks as well as failed commands.
         if !err.is_empty() {
             eprint!("{}", redact(OsString::from_vec(err.clone())));
