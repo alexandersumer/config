@@ -106,7 +106,7 @@ fn valid_cache_reuse_is_read_only_and_json_never_contains_credentials() {
         assert_eq!(r["targets"][2]["status"], "valid");
         assert_eq!(r["duration_guaranteed"], false);
     }
-    assert_eq!(f.calls().len(), 8);
+    assert_eq!(f.calls().len(), 16);
     assert!(f.calls().iter().all(|c| c[1][1] == "status"
         || c[1][0] == "workspace"
         || c[1][0] == "doctor"
@@ -141,18 +141,18 @@ fn all_missing_credentials_are_refreshed_once_and_normal_cache_is_rechecked() {
             .iter()
             .filter(|c| c[0] == "atlas" && c[1].as_array().unwrap().contains(&json!("--force")))
             .count(),
-        1
+        5
     );
     assert_eq!(
         calls
             .iter()
             .filter(|c| c[0] == "atlas" && c[1].as_array().unwrap().contains(&json!("--cached")))
             .count(),
-        2
+        10
     );
     let before = calls.len();
     f.run(&[], 0);
-    assert_eq!(f.calls().len() - before, 4);
+    assert_eq!(f.calls().len() - before, 8);
 }
 #[test]
 fn silent_oauth_refresh_succeeds_without_browser_in_noninteractive_mode() {
@@ -176,7 +176,7 @@ fn check_only_never_makes_any_refresh_or_login_call() {
     let f = Fixture::new(json!({"bb_valid":false,"twg_valid":false,"atlas_valid":false}));
     let r = f.run(&["--check"], 1);
     assert_eq!(r["status"], "blocked");
-    assert_eq!(f.calls().len(), 3);
+    assert_eq!(f.calls().len(), 7);
 }
 #[test]
 fn noninteractive_blocks_mfa_instead_of_launching_a_browser() {
@@ -207,7 +207,7 @@ fn malformed_permission_and_outage_errors_do_not_trigger_auth_refresh() {
     for mode in ["malformed", "permission", "outage"] {
         let f = Fixture::new(json!({"mode":mode}));
         let r = f.run(&[], 1);
-        assert_eq!(f.calls().len(), 3);
+        assert_eq!(f.calls().len(), 7);
         assert!(r["targets"]
             .as_array()
             .unwrap()
@@ -760,7 +760,7 @@ fn default_preflight_forces_every_valid_provider_once_on_every_invocation() {
             .collect();
         assert_eq!(
             renewals.len(),
-            2,
+            if provider == "atlas" { 10 } else { 2 },
             "{provider} must renew exactly once per invocation"
         );
     }
@@ -790,7 +790,7 @@ fn forced_preflight_does_not_hide_failed_renewal_behind_valid_cache() {
             .iter()
             .filter(|c| c[0] == "atlas" && c[1].as_array().unwrap().contains(&json!("--force")))
             .count(),
-        1
+        5
     );
 }
 #[test]
@@ -860,7 +860,9 @@ fn human_report_identifies_mode_account_readiness_and_unknown_expiry() {
         lifetime.is_match(&stdout),
         "missing readable lifetime: {stdout}"
     );
-    assert!(!stdout.contains("guarantee"));
+    assert!(stdout.contains("TWG OAuth API access verified"));
+    assert!(stdout.contains("twg bb"));
+    assert!(stdout.contains("not covered"));
     assert!(!stdout.contains("bitbucket:active"));
     assert!(!text(&out).contains(SECRET));
     assert!(!text(&out).contains('\u{1b}'));
@@ -916,4 +918,149 @@ fn json_check_has_no_human_progress_and_invalid_profile_has_clear_error() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("Authentication preflight: failed"));
     assert!(stdout.contains("Error: Unknown built-in auth profile"));
+}
+
+#[test]
+fn work_covers_recent_service_dependencies_with_exact_descriptors() {
+    let f = Fixture::new(json!({}));
+    let r = f.run(&["--check"], 0);
+    let labels: Vec<_> = r["targets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["target"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        labels,
+        vec![
+            "bitbucket:active",
+            "twg",
+            "slauth:prod:splunk.paas-inf.net:atlassian-all:mfa=true",
+            "slauth:prod:risk-mitigation-service::mfa=true",
+            "slauth:prod:pollinator::mfa=true",
+            "slauth:prod:mlp-config::mfa=false",
+            "slauth:prod:phobos::mfa=false",
+        ]
+    );
+    let note = r["targets"][1]["note"].as_str().unwrap();
+    assert!(note.contains("twg bb") && note.contains("not covered"));
+    let calls = f.calls();
+    let atlas: Vec<_> = calls.iter().filter(|c| c[0] == "atlas").collect();
+    assert_eq!(atlas.len(), 5);
+    for call in atlas {
+        let args = call[1].as_array().unwrap();
+        let audience = args[3].as_str().unwrap();
+        assert_eq!(args[5], "prod");
+        assert_eq!(
+            args.contains(&json!("--mfa")),
+            [
+                "splunk.paas-inf.net",
+                "risk-mitigation-service",
+                "pollinator"
+            ]
+            .contains(&audience)
+        );
+        assert_eq!(
+            args.contains(&json!("--groups")),
+            audience == "splunk.paas-inf.net"
+        );
+        assert_eq!(args.last().unwrap(), "--cached");
+    }
+}
+
+#[test]
+fn narrow_service_profiles_only_touch_the_selected_audience() {
+    for (profile, audience) in [
+        ("risk", "risk-mitigation-service"),
+        ("checks", "pollinator"),
+        ("config", "mlp-config"),
+        ("metrics", "phobos"),
+    ] {
+        let f = Fixture::new(json!({"atlas_valid":false}));
+        let r = f.run(&["--profile", profile], 0);
+        assert_eq!(r["targets"].as_array().unwrap().len(), 1);
+        assert_eq!(r["targets"][0]["status"], "refreshed");
+        assert_eq!(f.calls().len(), 3);
+        for call in f.calls() {
+            assert_eq!(call[0], "atlas");
+            assert_eq!(call[1][3], audience);
+        }
+        let before = f.calls().len();
+        f.run(&["--profile", profile, "--check", "--non-interactive"], 0);
+        assert_eq!(f.calls().len() - before, 1);
+    }
+    let f = Fixture::new(json!({}));
+    let r = f.run(&["--profile", "services", "--check"], 0);
+    assert_eq!(r["targets"].as_array().unwrap().len(), 4);
+    assert!(f.calls().iter().all(|c| c[0] == "atlas"));
+}
+
+#[test]
+fn one_missing_service_blocks_work_and_exec_but_other_audiences_continue() {
+    let f = Fixture::new(json!({"atlas_valid_by_audience":{"risk-mitigation-service":false}}));
+    let r = f.run(&["--check"], 1);
+    assert_eq!(r["targets"][3]["status"], "blocked");
+    assert!(r["targets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| *i != 3)
+        .all(|(_, t)| t["status"] == "valid"));
+    let marker = f.root.path().join("child-must-not-run");
+    let out = f
+        .command(&[
+            "auth",
+            "exec",
+            "--check",
+            "--",
+            "/usr/bin/touch",
+            marker.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(!marker.exists());
+    assert!(!text(&out).contains(SECRET));
+    let before = f.calls().len();
+    let r = f.run(&[], 0);
+    assert_eq!(r["targets"][3]["status"], "refreshed");
+    let calls = f.calls();
+    let renewals: Vec<_> = calls[before..]
+        .iter()
+        .filter(|c| c[1].as_array().unwrap().contains(&json!("--force")))
+        .collect();
+    assert_eq!(renewals.len(), 1);
+    assert_eq!(renewals[0][1][3], "risk-mitigation-service");
+}
+
+#[test]
+fn service_cache_cannot_substitute_a_different_audience_or_start_noninteractive_mfa() {
+    for profile in ["risk", "checks", "config", "metrics"] {
+        let f = Fixture::new(json!({"aud":"splunk.paas-inf.net"}));
+        let r = f.run(&["--profile", profile], 1);
+        assert_eq!(r["targets"][0]["status"], "failed");
+        assert_eq!(f.calls().len(), 1);
+        let f = Fixture::new(json!({"atlas_valid":false}));
+        let r = f.run(&["--profile", profile, "--non-interactive"], 1);
+        assert_eq!(r["targets"][0]["status"], "blocked");
+        assert_eq!(f.calls().len(), 1);
+    }
+}
+
+#[test]
+fn service_progress_identifies_the_audience_before_any_browser_prompt() {
+    let f = Fixture::new(json!({}));
+    let out = f
+        .command(&["auth", "preflight", "--profile", "checks"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let target = stderr
+        .find("Renewing SLAuth (prod · pollinator · MFA)")
+        .unwrap();
+    let prompt = stderr.find("Complete browser sign-in or MFA").unwrap();
+    assert!(target < prompt);
+    assert!(!text(&out).contains(SECRET));
 }

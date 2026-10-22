@@ -24,12 +24,56 @@ workctl auth exec --profile code -- bb pr list
 
 ## Choose a profile
 
-The built-in `work` profile contains Bitbucket OAuth, TWG OAuth, and production
-Splunk SLAuth (`splunk.paas-inf.net`, `atlassian-all`, MFA). `code` contains
-Bitbucket and TWG; `logs` contains Splunk only. Select the narrowest profile for the
-work. These are explicit requirements, not guesses about other running chats.
-Splunk issuance also warms the underlying Atlas login, but does not prove access
-to every Atlas service or refresh service-signed runtime credentials.
+The built-in `work` profile contains seven independent credential targets:
+
+| Profile | Targets | SLAuth environment, groups, MFA |
+| --- | --- | --- |
+| `code` | Bitbucket CLI OAuth and TWG OAuth | Not SLAuth |
+| `logs` | `splunk.paas-inf.net` | `prod`, `atlassian-all`, MFA |
+| `risk` | `risk-mitigation-service` | `prod`, no groups, MFA |
+| `checks` | `pollinator` | `prod`, no groups, MFA |
+| `config` | `mlp-config` | `prod`, no groups, no MFA requirement |
+| `metrics` | `phobos` | `prod`, no groups, no MFA requirement |
+| `services` | `risk` + `checks` + `config` + `metrics` | Exact descriptors above |
+| `work` (default) | `code` + `logs` + `services` | Exact descriptors above |
+
+Select the narrowest profile for the work. These are explicit requirements, not
+guesses about other running chats. For example, use `--profile risk` before a risk
+metadata query and `--profile metrics` before collecting Tome objectives. Custom
+profiles can combine these descriptors with other audiences or environments.
+Splunk issuance also warms the underlying Atlas login, but does not populate the
+other audience-specific caches or refresh service-signed runtime credentials.
+
+### Coverage evidence and boundaries
+
+The October 21–22, 2026 session review found Risk Mitigation calls for PR gates,
+Pollinator calls for release qualification, MLP Config reads for authorization
+diagnosis, and Phobos reads for reliability scorecards. The live acceptance session
+(`01a15cab-b96f-7742-8caa-12c8dee0973f`) needed explicit MFA for Risk Mitigation and
+Pollinator after earlier cached calls. The reliability measurement session
+(`01a160ae-28af-7fb3-99af-50b44f95425f`) stopped when the Phobos cache was absent
+and renewed that exact audience. These observations determine the added defaults;
+they are historical discovery, not proof of current access.
+
+Readiness covers the declared provider credentials. SLAuth checks verify the
+requested cache's audience and lifetime; they do not probe each service's resource
+permissions. The productive service call must still handle authorization failures.
+In particular:
+
+- TWG OAuth and TWG's optional Bitbucket API token are separate. Recent sessions
+  repeatedly saw `AUTH_INVALID` from `twg bb` while `bb` worked. The TWG result
+  explicitly names this boundary. Use `twg setup bitbucket` for that token's
+  interactive setup; refreshing TWG OAuth or `bb` cannot repair it.
+- Micros, Sliver, Spinnaker, browser sessions, and package-registry credentials
+  retain their provider-specific checks. Registry reads succeeded in the reviewed
+  sessions; an unpublished package was not an auth failure. These are not covered
+  merely because another Atlas audience succeeds.
+- Nebulae ingress Kerberos, local ASAP signing keys, service-to-service principals,
+  and tenant/user-context tokens are runtime-specific. A local `User context
+  missing` failure and a deployed principal rejection in the reviewed sessions
+  were not repairable by renewing workstation OAuth or Splunk. Resolve these in
+  the selected runtime; do not issue broad bot tokens, change access policy, or
+  refresh unrelated audiences as a generic preflight fix.
 
 ## Credential ownership and noninteractive use
 
@@ -45,7 +89,8 @@ an actionable `twg login` requirement: the installed TWG login requires a
 controlling terminal for account/site selection. TWG's separate optional Bitbucket
 token is reported by `twg doctor`, but does not invalidate a working TWG OAuth
 credential; workctl verifies the separate `bb` CLI credential for Bitbucket use.
-It does not repair TWG's optional Bitbucket API token or claim `twg bb` is ready.
+It does not repair TWG's optional Bitbucket API token or claim `twg bb` is ready;
+this limitation is also shown in human and JSON reports.
 
 ## Expiry and access guarantees
 
@@ -146,6 +191,8 @@ cargo test --locked --test auth_live -- --ignored --nocapture
 # Narrow service-specific live proof; this does not prove Splunk MFA:
 WORKCTL_AUTH_LIVE_CONFIG=/path/to/auth.json WORKCTL_AUTH_LIVE_PROFILE=staging \
   cargo test --locked --test auth_live real_slauth -- --ignored --nocapture
+# Check every built-in service cache without initiating renewal or MFA:
+cargo test --locked --test auth_live real_work_cache -- --ignored --nocapture
 ```
 
 The required Linux/macOS CI lane runs the auth CLI suite alongside the existing

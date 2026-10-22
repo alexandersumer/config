@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 #[derive(Args, Debug)]
 pub(crate) struct Options {
-    /// Named credential set: built-ins are work, code, and logs
+    /// Named credential set: work, code, logs, services, risk, checks, config, metrics
     #[arg(long, default_value = "work")]
     pub profile: String,
     /// Explicit JSON profile file; never reads a provider's credential store
@@ -173,19 +173,35 @@ pub(crate) fn targets(options: &Options) -> Result<Vec<Target>, String> {
             .ok_or("Auth profile not found")?
     } else {
         let code = vec![Target::Bitbucket { account: None }, Target::Twg {}];
-        let logs = vec![Target::Slauth {
-            audience: "splunk.paas-inf.net".into(),
+        let slauth = |audience: &str, mfa, groups: &[&str]| Target::Slauth {
+            audience: audience.into(),
             environment: "prod".into(),
-            groups: vec!["atlassian-all".into()],
-            mfa: true,
-        }];
+            groups: groups.iter().map(|s| (*s).into()).collect(),
+            mfa,
+        };
+        let logs = vec![slauth("splunk.paas-inf.net", true, &["atlassian-all"])];
+        let risk = slauth("risk-mitigation-service", true, &[]);
+        let checks = slauth("pollinator", true, &[]);
+        let config = slauth("mlp-config", false, &[]);
+        let metrics = slauth("phobos", false, &[]);
+        let services = vec![
+            risk.clone(),
+            checks.clone(),
+            config.clone(),
+            metrics.clone(),
+        ];
         match options.profile.as_str() {
             "code" => code,
             "logs" => logs,
-            "work" => code.into_iter().chain(logs).collect(),
+            "risk" => vec![risk],
+            "checks" => vec![checks],
+            "config" => vec![config],
+            "metrics" => vec![metrics],
+            "services" => services,
+            "work" => code.into_iter().chain(logs).chain(services).collect(),
             _ => {
                 return Err(
-                    "Unknown built-in auth profile; use work, code, logs, or --config".into(),
+                    "Unknown built-in auth profile; use work, code, logs, services, risk, checks, config, metrics, or --config".into(),
                 )
             }
         }

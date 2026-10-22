@@ -35,7 +35,7 @@ fn result(options: &Options, human: bool) -> Value {
             if human {
                 writeln!(
                     std::io::stderr(),
-                    "  [{}/{}] {} {}…",
+                    "  [{}/{}] {} {}{}…",
                     index + 1,
                     total,
                     if options.check {
@@ -45,7 +45,11 @@ fn result(options: &Options, human: bool) -> Value {
                     } else {
                         "Renewing"
                     },
-                    target.display_name()
+                    target.display_name(),
+                    target
+                        .scope()
+                        .map(|scope| format!(" ({scope})"))
+                        .unwrap_or_default()
                 )
                 .map_err(|_| "Cannot display authentication progress")?;
             }
@@ -182,7 +186,7 @@ fn render(result: &Value, stderr: bool, elapsed: std::time::Duration) -> std::io
         if let Some(account) = target["account"].as_str() {
             write_detail(&mut output, "Account", account)?;
         }
-        for (key, label) in [("reason", "Reason"), ("action", "Action")] {
+        for (key, label) in [("reason", "Reason"), ("action", "Action"), ("note", "Note")] {
             if let Some(text) = target[key].as_str() {
                 write_detail(&mut output, label, text)?;
             }

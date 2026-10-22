@@ -74,12 +74,22 @@ workctl auth exec --profile code -- bb pr list
 
 | Profile | Credentials |
 | --- | --- |
-| `work` (default) | Bitbucket, TWG, and production Splunk |
-| `code` | Bitbucket and TWG |
+| `work` (default) | `code` + `logs` + `services` (seven targets) |
+| `code` | Bitbucket CLI OAuth and TWG OAuth |
 | `logs` | Production Splunk |
+| `risk` | Risk Mitigation SLAuth, with MFA |
+| `checks` | Pollinator SLAuth, with MFA |
+| `config` | MLP Config SLAuth |
+| `metrics` | Phobos SLAuth for reliability/Tome reads |
+| `services` | `risk` + `checks` + `config` + `metrics` |
 
-Splunk uses SLAuth for `splunk.paas-inf.net`, group `atlassian-all`, with MFA.
-Use `--config FILE --profile NAME` for an explicit custom profile.
+All built-in SLAuth targets use `prod`. Splunk uses `splunk.paas-inf.net`, group
+`atlassian-all`, with MFA; the other audiences require no groups. Select the
+narrowest profile or use `--config FILE --profile NAME` for explicit descriptors.
+TWG's separate Bitbucket token requires `twg setup bitbucket`; the verified `bb`
+credential does not prove `twg bb` access. Runtime/service identities, browser
+sessions, and registry credentials require their own checks; see the
+[coverage boundaries](authentication.md#coverage-evidence-and-boundaries).
 
 ### Renewal modes
 

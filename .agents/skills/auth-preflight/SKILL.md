@@ -28,9 +28,18 @@ Ask one concise question only when multiple plausible targets remain after using
 
 ## workctl
 
-When installed, use `workctl` for matching credential sets: `code` (Bitbucket +
-TWG), `logs` (production Splunk), or `work` (both). Use `--config FILE --profile NAME`
+When installed, use `workctl` for matching credential sets: `code` (Bitbucket CLI +
+TWG OAuth), `logs` (production Splunk), `risk` (Risk Mitigation, MFA), `checks`
+(Pollinator, MFA), `config` (MLP Config), or `metrics` (Phobos). `services` combines
+the four service audiences; `work` combines code, logs, and services. All built-in
+SLAuth descriptors use production. Use `--config FILE --profile NAME`
 for an exact descriptor. Keep other services on their provider-specific path.
+
+TWG's optional Bitbucket API token is separate from TWG OAuth and the `bb` CLI.
+An `AUTH_INVALID` response from `twg bb` is not repaired by refreshing those
+credentials. Use `twg setup bitbucket` for its interactive setup or the verified
+native `bb` fallback. Runtime principals, ingress Kerberos, user-context tokens,
+browser sessions, and registry credentials need their own scoped checks.
 
 Run `workctl auth preflight --profile PROFILE --check --json` for status-only
 requests, `--reuse-valid --json` for productive work, or `--json` for explicit

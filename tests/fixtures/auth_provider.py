@@ -48,8 +48,9 @@ def save():
     state_path.write_text(json.dumps(state))
 
 def jwt():
+    audience = args[args.index('--aud') + 1]
     claims = {'exp': int(time.time()) + state.get('ttl', 3600),
-              'aud': state.get('aud', 'splunk.paas-inf.net')}
+              'aud': state.get('aud', audience)}
     if 'nbf' in state:
         claims['nbf'] = state['nbf']
     def part(obj):
@@ -118,8 +119,10 @@ elif name == 'twg':
 elif name == 'atlas':
     assert args[:2] == ['slauth', 'token']
     assert '--output' in args and args[args.index('--output') + 1] == 'jwt'
+    audience = args[args.index('--aud') + 1]
+    valid = state.get('atlas_valid_by_audience', {}).get(audience, state.get('atlas_valid', True))
     if '--cached' in args:
-        if not state.get('atlas_valid', True):
+        if not valid:
             print('ERROR: No existing token entry in cache ' + secret, file=sys.stderr)
             sys.exit(2)
         print(jwt())
@@ -141,7 +144,7 @@ elif name == 'atlas':
             print('MFA required ' + secret, file=sys.stderr)
             sys.exit(1)
         if not state.get('refresh_stale'):
-            state['atlas_valid'] = True
+            state.setdefault('atlas_valid_by_audience', {})[audience] = True
             state['ttl'] = state.get('refreshed_ttl', 3600)
             save()
         if state.get('refresh_cache_then_fail'):

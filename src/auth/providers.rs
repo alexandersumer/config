@@ -310,7 +310,7 @@ fn ready(target: &Target, evidence: Evidence, refreshed: bool) -> Value {
         .as_secs();
     json!({"target":target.label(), "status":if refreshed {"refreshed"} else {"valid"}, "remaining_seconds":evidence.remaining, "account":evidence.account,
         "checked_at_unix_seconds":checked_at, "expires_at_unix_seconds":evidence.remaining.map(|s|checked_at.saturating_add(s)),
-        "note":if evidence.remaining.is_none() {Some("Access verified now; provider does not expose credential expiry. No unattended-duration guarantee.")} else {None}})
+        "note":if matches!(target, Target::Twg {}) {Some("TWG OAuth API access verified; expiry unknown. The separate token for twg bb is not covered; use twg setup bitbucket to configure it or verify and use the bb CLI. No unattended-duration guarantee.")} else if evidence.remaining.is_none() {Some("Access verified now; provider does not expose credential expiry. No unattended-duration guarantee.")} else {None}})
 }
 fn blocked(target: &Target, reason: &str, action: &str) -> Value {
     json!({"target":target.label(),"status":"blocked","reason":reason,"action":action,"remaining_seconds":null})

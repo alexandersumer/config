@@ -46,7 +46,7 @@ enum Operation {
 enum Auth {
     /// Force-renew every credential once and independently verify readiness
     #[command(
-        after_long_help = "Profiles: work = Bitbucket + TWG + Splunk; code = Bitbucket + TWG; logs = Splunk.\nDefault: force-renew every target. --reuse-valid opts into cached reuse.\nProvider CLIs own all credentials. --check makes no explicit refresh/login.\n--non-interactive allows silent OAuth refresh but never browser/MFA issuance.\nExpiry is reported when available; no command can guarantee future access.\nExamples:\n  workctl auth preflight\n  workctl auth preflight --profile code --json\n  workctl auth preflight --profile logs --check\n  workctl auth preflight --config auth.json --profile staging"
+        after_long_help = "Profiles: work = code + logs + services; code = Bitbucket + TWG OAuth; logs = Splunk.\nservices = risk + checks + config + metrics.\nrisk = Risk Mitigation (MFA); checks = Pollinator (MFA); config = MLP Config; metrics = Phobos.\nAll built-in SLAuth targets use prod; custom descriptors use --config.\nDefault: force-renew every target. --reuse-valid opts into cached reuse.\nProvider CLIs own all credentials. --check makes no explicit refresh/login.\n--non-interactive allows silent OAuth refresh but never browser/MFA issuance.\nExpiry is reported when available; no command can guarantee future access.\nExamples:\n  workctl auth preflight\n  workctl auth preflight --profile code --json\n  workctl auth preflight --profile risk --check\n  workctl auth preflight --config auth.json --profile staging"
     )]
     Preflight(crate::auth::Options),
     /// Preflight automatically, then execute argv directly with the child's exit status

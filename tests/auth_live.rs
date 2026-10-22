@@ -79,3 +79,25 @@ fn real_slauth_preflight_cache_reuse_and_ttl_policy() {
     assert_eq!(impossible["targets"][0]["status"], "blocked");
     println!("Real SLAuth ({profile}): preflight, cache reuse, wrapped command, impossible lifetime verified");
 }
+
+#[test]
+#[ignore = "requires real bb/TWG/Atlas installations, shared caches and network; never renews"]
+fn real_work_cache_checks_all_seven_targets_without_renewal() {
+    let checked = result(&["auth", "preflight", "--check", "--json"], 0);
+    let targets = checked["targets"].as_array().unwrap();
+    assert_eq!(targets.len(), 7);
+    assert!(targets.iter().all(|t| t["status"] == "valid"));
+    for audience in [
+        "splunk.paas-inf.net",
+        "risk-mitigation-service",
+        "pollinator",
+        "mlp-config",
+        "phobos",
+    ] {
+        assert!(targets.iter().any(|t| t["target"]
+            .as_str()
+            .unwrap()
+            .contains(&format!(":{audience}:"))));
+    }
+    println!("Real work profile: all seven current provider credentials verified without explicit renewal");
+}

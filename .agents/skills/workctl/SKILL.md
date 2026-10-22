@@ -26,10 +26,18 @@ workspace. Prefer `--json` for structured results.
 
 ## Choose and execute
 
-Profiles: `code` = Bitbucket + TWG; `logs` = production Splunk; `work` = both.
+Profiles: `code` = Bitbucket CLI + TWG OAuth; `logs` = production Splunk;
+`risk` = Risk Mitigation (MFA); `checks` = Pollinator (MFA); `config` = MLP Config;
+`metrics` = Phobos; `services` = risk + checks + config + metrics;
+`work` = code + logs + services. All built-in SLAuth targets use production.
 Choose the narrowest matching set. Use `--config FILE --profile NAME` for exact
 account or audience requirements. `auth exec` preserves child output and exit
 status; omit `--json` there.
+
+TWG's separate Bitbucket token requires `twg setup bitbucket`; neither TWG OAuth
+nor the independent `bb` credential proves `twg bb` access. Runtime principals,
+Nebulae ingress Kerberos, user-context tokens, browser sessions, and registry
+credentials retain their provider-specific paths.
 
 Use the requested paths. Preview cleanup, then apply when removal is authorized.
 Cleanup removes ignored files in eligible worktrees and retains committed history
