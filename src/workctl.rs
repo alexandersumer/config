@@ -7,7 +7,7 @@ use std::io::Write;
 #[command(
     name = "workctl",
     version,
-    about = "Personal workstation maintenance",
+    about = "Work credentials and Git maintenance",
     propagate_version = true,
     args_override_self = true,
     after_help = "Examples:\n  workctl git reset /path/to/work /path/to/oss\n  workctl git worktree clean /path/to/work\n  workctl auth preflight\n  workctl auth exec --profile code -- bb pr list\n  workctl doctor\n  workctl completions zsh\n\nExit codes: 0 success, 1 failed or blocked, 2 invalid usage, 130 interrupted."

@@ -1433,7 +1433,7 @@ fi
     );
     assert!(!text(&out).contains("1 succeeded"));
     assert!(String::from_utf8_lossy(&out.stdout).contains(&format!(
-        "git branch recovered-work {}",
+        "branch recovered-work {}",
         backups[0].as_str().unwrap()
     )));
 }
@@ -1520,7 +1520,8 @@ fn successful_default_runs_remove_logs_and_preserve_recovery_refs() {
                         "refs/home-reset-backups/",
                     ],
                 );
-                assert!(stdout.contains(&format!("git branch recovered-work {reference}")));
+                assert!(stdout.contains("git -C "));
+                assert!(stdout.contains(&format!("branch recovered-work {reference}")));
             }
             assert_eq!(git(repo, &["rev-parse", "HEAD"]), f.new);
             assert_eq!(
@@ -1904,6 +1905,56 @@ fn reset_regression_explicit_branch_names_are_verified_literally() {
         success(&f.run(&f.repo, &["--branch", branch]));
         assert_eq!(git(&f.repo, &["branch", "--show-current"]), branch);
         assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.new);
+    }
+}
+
+#[test]
+fn reset_recovery_commands_quote_refs_and_select_the_correct_repository() {
+    for branch in [
+        "feature/$(touch${IFS}unexpected-recovery)",
+        "feature/o'hare",
+    ] {
+        let f = Fixture::new();
+        git(&f.repo, &["branch", branch, &f.old]);
+        git(
+            &f.origin,
+            &["update-ref", &format!("refs/heads/{branch}"), &f.new],
+        );
+        let out = f.run(&f.repo, &["--branch", branch, "--verbose"]);
+        success(&out);
+        let stdout = String::from_utf8(out.stdout.clone()).unwrap();
+        let recovery = stdout
+            .lines()
+            .find_map(|line| {
+                line.strip_prefix("  Recover ")
+                    .and_then(|line| line.split_once(": "))
+                    .map(|(_, command)| command)
+            })
+            .expect("reset must supply a recovery command");
+        let recovered = env(Command::new("bash").current_dir(f.temp.path()))
+            .args(["--noprofile", "--norc", "-c", recovery])
+            .output()
+            .unwrap();
+        assert!(
+            !f.temp.path().join("unexpected-recovery").exists(),
+            "recovery command executed branch text"
+        );
+        success(&recovered);
+        assert_eq!(git(&f.repo, &["rev-parse", "recovered-work"]), f.old);
+        assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.new);
+        git(&f.repo, &["branch", "-D", "recovered-work"]);
+        let log = fs::read_to_string(logs(&out).join("0001.log")).unwrap();
+        let recovery = log
+            .lines()
+            .find_map(|line| line.strip_prefix("Recover with: "))
+            .unwrap();
+        let recovered = env(Command::new("bash").current_dir(f.temp.path()))
+            .args(["--noprofile", "--norc", "-c", recovery])
+            .output()
+            .unwrap();
+        success(&recovered);
+        assert!(!f.temp.path().join("unexpected-recovery").exists());
+        assert_eq!(git(&f.repo, &["rev-parse", "recovered-work"]), f.old);
     }
 }
 

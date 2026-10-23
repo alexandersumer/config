@@ -100,7 +100,7 @@ fn group_is_inert(group: u32) -> Result<bool, String> {
                 io::Error::last_os_error()
             ));
         }
-        if bytes as usize % std::mem::size_of::<libc::pid_t>() != 0 {
+        if !(bytes as usize).is_multiple_of(std::mem::size_of::<libc::pid_t>()) {
             return Err("cannot inspect worker group: incomplete process table".into());
         }
         if bytes as usize >= size {

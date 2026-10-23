@@ -106,7 +106,10 @@ requested audience, expiry and not-before claims; Atlas owns token issuance and
 validation. SLAuth TTL is capped by policy at one hour or the remaining underlying
 login lifetime. Asking for two hours therefore blocks, even after successful
 issuance. No preflight can guarantee future access after revocation or future MFA.
-Earlier credentials are aged again at handoff in case a later MFA flow took time.
+Known expiry is preserved throughout verification. Bitbucket's relative lifetime
+is measured from the start of its status check, so time spent checking API access
+does not extend it. Credentials are aged again at handoff in case a later MFA flow
+took time.
 For long commands, use the provider's supported renewal mechanism inside that
 command; `auth exec` checks readiness before launch, not throughout execution.
 

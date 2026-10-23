@@ -2044,6 +2044,69 @@ fn cleanup_human_guidance_distinguishes_preview_and_current_state_revalidation()
 }
 
 #[test]
+fn cleanup_preview_explains_the_selected_history_and_file_policy() {
+    for strict in [false, true] {
+        for discard in [false, true] {
+            let f = Fixture::new();
+            if discard {
+                fs::write(f.worktree.join("file"), "uncommitted work").unwrap();
+                fs::write(f.worktree.join("notes"), "untracked work").unwrap();
+            }
+            let mut command = Command::new(BIN);
+            env(&mut command).args(["git", "worktree", "clean"]);
+            if strict {
+                command.arg("--strict");
+            }
+            if discard {
+                command.arg("--discard-local").arg(&f.worktree);
+            }
+            let out = command.arg(&f.worktree).output().unwrap();
+            assert!(out.status.success(), "{}", text(&out));
+            let human = text(&out);
+            if strict {
+                assert!(
+                    human.contains("Remote publication verified: origin"),
+                    "{human}"
+                );
+                assert!(
+                    !human.contains("saves committed history locally"),
+                    "{human}"
+                );
+                assert!(!human.contains("Recovery ref planned"), "{human}");
+            } else {
+                assert!(human.contains("Recovery ref planned"), "{human}");
+            }
+            if discard {
+                assert!(
+                    human.contains(
+                        "Discard approved: tracked changes, untracked files, and ignored files"
+                    ),
+                    "{human}"
+                );
+                assert!(
+                    human.contains("1 tracked changes, 1 untracked entries"),
+                    "{human}"
+                );
+                assert!(
+                    !human.contains("tracked changes and untracked files stay protected"),
+                    "{human}"
+                );
+                assert_eq!(
+                    fs::read_to_string(f.worktree.join("file")).unwrap(),
+                    "uncommitted work"
+                );
+                assert_eq!(
+                    fs::read_to_string(f.worktree.join("notes")).unwrap(),
+                    "untracked work"
+                );
+            }
+            f.unchanged();
+            assert!(git(&f.repo, &["for-each-ref", "refs/workctl/cleanup/"]).is_empty());
+        }
+    }
+}
+
+#[test]
 fn exact_commit_preservation_allows_offline_cleanup_without_losing_unpublished_history() {
     for format in ["sha1", "sha256"] {
         let f = Fixture::with_object_format(format);

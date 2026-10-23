@@ -60,6 +60,7 @@ def jwt():
 if name == 'bb':
     if args[:2] == ['workspace', 'list']:
         assert '--json' in args
+        time.sleep(state.get('bb_api_delay', 0))
         if state.get('bb_revoked'):
             print('Authentication failed (401) ' + secret, file=sys.stderr)
             sys.exit(1)
@@ -73,7 +74,8 @@ if name == 'bb':
             sys.exit(1)
         account = args[args.index('--account') + 1] if '--account' in args else 'office'
         marker = '' if state.get('bb_inactive') else ' (active)'
-        print('✓ ' + account + marker + '\ttest@example.com\tOAuth\texpires in ' + str(state.get('bb_minutes', 60)) + ' min')
+        lifetime = str(state['bb_seconds']) + 's' if 'bb_seconds' in state else str(state.get('bb_minutes', 60)) + ' min'
+        print('✓ ' + account + marker + '\ttest@example.com\tOAuth\texpires in ' + lifetime)
         if state.get('bb_other_active'):
             print('✓ other (active)\ttest@example.com\tOAuth\texpires in 60 min')
     elif args[:2] == ['auth', 'token']:

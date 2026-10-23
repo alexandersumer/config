@@ -521,11 +521,40 @@ fn missing_provider_is_a_structured_failure_and_other_targets_continue() {
 
 #[test]
 fn credentials_are_rechecked_for_age_at_command_handoff() {
-    let f = Fixture::new(json!({"bb_minutes":1,"twg_delay":2}));
+    let f = Fixture::new(json!({"bb_seconds":63,"twg_delay":4}));
     let r = f.run(&["--profile", "code", "--min-valid-for", "60"], 1);
     assert_eq!(r["targets"][0]["status"], "blocked");
     assert!(r["targets"][0]["remaining_seconds"].as_u64().unwrap() < 60);
     assert!(r["targets"][0]["reason"].as_str().unwrap().contains("aged"));
+}
+
+#[test]
+fn bitbucket_expiry_during_api_verification_blocks_preflight_and_exec() {
+    for exec in [false, true] {
+        let f = Fixture::new(json!({"bb_seconds":3,"bb_api_delay":4}));
+        let profile = f.profile(json!([{"provider":"bitbucket"}]));
+        let marker = f.root.path().join("child-started");
+        let mut command = f.command(&["auth", if exec { "exec" } else { "preflight" }]);
+        command.args(["--check", "--config", &profile, "--min-valid-for", "0"]);
+        if exec {
+            command.args(["--", "/usr/bin/touch"]).arg(&marker);
+        } else {
+            command.arg("--json");
+        }
+        let out = command.output().unwrap();
+        assert!(
+            !marker.exists(),
+            "expired credentials must not launch the child"
+        );
+        assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+        assert_eq!(f.calls().len(), 2, "check-only must not renew or retry");
+        assert_eq!(f.calls()[1][1], json!(["workspace", "list", "--json"]));
+        if !exec {
+            let result: Value = serde_json::from_slice(&out.stdout).unwrap();
+            assert_eq!(result["status"], "blocked");
+            assert_eq!(result["targets"][0]["status"], "blocked");
+        }
+    }
 }
 #[test]
 fn special_or_oversized_profile_files_fail_promptly_without_provider_calls() {

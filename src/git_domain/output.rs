@@ -1,5 +1,14 @@
 use super::display;
 use std::path::Path;
+
+pub(super) fn recovery_command(path: &Path, reference: &str) -> String {
+    format!(
+        "git -C {} branch recovered-work {}",
+        crate::presentation::shell_arg(path.as_os_str()),
+        crate::presentation::shell_arg(reference.as_ref())
+    )
+}
+
 pub(super) fn short(path: &Path) -> String {
     if let Some(home) = std::env::var_os("HOME") {
         if let Ok(relative) = path.strip_prefix(home) {

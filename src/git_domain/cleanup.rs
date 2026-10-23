@@ -1,5 +1,6 @@
 //! Conservative linked-worktree policy. Preview never removes files or registrations.
 use super::{discover, display, git, git::diagnostic, lock};
+use crate::presentation::shell_arg;
 use crate::{presentation, runtime};
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -437,10 +438,7 @@ impl Session<'_> {
         if code != 0 {
             return Err(format!(
                 "git {} failed (exit {code}): {}",
-                args.iter()
-                    .map(|arg| diagnostic(arg))
-                    .collect::<Vec<_>>()
-                    .join(" "),
+                args.iter().map(diagnostic).collect::<Vec<_>>().join(" "),
                 diagnostic(OsString::from_vec(err))
             ));
         }
@@ -814,7 +812,9 @@ impl Session<'_> {
             && status
                 .split(|b| *b == 0)
                 .all(|entry| entry.is_empty() || entry.starts_with(b"!! "));
-        if (!status.is_empty() || masked) && !discard && !(discard_ignored && only_ignored) {
+        let local_allowed =
+            discard || (status.is_empty() && !masked) || (discard_ignored && only_ignored);
+        if !local_allowed {
             return Err(format!(
                 "local data ({}) requires {}{}",
                 local_data(&status, &flags),
@@ -1049,7 +1049,7 @@ fn local_examples(status: &[u8], flags: &[u8]) -> String {
 struct Failure {
     status: &'static str,
     reason: String,
-    evidence: Option<Snapshot>,
+    evidence: Option<Box<Snapshot>>,
 }
 impl From<String> for Failure {
     fn from(reason: String) -> Self {
@@ -1160,7 +1160,7 @@ fn execute(
                     return Err(Failure {
                         status: "blocked",
                         reason: format!("{reason}; recovery ref retained"),
-                        evidence: Some(first),
+                        evidence: Some(Box::new(first)),
                     })
                 }
             };
@@ -1168,7 +1168,7 @@ fn execute(
                 return Err(Failure {
                     status: "blocked",
                     reason: "worktree changed while saving recovery history; refusing removal (recovery ref retained)".into(),
-                    evidence: Some(first),
+                    evidence: Some(Box::new(first)),
                 });
             }
         }
@@ -1212,37 +1212,13 @@ fn execute(
         return Err(Failure {
             status,
             reason,
-            evidence: Some(first),
+            evidence: Some(Box::new(first)),
         });
     }
     if preserve_commits {
         first.recovery_ref = Some(format!("refs/workctl/cleanup/{}", first.head));
     }
     Ok(first)
-}
-
-// ANSI-C quoting works in the supported zsh and bash terminals, including
-// paths containing controls or non-UTF-8 bytes. Never render raw controls.
-fn shell_arg(value: &OsStr) -> String {
-    let bytes = value.as_encoded_bytes();
-    if !bytes.is_empty()
-        && bytes
-            .iter()
-            .all(|byte| byte.is_ascii_alphanumeric() || b"-_./:=+".contains(byte))
-    {
-        return String::from_utf8(bytes.to_vec()).expect("ASCII shell argument");
-    }
-    let mut out = String::from("$'");
-    for &byte in bytes {
-        match byte {
-            b'\'' => out.push_str("\\'"),
-            b'\\' => out.push_str("\\\\"),
-            32..=126 => out.push(byte as char),
-            _ => out.push_str(&format!("\\x{byte:02x}")),
-        }
-    }
-    out.push('\'');
-    out
 }
 
 fn next_step(
@@ -1474,7 +1450,7 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
                 };
                 let candidate = &selected.candidates[index];
                 let path = &candidate.registration.path;
-                let metadata = action.as_ref().map(Some).unwrap_or_else(|e| e.evidence.as_ref()).map(|snapshot| {
+                let metadata = action.as_ref().map(Some).unwrap_or_else(|e| e.evidence.as_deref()).map(|snapshot| {
             let restore = snapshot.recovery_ref.as_ref().map(|recovery| {
                 [OsString::from("git"), OsString::from("-C"), candidate.primary.as_os_str().to_owned(), OsString::from("worktree"), OsString::from("add"), OsString::from("--detach"), path.as_os_str().to_owned(), OsString::from(recovery)]
                     .iter().map(|arg| shell_arg(arg)).collect::<Vec<_>>().join(" ")
@@ -1546,14 +1522,31 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
                 if let Some(evidence) = &metadata {
                     if let Some(recovery) = evidence["recovery_ref"].as_str() {
                         detail.push_str(&format!(
-                            "\n    {}: {recovery}\n    Local files: {}",
-                            if args.apply {
+                            "\n    {}: {recovery}",
+                            if evidence["recovery_saved"] == true {
                                 "Recovery ref saved"
                             } else {
                                 "Recovery ref planned"
-                            },
-                            evidence["local_data"].as_str().unwrap_or("unknown")
+                            }
                         ));
+                    } else if evidence["publication"] == "verified" {
+                        detail.push_str(&format!(
+                            "\n    Remote publication verified: {}",
+                            display(&args.remote)
+                        ));
+                    }
+                    detail.push_str(&format!(
+                        "\n    Local files: {}",
+                        evidence["local_data"].as_str().unwrap_or("unknown")
+                    ));
+                    if status == "would remove" {
+                        detail.push_str(if discard.contains(path) {
+                            "\n    Discard approved: tracked changes, untracked files, and ignored files"
+                        } else if !args.strict || discard_ignored.contains(path) {
+                            "\n    Ignored files will be removed; tracked changes and untracked files stay protected"
+                        } else {
+                            "\n    Tracked changes, untracked files, and ignored files stay protected"
+                        });
                     }
                 }
                 if args.verbose {
@@ -1711,10 +1704,7 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
             result["next_step"]["action"] == "preview_ignored_removal"
                 || result["next_step"]["action"] == "inspect_local_data"
         }) {
-            writeln!(out, "Tracked changes, untracked files, and masked paths stay protected. Inspect these files before deciding whether to discard them.").map_err(|e| e.to_string())?;
-        } else if !args.apply && would_remove > 0 {
-            writeln!(out, "Apply removes ignored files and saves committed history locally; tracked changes and untracked files stay protected.")
-                .map_err(|e| e.to_string())?;
+            writeln!(out, "For protected worktrees, inspect local files before deciding whether to discard them.").map_err(|e| e.to_string())?;
         }
     }
     Ok(code)

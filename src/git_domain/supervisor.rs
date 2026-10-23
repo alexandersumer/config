@@ -493,9 +493,9 @@ fn run_inner(options: &Options, selection: Selection, started: Instant) -> Resul
             {
                 writeln!(
                     out,
-                    "  Recover {}: git branch recovered-work {}",
+                    "  Recover {}: {}",
                     display(&record.path),
-                    display(backup)
+                    output::recovery_command(&record.path, backup)
                 )
                 .map_err(|e| e.to_string())?;
             }

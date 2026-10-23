@@ -301,7 +301,10 @@ impl Operation {
                 self.status.backups.push(backup.clone());
                 self.status.write(&self.status_path)?;
                 println!("Backup: {backup}");
-                println!("Recover with: git branch recovered-work {backup}");
+                println!(
+                    "Recover with: {}",
+                    super::output::recovery_command(&self.git.cwd, &backup)
+                );
             }
         }
         self.stage("switch")?;

@@ -8,8 +8,19 @@ use std::process::Command;
 
 #[derive(Debug)]
 struct Evidence {
-    remaining: Option<u64>,
+    expires_at: Option<u64>,
     account: Option<String>,
+}
+fn now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+impl Evidence {
+    fn remaining(&self) -> Option<u64> {
+        self.expires_at.map(|expiry| expiry.saturating_sub(now()))
+    }
 }
 enum Probe {
     Valid(Evidence),
@@ -69,7 +80,7 @@ fn bb_status(target: &Target, options: &Options) -> Result<Output, String> {
     }
     call(c, options, false)
 }
-fn bitbucket(output: &Output, requested: Option<&str>) -> Probe {
+fn bitbucket(output: &Output, requested: Option<&str>, started_at: u64) -> Probe {
     if output.code != 0 {
         return if auth_error(output) {
             Probe::Missing
@@ -100,7 +111,7 @@ fn bitbucket(output: &Output, requested: Option<&str>) -> Probe {
         .or_else(|| active.captures(line).map(|c| c[1].to_owned()));
     if line.to_ascii_lowercase().contains("expired") {
         return Probe::Valid(Evidence {
-            remaining: Some(0),
+            expires_at: Some(0),
             account,
         });
     }
@@ -111,7 +122,7 @@ fn bitbucket(output: &Output, requested: Option<&str>) -> Probe {
         return Probe::Failed("Unsupported Bitbucket token expiry format");
     };
     Probe::Valid(Evidence {
-        remaining: Some(remaining),
+        expires_at: Some(started_at.saturating_add(remaining)),
         account,
     })
 }
@@ -157,7 +168,7 @@ fn twig_probe(options: &Options) -> Result<Probe, String> {
     {
         // Doctor can exit 1 solely because its separate Bitbucket token is invalid.
         return Ok(Probe::Valid(Evidence {
-            remaining: None,
+            expires_at: None,
             account: None,
         }));
     }
@@ -248,15 +259,18 @@ fn slauth_probe(target: &Target, options: &Options) -> Result<Probe, String> {
         return Ok(Probe::Missing);
     }
     Ok(Probe::Valid(Evidence {
-        remaining: Some(expiry - now),
+        expires_at: Some(expiry),
         account: None,
     }))
 }
 fn probe(target: &Target, options: &Options) -> Result<Probe, String> {
     match target {
         Target::Bitbucket { account } => {
+            // Relative lifetimes start before status capture, never after a
+            // potentially slow API proof. All later checks age this same expiry.
+            let started_at = now();
             let output = bb_status(target, options)?;
-            let cached = bitbucket(&output, account.as_deref());
+            let cached = bitbucket(&output, account.as_deref(), started_at);
             if let Probe::Valid(evidence) = &cached {
                 if enough(evidence, options) {
                     // workspace list has no account override. Refuse a named
@@ -300,17 +314,14 @@ fn probe(target: &Target, options: &Options) -> Result<Probe, String> {
 }
 fn enough(evidence: &Evidence, options: &Options) -> bool {
     evidence
-        .remaining
+        .remaining()
         .is_none_or(|s| s > 0 && s >= options.min_valid_for)
 }
 fn ready(target: &Target, evidence: Evidence, refreshed: bool) -> Value {
-    let checked_at = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    json!({"target":target.label(), "status":if refreshed {"refreshed"} else {"valid"}, "remaining_seconds":evidence.remaining, "account":evidence.account,
-        "checked_at_unix_seconds":checked_at, "expires_at_unix_seconds":evidence.remaining.map(|s|checked_at.saturating_add(s)),
-        "note":if matches!(target, Target::Twg {}) {Some("TWG OAuth API access verified; expiry unknown. The separate token for twg bb is not covered; use twg setup bitbucket to configure it or verify and use the bb CLI. No unattended-duration guarantee.")} else if evidence.remaining.is_none() {Some("Access verified now; provider does not expose credential expiry. No unattended-duration guarantee.")} else {None}})
+    let checked_at = now();
+    json!({"target":target.label(), "status":if refreshed {"refreshed"} else {"valid"}, "remaining_seconds":evidence.expires_at.map(|expiry|expiry.saturating_sub(checked_at)), "account":evidence.account,
+        "checked_at_unix_seconds":checked_at, "expires_at_unix_seconds":evidence.expires_at,
+        "note":if matches!(target, Target::Twg {}) {Some("TWG OAuth API access verified; expiry unknown. The separate token for twg bb is not covered; use twg setup bitbucket to configure it or verify and use the bb CLI. No unattended-duration guarantee.")} else if evidence.expires_at.is_none() {Some("Access verified now; provider does not expose credential expiry. No unattended-duration guarantee.")} else {None}})
 }
 fn blocked(target: &Target, reason: &str, action: &str) -> Value {
     json!({"target":target.label(),"status":"blocked","reason":reason,"action":action,"remaining_seconds":null})
@@ -448,7 +459,7 @@ pub(crate) fn check(target: &Target, options: &Options) -> Value {
             Probe::Valid(e) => Some(e),
             Probe::Missing => None,
             Probe::MissingForAccount(account) => Some(Evidence {
-                remaining: Some(0),
+                expires_at: Some(0),
                 account: Some(account),
             }),
             Probe::Failed(reason) => return Err(reason.into()),
@@ -490,7 +501,7 @@ pub(crate) fn check(target: &Target, options: &Options) -> Value {
         match probe(target, options)? {
             Probe::Valid(e) if enough(&e, options) => Ok(ready(target, e, true)),
             Probe::Valid(e) => Ok(
-                json!({"target":target.label(),"status":"blocked","reason":"Refreshed token cannot meet the requested minimum lifetime; provider TTL policy applies","remaining_seconds":e.remaining,"action":"Choose a shorter --min-valid-for; future refresh/MFA may still be required"}),
+                json!({"target":target.label(),"status":"blocked","reason":"Refreshed token cannot meet the requested minimum lifetime; provider TTL policy applies","remaining_seconds":e.remaining(),"action":"Choose a shorter --min-valid-for; future refresh/MFA may still be required"}),
             ),
             Probe::Missing | Probe::MissingForAccount(_) => Ok(blocked(
                 target,

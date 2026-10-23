@@ -133,6 +133,8 @@ collisions block reset. Replaced branch tips are backed up under
 `refs/home-reset-backups/`; detached-HEAD commits receive no additional backup.
 Other local branches and linked worktrees are preserved. A batch has no automatic
 rollback: earlier changes may remain when a later checkout fails.
+Recovery commands select the affected checkout explicitly and quote paths and
+references for bash and zsh, so they can be run from any directory.
 
 ### Clean up linked worktrees
 
@@ -155,6 +157,8 @@ Use `--strict` to require fresh remote-publication proof and protect ignored fil
 Explicit discard options apply only to the named worktrees. Locks, nested
 repositories, populated submodules, missing paths, and uncertain ownership still
 block removal. Primary checkouts are always protected.
+Each eligible preview row identifies local recovery or verified remote publication,
+counts local files, and states which file deletions are authorized.
 
 ### Scope and execution
 

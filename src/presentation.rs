@@ -14,6 +14,29 @@ pub(crate) fn safe_text(text: &str) -> String {
         })
         .collect()
 }
+
+/// Quote one argument for the supported zsh and bash terminals without raw controls.
+pub(crate) fn shell_arg(value: &std::ffi::OsStr) -> String {
+    let bytes = value.as_encoded_bytes();
+    if !bytes.is_empty()
+        && bytes
+            .iter()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"-_./:=+".contains(byte))
+    {
+        return String::from_utf8(bytes.to_vec()).expect("ASCII shell argument");
+    }
+    let mut out = String::from("$'");
+    for &byte in bytes {
+        match byte {
+            b'\'' => out.push_str("\\'"),
+            b'\\' => out.push_str("\\\\"),
+            32..=126 => out.push(byte as char),
+            _ => out.push_str(&format!("\\x{byte:02x}")),
+        }
+    }
+    out.push('\'');
+    out
+}
 pub(crate) fn json(result: &serde_json::Value) -> u8 {
     let mut out = io::stdout().lock();
     u8::from(
@@ -170,6 +193,34 @@ impl Drop for Progress {
         self.finish();
     }
 }
+pub(crate) fn paths<'a>(paths: impl IntoIterator<Item = &'a std::path::PathBuf>) -> Vec<String> {
+    paths
+        .into_iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect()
+}
+pub(crate) fn path_bytes(path: &std::path::Path) -> Vec<u8> {
+    path.as_os_str().as_encoded_bytes().to_vec()
+}
+
+pub(crate) fn status(text: &str, failed: bool, stderr: bool) -> String {
+    let terminal = if stderr {
+        io::stderr().is_terminal()
+    } else {
+        io::stdout().is_terminal()
+    };
+    let enabled = terminal
+        && std::env::var_os("NO_COLOR").is_none()
+        && std::env::var_os("TERM").is_none_or(|v| v != "dumb")
+        && std::env::var_os("CLICOLOR").is_none_or(|v| v != "0");
+    let style = if failed {
+        console::Style::new().red()
+    } else {
+        console::Style::new().green()
+    };
+    style.force_styling(enabled).apply_to(text).to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -212,32 +263,4 @@ mod tests {
         p.update(1, 2).unwrap();
         assert!(p.last.elapsed() < Duration::from_secs(1));
     }
-}
-
-pub(crate) fn paths<'a>(paths: impl IntoIterator<Item = &'a std::path::PathBuf>) -> Vec<String> {
-    paths
-        .into_iter()
-        .map(|p| p.to_string_lossy().into_owned())
-        .collect()
-}
-pub(crate) fn path_bytes(path: &std::path::Path) -> Vec<u8> {
-    path.as_os_str().as_encoded_bytes().to_vec()
-}
-
-pub(crate) fn status(text: &str, failed: bool, stderr: bool) -> String {
-    let terminal = if stderr {
-        io::stderr().is_terminal()
-    } else {
-        io::stdout().is_terminal()
-    };
-    let enabled = terminal
-        && std::env::var_os("NO_COLOR").is_none()
-        && std::env::var_os("TERM").is_none_or(|v| v != "dumb")
-        && std::env::var_os("CLICOLOR").is_none_or(|v| v != "0");
-    let style = if failed {
-        console::Style::new().red()
-    } else {
-        console::Style::new().green()
-    };
-    style.force_styling(enabled).apply_to(text).to_string()
 }
