@@ -490,6 +490,24 @@ pub(crate) fn test_install_command() -> Result<()> {
         )
     })?;
     let stale_managed_skill = home.path().join(".codex/skills/review-code");
+    let browser_skill_links = [
+        ".codex/skills/browser-use",
+        ".claude/skills/browser-use",
+        ".claude/skills/chatgpt-browser-use",
+    ];
+    #[cfg(unix)]
+    for link in browser_skill_links {
+        let target = home.path().join(link);
+        fs::create_dir_all(target.parent().unwrap())
+            .map_err(|err| format!("cannot create browser skill fixture directory: {err}"))?;
+        let source = if link.ends_with("/browser-use") {
+            "browser-use"
+        } else {
+            "chatgpt-browser-use"
+        };
+        unix_fs::symlink(fixture.path().join(".agents/skills").join(source), target)
+            .map_err(|err| format!("cannot create browser skill link fixture: {err}"))?;
+    }
     let external_skill_dir = home.path().join("external-skill");
     fs::create_dir(&external_skill_dir)
         .map_err(|err| format!("cannot create external skill fixture: {err}"))?;
@@ -585,6 +603,18 @@ pub(crate) fn test_install_command() -> Result<()> {
         &home.path().join(".codex/skills/surgical-edit"),
         &fixture.path().join(".agents/skills/surgical-edit"),
     )?;
+    assert_symlink_resolves_to(
+        &home.path().join(".codex/skills/chatgpt-browser-use"),
+        &fixture.path().join(".agents/skills/chatgpt-browser-use"),
+    )?;
+    for link in browser_skill_links {
+        let path = home.path().join(link);
+        if path.exists() || path.is_symlink() {
+            return Err(format!(
+                "install left an excluded or stale browser skill link: {link}"
+            ));
+        }
+    }
     assert_symlink_resolves_to(
         &home.path().join(".codex/skills/branch-description"),
         &fixture.path().join(".agents/skills/branch-description"),

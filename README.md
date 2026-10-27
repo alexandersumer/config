@@ -52,7 +52,8 @@ See the [workctl guide](docs/workctl.md) for authentication, Git policies, and r
 ## Use custom skills
 
 Custom skills live in [`.agents/skills`](.agents/skills). Installation links the
-same source directories into `~/.codex/skills` and `~/.claude/skills`.
+same source directories into `~/.codex/skills` and `~/.claude/skills`, except
+`chatgpt-browser-use`, which is for ChatGPT/Codex only.
 
 In Codex, invoke a skill with a skill mention, for example:
 

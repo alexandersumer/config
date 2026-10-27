@@ -42,7 +42,7 @@ This checkout is the single source of truth for custom skills. One `SKILL.md` pe
 - Codex link: `~/.codex/skills/<name> -> <checkout>/.agents/skills/<name>`
 - Claude Code link: `~/.claude/skills/<name> -> <checkout>/.agents/skills/<name>`
 
-The same discovery rule applies to every consumer: a top-level, non-hidden `.agents/skills/<name>` directory containing `SKILL.md` is linked; hidden directories and directories without `SKILL.md` are skipped. Linking is idempotent, never clobbers an existing non-managed entry, and removes managed links whose source skill no longer exists.
+Discovery uses the same source layout for both consumers: a top-level, non-hidden `.agents/skills/<name>` directory containing `SKILL.md` is linked; hidden directories and directories without `SKILL.md` are skipped. Linking is idempotent, never clobbers an existing non-managed entry, and removes stale managed links. The `chatgpt-browser-use` skill is linked only into Codex; Claude uses its own browser integration instructions.
 
 ### Codex
 
@@ -60,7 +60,7 @@ Do not add `register_cmd` to skill front matter. Current Codex ignores that lega
 
 ### Claude Code
 
-Claude Code discovers personal skills from `~/.claude/skills/<name>/SKILL.md`, which is the same `SKILL.md` format the registry already validates (`name`, `description`, `allowed-tools`). Install links every custom skill into `~/.claude/skills`, creating the directory if it does not exist. Discoverability is proven deterministically: `check-claude-skills` asserts each `~/.claude/skills/<name>` resolves to its registry-validated source, which is exactly the contract Claude Code's loader requires.
+Claude Code discovers personal skills from `~/.claude/skills/<name>/SKILL.md`, which is the same `SKILL.md` format the registry already validates (`name`, `description`, `allowed-tools`). Install links custom skills other than `chatgpt-browser-use` into `~/.claude/skills`, creating the directory if it does not exist. Discoverability is proven deterministically: `check-claude-skills` asserts each `~/.claude/skills/<name>` resolves to its registry-validated source, which is exactly the contract Claude Code's loader requires.
 
 ## TWG CLI skills
 
@@ -122,7 +122,7 @@ Expected symlink behavior:
 - `~/.local/bin/config-tools` and `~/.local/bin/workctl` are runnable copies of the Rust multicall executable.
 - Codex runs directly from the official Homebrew installation. The shell prefers `/opt/homebrew/bin` over older `/usr/local/bin` tools; no config-repair wrapper is installed.
 - `~/.codex/skills/.system` remains a Codex-owned directory with Codex system skills.
-- Each custom top-level `.agents/skills/<name>/SKILL.md` directory links into `~/.codex/skills/<name>` and `~/.claude/skills/<name>`.
+- Each custom top-level `.agents/skills/<name>/SKILL.md` directory links into `~/.codex/skills/<name>` and, except for `chatgpt-browser-use`, `~/.claude/skills/<name>`.
 - `~/.claude/skills` is created if missing; the directory itself is not symlinked, only the per-skill entries inside it.
 - Hidden skill directories and directories without `SKILL.md` are not linked into Codex or Claude Code.
 - Existing non-empty files/directories or unrelated symlinks are not replaced automatically.

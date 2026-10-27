@@ -34,7 +34,7 @@ const REQUIRED_PROOF_POLICY_PHRASES: &[&str] = &[
 const REQUIRED_CUSTOM_SKILL_NAMES: &[&str] = &[
     "address-comments",
     "auth-preflight",
-    "browser-use",
+    "chatgpt-browser-use",
     "architecture-review-deep",
     "architecture-review-solo",
     "feature-flag-clean-up",
