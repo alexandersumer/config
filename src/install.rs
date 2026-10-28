@@ -890,7 +890,12 @@ fn prepare_codex_skill_links(skills_dir: &Path, home_dir: &Path) -> Result<Skill
     let system_skills_dir = codex_skills_dir.join(".system");
     require_dir(&system_skills_dir, "Codex system skills directory")?;
     verify_codex_system_skills(&system_skills_dir)?;
-    prepare_skill_links(skills_dir, &codex_skills_dir, "Codex", &[])
+    prepare_skill_links(
+        skills_dir,
+        &codex_skills_dir,
+        "Codex",
+        &["claude-browser-use"],
+    )
 }
 
 fn prepare_claude_skill_links(skills_dir: &Path, home_dir: &Path) -> Result<SkillLinkPlan> {

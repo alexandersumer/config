@@ -494,18 +494,15 @@ pub(crate) fn test_install_command() -> Result<()> {
         ".codex/skills/browser-use",
         ".claude/skills/browser-use",
         ".claude/skills/chatgpt-browser-use",
+        ".codex/skills/claude-browser-use",
     ];
     #[cfg(unix)]
     for link in browser_skill_links {
         let target = home.path().join(link);
         fs::create_dir_all(target.parent().unwrap())
             .map_err(|err| format!("cannot create browser skill fixture directory: {err}"))?;
-        let source = if link.ends_with("/browser-use") {
-            "browser-use"
-        } else {
-            "chatgpt-browser-use"
-        };
-        unix_fs::symlink(fixture.path().join(".agents/skills").join(source), target)
+        let source = target.file_name().unwrap();
+        unix_fs::symlink(fixture.path().join(".agents/skills").join(source), &target)
             .map_err(|err| format!("cannot create browser skill link fixture: {err}"))?;
     }
     let external_skill_dir = home.path().join("external-skill");
@@ -606,6 +603,10 @@ pub(crate) fn test_install_command() -> Result<()> {
     assert_symlink_resolves_to(
         &home.path().join(".codex/skills/chatgpt-browser-use"),
         &fixture.path().join(".agents/skills/chatgpt-browser-use"),
+    )?;
+    assert_symlink_resolves_to(
+        &home.path().join(".claude/skills/claude-browser-use"),
+        &fixture.path().join(".agents/skills/claude-browser-use"),
     )?;
     for link in browser_skill_links {
         let path = home.path().join(link);

@@ -35,6 +35,7 @@ const REQUIRED_CUSTOM_SKILL_NAMES: &[&str] = &[
     "address-comments",
     "auth-preflight",
     "chatgpt-browser-use",
+    "claude-browser-use",
     "architecture-review-deep",
     "architecture-review-solo",
     "feature-flag-clean-up",
