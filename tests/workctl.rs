@@ -140,6 +140,71 @@ impl Fixture {
 }
 
 #[test]
+fn stale_fsmonitor_cannot_hide_tracked_edits_from_cleanup() {
+    for strict in [false, true] {
+        let f = Fixture::new();
+        let hook = f.repo.join(".git/hooks/stale-fsmonitor");
+        fs::write(&hook, "#!/bin/sh\nprintf 'token\\0'\n").unwrap();
+        fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+        git(
+            &f.repo,
+            &["config", "core.fsmonitor", hook.to_str().unwrap()],
+        );
+        git(&f.repo, &["config", "core.fsmonitorHookVersion", "2"]);
+        git(&f.worktree, &["status", "--porcelain"]);
+        git(&f.worktree, &["update-index", "--fsmonitor-valid", "file"]);
+        let index =
+            PathBuf::from(git(&f.worktree, &["rev-parse", "--absolute-git-dir"])).join("index");
+        fs::File::open(index)
+            .unwrap()
+            .set_times(
+                fs::FileTimes::new()
+                    .set_modified(std::time::SystemTime::now() + Duration::from_secs(3600)),
+            )
+            .unwrap();
+        fs::write(f.worktree.join("file"), "precious local edit\n").unwrap();
+        assert!(git(
+            &f.worktree,
+            &["--no-optional-locks", "status", "--porcelain"]
+        )
+        .is_empty());
+
+        for apply in [true, false] {
+            let mut command = Command::new(BIN);
+            env(&mut command);
+            command.args(["git", "worktree", "clean", "--json"]);
+            if strict {
+                command.arg("--strict");
+            }
+            if apply {
+                command.arg("--apply");
+            }
+            let out = command.arg(&f.worktree).output().unwrap();
+            assert_eq!(
+                fs::read_to_string(f.worktree.join("file")).unwrap(),
+                "precious local edit\n"
+            );
+            assert_eq!(out.status.code(), Some(i32::from(strict)), "{}", text(&out));
+            let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+            assert_eq!(
+                result["results"][0]["status"],
+                if strict { "blocked" } else { "protected" }
+            );
+            assert!(result["results"][0]["reason"]
+                .as_str()
+                .unwrap()
+                .contains("1 tracked changes"));
+            assert!(git(&f.repo, &["for-each-ref", "refs/workctl/cleanup/"]).is_empty());
+            f.unchanged();
+        }
+        assert_eq!(
+            git(&f.repo, &["config", "core.fsmonitor"]),
+            hook.to_str().unwrap()
+        );
+    }
+}
+
+#[test]
 fn relative_remote_publication_preserves_source_resolution_without_mutating_refs() {
     let f = Fixture::new();
     git(&f.repo, &["remote", "set-url", "origin", "../remote.git"]);
@@ -1885,7 +1950,7 @@ fn publication_preserves_case_colliding_refs_with_the_older_git_fallback() {
     let f = Fixture::new();
     let head = git(&f.repo, &["rev-parse", "HEAD"]);
     fs::write(f.remote.join("packed-refs"), format!("# pack-refs with: peeled fully-peeled sorted\n{head} refs/heads/Feature\n{head} refs/heads/feature\n")).unwrap();
-    let bin = f.shim("if [ \"$1\" = --version ]; then echo 'git version 2.44.0'; exit 0; fi");
+    let bin = f.shim("case \" $* \" in *' --version '*) echo 'git version 2.44.0'; exit 0;; esac");
     let config = fs::read(f.repo.join(".git/config")).unwrap();
     let refs = git(&f.repo, &["for-each-ref"]);
     for apply in [false, true] {
@@ -2925,13 +2990,18 @@ if trigger and not os.path.exists(os.environ['PROBE_READY']):
             .output()
             .unwrap();
         assert!(out.status.success(), "{}", text(&out));
-        assert!(
-            ready.exists(),
-            "{kind}: hook readiness was not signaled: {}",
-            text(&out)
-        );
-        if kind != "reference-transaction" {
-            assert!(invoked.exists());
+        if kind.contains("fsmonitor") {
+            assert!(!ready.exists(), "filesystem monitors must be bypassed");
+            assert!(!invoked.exists(), "filesystem monitors must be bypassed");
+        } else {
+            assert!(
+                ready.exists(),
+                "{kind}: hook readiness was not signaled: {}",
+                text(&out)
+            );
+            if kind != "reference-transaction" {
+                assert!(invoked.exists());
+            }
         }
         assert!(removing.exists());
         assert!(!f.worktree.exists());

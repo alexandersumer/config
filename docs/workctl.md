@@ -136,6 +136,11 @@ rollback: earlier changes may remain when a later checkout fails.
 Recovery commands select the affected checkout explicitly and quote paths and
 references for bash and zsh, so they can be run from any directory.
 
+Git maintenance bypasses filesystem monitors for inspection and execution, so a
+stale monitor cannot hide local edits from safety checks. This command-specific
+override leaves repository configuration unchanged. Checks may take longer on
+large working trees.
+
 ### Clean up linked worktrees
 
 Preview first, then apply:

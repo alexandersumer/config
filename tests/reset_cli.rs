@@ -544,6 +544,57 @@ fn custom_fetch_mapping_is_respected_and_excluded_targets_are_refused() {
 }
 
 #[test]
+fn stale_fsmonitor_cannot_hide_tracked_edits_from_reset() {
+    let f = Fixture::new();
+    let hook = f.temp.path().join("stale-fsmonitor");
+    fs::write(&hook, "#!/bin/sh\nprintf 'token\\0'\n").unwrap();
+    fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+    git(
+        &f.repo,
+        &["config", "core.fsmonitor", hook.to_str().unwrap()],
+    );
+    git(&f.repo, &["config", "core.fsmonitorHookVersion", "2"]);
+    git(&f.repo, &["status", "--porcelain"]);
+    git(&f.repo, &["update-index", "--fsmonitor-valid", "file"]);
+    // Keep the fixture outside Git's independent racy-index fallback.
+    fs::File::open(f.repo.join(".git/index"))
+        .unwrap()
+        .set_times(
+            fs::FileTimes::new()
+                .set_modified(std::time::SystemTime::now() + Duration::from_secs(3600)),
+        )
+        .unwrap();
+    fs::write(f.repo.join("file"), "precious local edit\n").unwrap();
+    let hidden = git(&f.repo, &["--no-optional-locks", "status", "--porcelain"]);
+    assert!(
+        hidden.is_empty(),
+        "status {hidden:?}; flags {}",
+        git(&f.repo, &["ls-files", "-f"])
+    );
+
+    let out = f.run(&f.repo, &[]);
+    // Check preservation before exit status so the old implementation proves data loss.
+    assert_eq!(
+        fs::read_to_string(f.repo.join("file")).unwrap(),
+        "precious local edit\n"
+    );
+    failure(&out, "Tracked changes");
+    let detail = records(&out)[0]["detail"].as_str().unwrap().to_owned();
+    let inspect = detail.split_once("; inspect with: ").unwrap().1;
+    let inspected = env(Command::new("bash").current_dir(f.temp.path()))
+        .args(["--noprofile", "--norc", "-c", inspect])
+        .output()
+        .unwrap();
+    success(&inspected);
+    assert!(String::from_utf8_lossy(&inspected.stdout).contains("M file"));
+    assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.old);
+    assert_eq!(
+        git(&f.repo, &["config", "core.fsmonitor"]),
+        hook.to_str().unwrap()
+    );
+}
+
+#[test]
 fn ignored_files_and_submodule_contents_are_preserved() {
     let f = Fixture::new();
     git(
@@ -1792,6 +1843,37 @@ fn reset_regression_selected_case_alias_is_refused_without_ref_changes() {
         );
         assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.new);
     }
+}
+
+#[test]
+fn successful_fetch_stdout_redacts_url_credentials_before_logging() {
+    let f = Fixture::new();
+    let dir = f.shim(
+        r#"
+for arg in "$@"; do
+    if [ "$arg" = fetch ]; then
+        printf 'fetch diagnostic: https://user:FETCH_PASSWORD@example.com/repo?token=FETCH_TOKEN\n'
+    fi
+done"#,
+    );
+    let mut cmd = f.cli(&f.repo, &[OsStr::new("--verbose")]);
+    f.with_shim(&mut cmd, &dir);
+    let out = cmd.output().unwrap();
+    success(&out);
+    let log = fs::read_to_string(logs(&out).join("0001.log")).unwrap();
+    for output in [text(&out), log] {
+        assert!(
+            !output.contains("FETCH_PASSWORD"),
+            "credential leaked into diagnostic output"
+        );
+        assert!(
+            !output.contains("FETCH_TOKEN"),
+            "token leaked into diagnostic output"
+        );
+        assert!(output
+            .contains("fetch diagnostic: https://[redacted]@example.com/repo?token=[redacted]"));
+    }
+    assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.new);
 }
 
 #[test]

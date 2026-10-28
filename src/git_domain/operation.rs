@@ -63,7 +63,10 @@ impl Operation {
             ])?
             .is_empty()
         {
-            return Err("Tracked changes or a dirty submodule: refusing reset".into());
+            return Err(format!(
+                "Tracked changes or a dirty submodule: refusing reset; inspect with: git -C {} -c core.fsmonitor=false status --short --untracked-files=no",
+                crate::presentation::shell_arg(self.git.cwd.as_os_str())
+            ));
         }
         for marker in [
             "MERGE_HEAD",
@@ -260,7 +263,7 @@ impl Operation {
             remote,
             &refspec,
         ])?;
-        print!("{}", String::from_utf8_lossy(&output));
+        print!("{}", git::redact(OsString::from_vec(output)));
         // A stale preexisting tracking ref is not proof that this fetch included it.
         let fetch_head = fs::read(self.git.metadata("FETCH_HEAD"))
             .map_err(|e| format!("Cannot inspect FETCH_HEAD: {e}"))?;

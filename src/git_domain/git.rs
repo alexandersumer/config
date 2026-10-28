@@ -53,6 +53,9 @@ pub(super) fn diagnostic(value: impl AsRef<OsStr>) -> String {
 pub(super) fn command(path: &Path) -> Command {
     let mut cmd = Command::new("git");
     cmd.current_dir(path)
+        // Safety decisions must inspect the filesystem even when a monitor's
+        // cached change list is stale. Apply this to native removal/reset too.
+        .args(["-c", "core.fsmonitor=false"])
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GCM_INTERACTIVE", "Never")
         .env("LC_ALL", "C");
