@@ -491,8 +491,8 @@ pub(crate) fn test_install_command() -> Result<()> {
     })?;
     let stale_managed_skill = home.path().join(".codex/skills/review-code");
     let browser_skill_links = [
-        ".codex/skills/browser-use",
-        ".claude/skills/browser-use",
+        ".codex/skills/chatgpt-browser-use",
+        ".claude/skills/claude-browser-use",
         ".claude/skills/chatgpt-browser-use",
         ".codex/skills/claude-browser-use",
     ];
@@ -601,12 +601,12 @@ pub(crate) fn test_install_command() -> Result<()> {
         &fixture.path().join(".agents/skills/surgical-edit"),
     )?;
     assert_symlink_resolves_to(
-        &home.path().join(".codex/skills/chatgpt-browser-use"),
-        &fixture.path().join(".agents/skills/chatgpt-browser-use"),
+        &home.path().join(".codex/skills/browser-use"),
+        &fixture.path().join(".agents/skills/browser-use"),
     )?;
     assert_symlink_resolves_to(
-        &home.path().join(".claude/skills/claude-browser-use"),
-        &fixture.path().join(".agents/skills/claude-browser-use"),
+        &home.path().join(".claude/skills/browser-use"),
+        &fixture.path().join(".agents/skills/browser-use"),
     )?;
     for link in browser_skill_links {
         let path = home.path().join(link);

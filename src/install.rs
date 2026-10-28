@@ -890,38 +890,20 @@ fn prepare_codex_skill_links(skills_dir: &Path, home_dir: &Path) -> Result<Skill
     let system_skills_dir = codex_skills_dir.join(".system");
     require_dir(&system_skills_dir, "Codex system skills directory")?;
     verify_codex_system_skills(&system_skills_dir)?;
-    prepare_skill_links(
-        skills_dir,
-        &codex_skills_dir,
-        "Codex",
-        &["claude-browser-use"],
-    )
+    prepare_skill_links(skills_dir, &codex_skills_dir, "Codex")
 }
 
 fn prepare_claude_skill_links(skills_dir: &Path, home_dir: &Path) -> Result<SkillLinkPlan> {
     let claude_skills_dir = home_dir.join(".claude/skills");
-    prepare_skill_links(
-        skills_dir,
-        &claude_skills_dir,
-        "Claude Code",
-        &["chatgpt-browser-use"],
-    )
+    prepare_skill_links(skills_dir, &claude_skills_dir, "Claude Code")
 }
 
 fn prepare_skill_links(
     skills_dir: &Path,
     target_skills_dir: &Path,
     label: &'static str,
-    excluded_skills: &[&str],
 ) -> Result<SkillLinkPlan> {
-    let links = skill_links(skills_dir, target_skills_dir)?
-        .into_iter()
-        .filter(|(source, _)| {
-            !excluded_skills
-                .iter()
-                .any(|name| source.file_name() == Some(std::ffi::OsStr::new(name)))
-        })
-        .collect::<Vec<_>>();
+    let links = skill_links(skills_dir, target_skills_dir)?;
     let stale_managed_links = stale_managed_skill_links(target_skills_dir, skills_dir, &links)?;
     for (source, target) in &links {
         verify_skill_target(source, target, label)?;
