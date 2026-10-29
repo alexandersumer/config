@@ -21,6 +21,11 @@ pub(crate) fn run() -> Result<ExitCode> {
 
     match command.as_str() {
         "validate" => validate_command(command_args).map(|()| ExitCode::SUCCESS),
+        "test-parallel" => crate::validation::test_parallel(
+            &std::env::current_dir().map_err(|e| e.to_string())?,
+            command_args,
+        )
+        .map(|()| ExitCode::SUCCESS),
         "test-validate" => test_validate_command(command_args).map(|()| ExitCode::SUCCESS),
         "check" => check_command(command_args).map(|()| ExitCode::SUCCESS),
         "prepare" => prepare_command(command_args).map(|()| ExitCode::SUCCESS),
@@ -53,7 +58,7 @@ fn print_help() {
 }
 
 fn help_text() -> &'static str {
-    "Usage: config-tools <command> [options]\n\nCommands:\n  install-workctl [--home PATH]\n  validate [--config-root PATH]\n  test-validate\n  check [--config-root PATH]\n  prepare [--config-root PATH]\n  pre-commit [--config-root PATH]\n  install-git-hooks [--config-root PATH]\n  check-codex-skills [--config-root PATH] [--home PATH]\n  check-claude-skills [--config-root PATH] [--home PATH]\n  check-install [--config-root PATH] [--home PATH]\n  repair-codex-config [--home PATH]\n  install [--config-root PATH] [--home PATH]\n"
+    "Usage: config-tools <command> [options]\n\nCommands:\n  install-workctl [--home PATH]\n  validate [--config-root PATH]\n  test-validate\n  test-parallel [--locked] [--lib] [--test NAME]...\n  check [--config-root PATH]\n  prepare [--config-root PATH]\n  pre-commit [--config-root PATH]\n  install-git-hooks [--config-root PATH]\n  check-codex-skills [--config-root PATH] [--home PATH]\n  check-claude-skills [--config-root PATH] [--home PATH]\n  check-install [--config-root PATH] [--home PATH]\n  repair-codex-config [--home PATH]\n  install [--config-root PATH] [--home PATH]\n"
 }
 
 pub(crate) fn parse_config_args(args: &[String], allow_check: bool) -> Result<(PathBuf, bool)> {
