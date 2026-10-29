@@ -31,7 +31,7 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo chmod go-w /usr/share/zsh /usr/share/zsh/vendor-completions
       - name: Run real Git CLI regressions and protocol E2E
-        run: cargo +stable test --locked --lib --test reset_cli --test reset_e2e --test workctl --test auth_cli -- --nocapture
+        run: cargo +stable run --locked -- test-parallel --locked --lib --test reset_cli --test reset_e2e --test workctl --test auth_cli --test validation
       - name: Preserve runtime evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7

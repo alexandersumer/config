@@ -91,3 +91,24 @@ The executable-file check should print only:
 ```
 
 `.githooks/pre-commit` delegates to Rust and should contain no config-tool logic beyond `cargo run -- pre-commit`.
+
+### Parallel test execution
+
+`check`, `prepare`, and staged `pre-commit` build the complete test inventory with
+Cargo, then run the independent test executables concurrently. Full validation
+also runs doctests. The hosted Linux/macOS workflow uses the same runner with its
+existing explicit target list, plus a regression test for the runner itself:
+
+```sh
+cargo run --locked -- test-parallel --locked --lib --test reset_cli --test reset_e2e --test workctl --test auth_cli --test validation
+```
+
+Cargo remains responsible for compilation and dependency invalidation. No test
+results are cached, and no paths or branch names select which checks run. The
+staged snapshot and its Cargo target directory are still new for each invocation.
+Every selected executable is awaited, including after another suite fails.
+Large suite output goes to separate files to avoid pipe deadlocks and interleaved
+diagnostics; logs are replayed and failure logs remain under
+`target/validation-logs`. Hosted in-progress logs live in the existing runtime
+artifact directory, so timeout diagnostics can be uploaded by the always-run
+artifact step. Tests retain their existing assertions and time limits.
