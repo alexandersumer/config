@@ -27,7 +27,9 @@ if provider_state.exists():
 log = os.open(root / 'calls.jsonl', os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
 os.write(log, (json.dumps([name, args]) + '\n').encode())
 os.close(log)
-if name == 'atlas':
+if name in ['klist', 'kinit']:
+    key = name + '-' + ('test' if args else 'list')
+elif name == 'atlas':
     audience = args[args.index('--aud') + 1]
     key = 'atlas-' + ('cache-' if '--cached' in args else 'force-') + audience
 else:
@@ -143,8 +145,10 @@ elif name == 'twg':
     if args[0] == 'doctor':
         print(json.dumps({'data': {'connectivity': {'ok': state.get('twg_valid', True)},
                                  'auth': {'resolved': {'tokenPresent': state.get('twg_valid', True)}},
-                                 'bitbucket': {'status': 'invalid-or-expired'}}}))
-        sys.exit(1)  # unrelated Bitbucket credential failure must not invalidate OAuth
+                                 'bitbucket': state.get('twg_bb_response', {'attempted': True, 'ok': state.get('twg_bb_valid', True),
+                                               'status': state.get('twg_bb_status', 'valid' if state.get('twg_bb_valid', True) else 'invalid-or-expired'),
+                                               'username': 'fixture-user'})}}))
+        sys.exit(0 if state.get('twg_bb_valid', True) else 1)
     elif args[:2] == ['auth', 'refresh']:
         assert '--force' in args
         if state.get('refresh_fails'):
@@ -196,5 +200,21 @@ elif name == 'atlas':
         print(jwt())
     if mode == 'leader_exit':
         sys.exit(0)
+elif name == 'klist':
+    if args:
+        assert args in [['-s'], ['-t']]
+        sys.exit(0 if state.get('kerberos_valid', True) else 1)
+    if state.get('kerberos_cache_missing'):
+        print('No credentials cache found ' + secret, file=sys.stderr)
+        sys.exit(1)
+    print('Principal: ' + state.get('kerberos_principal', 'fixture@EXAMPLE.COM'))
+elif name == 'kinit':
+    assert args == ['-R']
+    if state.get('refresh_fails'):
+        print('Ticket expired ' + secret, file=sys.stderr)
+        sys.exit(1)
+    state['kerberos_valid'] = True
+    # klist and kinit share a credential cache.
+    (root / 'klist-state.json').write_text(json.dumps(state))
 else:
     raise RuntimeError('Unknown simulator')

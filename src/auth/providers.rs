@@ -191,6 +191,89 @@ fn twig_probe(ctx: &Context<'_>) -> Result<Probe, String> {
         "TWG access check failed; inspect connectivity or permissions with twg doctor",
     ))
 }
+fn twg_bitbucket_probe(ctx: &Context<'_>) -> Result<Probe, String> {
+    let output = call(twg_command(&["doctor"]), ctx, false)?;
+    let value: Value = serde_json::from_slice(&output.stdout)
+        .map_err(|_| "TWG did not return its documented JSON status")?;
+    let status = value
+        .pointer("/data/bitbucket/status")
+        .and_then(Value::as_str);
+    let ok = value.pointer("/data/bitbucket/ok").and_then(Value::as_bool);
+    let attempted = value
+        .pointer("/data/bitbucket/attempted")
+        .and_then(Value::as_bool);
+    Ok(match (status, ok, attempted) {
+        (Some("valid"), Some(true), Some(true)) => Probe::Valid(Evidence { expires_at: None, account: None }),
+        (Some("missing"), Some(false), Some(_))
+        | (Some("invalid-or-expired"), Some(false), Some(true)) => Probe::Missing,
+        (Some("forbidden"), Some(false), Some(true)) => Probe::Failed("TWG Bitbucket token lacks required scopes; verify permissions with twg doctor; refreshing OAuth cannot repair this"),
+        _ => Probe::Failed("TWG Bitbucket connectivity check failed or returned an unsupported status; inspect twg doctor"),
+    })
+}
+
+fn kerberos_probe(principal: Option<&str>, ctx: &Context<'_>) -> Result<Probe, String> {
+    let mut test = command(
+        "klist",
+        &[if cfg!(target_os = "macos") {
+            "-t"
+        } else {
+            "-s"
+        }],
+    );
+    test.env("LC_ALL", "C");
+    let output = call(test, ctx, false)?;
+    if output.code != 0 {
+        let message = String::from_utf8_lossy(&output.stderr).to_ascii_lowercase();
+        return Ok(
+            if output.code == 1
+                && (message.trim().is_empty()
+                    || message.contains("no credentials cache")
+                    || message.contains("no ticket file"))
+            {
+                Probe::Missing
+            } else {
+                Probe::Failed(
+                    "Kerberos cache check failed; inspect klist and credential-cache permissions",
+                )
+            },
+        );
+    }
+    Ok(Probe::Valid(Evidence {
+        expires_at: None,
+        account: Some(kerberos_identity(principal, ctx)?),
+    }))
+}
+
+fn kerberos_identity(principal: Option<&str>, ctx: &Context<'_>) -> Result<String, String> {
+    let mut list = command("klist", &[]);
+    list.env("LC_ALL", "C");
+    let output = call(list, ctx, false)?;
+    if output.code != 0 {
+        return Err("Cannot identify Kerberos principal; obtain the intended ticket using your supported login before preflight".into());
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let name = text.lines().find_map(|line| {
+        let line = line.trim();
+        line.strip_prefix("Principal:")
+            .or_else(|| line.strip_prefix("Default principal:"))
+            .map(str::trim)
+    });
+    let Some(name) = name.filter(|name| {
+        !name.is_empty()
+            && name.contains('@')
+            && name.len() <= 256
+            && name
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || b"._:/@-".contains(&c))
+    }) else {
+        return Err("Cannot identify Kerberos principal from klist output".into());
+    };
+    if principal.is_some_and(|selected| selected != name) {
+        return Err("Kerberos default cache belongs to another principal; select the intended cache before preflight".into());
+    }
+    Ok(name.into())
+}
+
 fn slauth_command(target: &Target, cached: bool) -> Command {
     let Target::Slauth {
         audience,
@@ -313,6 +396,8 @@ fn probe(target: &Target, ctx: &Context<'_>) -> Result<Probe, String> {
             Ok(cached)
         }
         Target::Twg {} => twig_probe(ctx),
+        Target::TwgBitbucket {} => twg_bitbucket_probe(ctx),
+        Target::Kerberos { principal } => kerberos_probe(principal.as_deref(), ctx),
         Target::Slauth { .. } => slauth_probe(target, ctx),
     }
 }
@@ -325,7 +410,7 @@ fn ready(target: &Target, evidence: Evidence, refreshed: bool) -> Value {
     let checked_at = now();
     json!({"target":target.label(), "status":if refreshed {"refreshed"} else {"valid"}, "remaining_seconds":evidence.expires_at.map(|expiry|expiry.saturating_sub(checked_at)), "account":evidence.account,
         "checked_at_unix_seconds":checked_at, "expires_at_unix_seconds":evidence.expires_at,
-        "note":if matches!(target, Target::Twg {}) {Some("TWG OAuth API access verified; expiry unknown. The separate token for twg bb is not covered; use twg setup bitbucket to configure it or verify and use the bb CLI. No unattended-duration guarantee.")} else if evidence.expires_at.is_none() {Some("Access verified now; provider does not expose credential expiry. No unattended-duration guarantee.")} else {None}})
+        "note":if matches!(target, Target::Twg {}) {Some("TWG OAuth API access verified; expiry unknown. TWG Bitbucket is verified separately by the code/work profiles. No unattended-duration guarantee.")} else if matches!(target, Target::TwgBitbucket {}) {Some("TWG Bitbucket API access verified; expiry unknown. Manually managed token: checked, never automatically rotated. No unattended-duration guarantee.")} else if matches!(target, Target::Kerberos { .. }) {Some("Kerberos TGT and default principal checked; expiry unknown. Runtime endpoint authorization is not verified. No unattended-duration guarantee.")} else if evidence.expires_at.is_none() {Some("Access verified now; provider does not expose credential expiry. No unattended-duration guarantee.")} else {None}})
 }
 fn blocked(target: &Target, reason: &str, action: &str) -> Value {
     json!({"target":target.label(),"status":"blocked","reason":reason,"action":action,"remaining_seconds":null})
@@ -392,6 +477,13 @@ fn refresh(
                         || (options.reuse_valid && ["fresh", "not_due", "skipped"].contains(&s))
                 }))
         }
+        Target::TwgBitbucket {} => Ok(false),
+        Target::Kerberos { principal } => {
+            if principal.is_some() {
+                kerberos_identity(principal.as_deref(), ctx)?;
+            }
+            Ok(call(command("kinit", &["-R"]), ctx, false)?.code == 0)
+        }
         Target::Slauth { .. } => {
             if options.non_interactive {
                 return Ok(false);
@@ -451,7 +543,12 @@ pub(crate) fn check(target: &Target, options: &Options, session: &process::Sessi
     let run = || -> Result<Value, String> {
         let initial = probe(target, ctx)?;
         let evidence = match initial {
-            Probe::Valid(e) if enough(&e, options) && (options.check || options.reuse_valid) => {
+            Probe::Valid(e)
+                if enough(&e, options)
+                    && (options.check
+                        || options.reuse_valid
+                        || matches!(target, Target::TwgBitbucket {})) =>
+            {
                 return Ok(ready(target, e, false))
             }
             Probe::Valid(e) => Some(e),
@@ -464,9 +561,14 @@ pub(crate) fn check(target: &Target, options: &Options, session: &process::Sessi
         };
         let action = match target {
             Target::Bitbucket { .. } => "Complete bb auth login for the selected account, then rerun preflight",
-            Target::Twg {} => "Run twg login in a terminal, then rerun preflight; TWG Bitbucket uses the separate bb fallback",
+            Target::Twg {} => "Run twg login in a terminal, then rerun preflight",
+            Target::TwgBitbucket {} => "Run twg setup bitbucket --force in a terminal, then rerun preflight; enter the token directly in that terminal",
+            Target::Kerberos { .. } => "Obtain a ticket for the intended principal using your supported Kerberos login, then rerun preflight; kinit -R only renews an existing renewable TGT",
             Target::Slauth { .. } => "Rerun without --check/--non-interactive and complete Atlas browser/MFA; SLAuth TTL is at most one hour",
         };
+        if matches!(target, Target::TwgBitbucket {}) {
+            return Ok(blocked(target, "TWG Bitbucket token is missing or invalid; interactive token entry is required and no automatic rotation is supported", action));
+        }
         if options.check {
             return Ok(blocked(target, "Missing credential or insufficient remaining validity; check-only mode made no explicit refresh", action));
         }

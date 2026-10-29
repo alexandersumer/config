@@ -32,7 +32,8 @@ fn reuse_and_exec(options: &[&str], targets: usize) {
         .as_array()
         .unwrap()
         .iter()
-        .all(|t| t["status"] == "refreshed"));
+        .all(|t| t["status"] == "refreshed"
+            || (t["target"] == "twg-bitbucket" && t["status"] == "valid")));
     assert_eq!(refresh["targets"].as_array().unwrap().len(), targets);
     args.push("--check");
     let cached = result(&args, 0);
@@ -57,7 +58,7 @@ fn reuse_and_exec(options: &[&str], targets: usize) {
 #[test]
 #[ignore = "requires real bb/TWG installations, shared credentials and network"]
 fn real_code_provider_preflight_cache_reuse_and_wrapped_command() {
-    reuse_and_exec(&["--profile", "code"], 2);
+    reuse_and_exec(&["--profile", "code"], 3);
     println!("Real Bitbucket/TWG: preflight, cache reuse, exact child stdout/exit verified");
 }
 #[test]
@@ -82,10 +83,10 @@ fn real_slauth_preflight_cache_reuse_and_ttl_policy() {
 
 #[test]
 #[ignore = "requires real bb/TWG/Atlas installations, shared caches and network; never renews"]
-fn real_work_cache_checks_all_seven_targets_without_renewal() {
+fn real_work_cache_checks_all_eight_targets_without_renewal() {
     let checked = result(&["auth", "preflight", "--check", "--json"], 0);
     let targets = checked["targets"].as_array().unwrap();
-    assert_eq!(targets.len(), 7);
+    assert_eq!(targets.len(), 8);
     assert!(targets.iter().all(|t| t["status"] == "valid"));
     for audience in [
         "splunk.paas-inf.net",
@@ -99,5 +100,88 @@ fn real_work_cache_checks_all_seven_targets_without_renewal() {
             .unwrap()
             .contains(&format!(":{audience}:"))));
     }
-    println!("Real work profile: all seven current provider credentials verified without explicit renewal");
+    println!("Real work profile: all eight current provider credentials verified without explicit renewal");
+}
+
+#[test]
+#[ignore = "requires real TWG connectivity; accepts an explicitly blocked missing or invalid token"]
+fn real_twg_bitbucket_reports_independent_readiness_without_renewal() {
+    assert!(
+        std::env::var_os("AUTH_FIXTURE").is_none(),
+        "Live proof cannot use provider simulators"
+    );
+    let out = Command::new(BIN)
+        .args([
+            "auth",
+            "preflight",
+            "--profile",
+            "twg-bitbucket",
+            "--check",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    let r: Value = serde_json::from_slice(&out.stdout).expect("auth report");
+    assert_eq!(r["targets"][0]["target"], "twg-bitbucket");
+    let status = r["targets"][0]["status"].as_str().unwrap();
+    assert!(
+        matches!(status, "valid" | "blocked"),
+        "unexpected TWG provider failure"
+    );
+    assert_eq!(out.status.success(), status == "valid");
+    if status == "blocked" {
+        assert!(r["targets"][0]["action"]
+            .as_str()
+            .unwrap()
+            .contains("twg setup bitbucket --force"));
+    }
+    println!("Real TWG Bitbucket status: {status}; no explicit renewal");
+}
+
+#[test]
+#[ignore = "requires a real valid default-cache Kerberos TGT; never renews"]
+fn real_kerberos_cache_and_exact_principal_are_checked_without_renewal() {
+    let checked = result(
+        &[
+            "auth",
+            "preflight",
+            "--profile",
+            "runtime",
+            "--check",
+            "--json",
+        ],
+        0,
+    );
+    let principal = checked["targets"][0]["account"]
+        .as_str()
+        .expect("verified principal");
+    let directory = tempfile::tempdir().unwrap();
+    let config = directory.path().join("auth.json");
+    for (selected, expected, status) in [
+        (principal, 0, "valid"),
+        ("workctl-proof-wrong-principal@EXAMPLE.INVALID", 1, "failed"),
+    ] {
+        std::fs::write(
+            &config,
+            serde_json::json!({"schema_version":1,
+            "profiles":{"exact":[{"provider":"kerberos","principal":selected}]}})
+            .to_string(),
+        )
+        .unwrap();
+        let checked = result(
+            &[
+                "auth",
+                "preflight",
+                "--config",
+                config.to_str().unwrap(),
+                "--profile",
+                "exact",
+                "--check",
+                "--json",
+            ],
+            expected,
+        );
+        assert_eq!(checked["targets"][0]["status"], status);
+    }
+    println!("Real Kerberos: default TGT, exact identity, and wrong-identity refusal verified without renewal");
 }

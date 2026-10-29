@@ -1259,7 +1259,9 @@ esac"#);
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(10);
+    // Reaching removal is setup, bounded by the existing command timeout.
+    // Cancellation responsiveness gets its own ten-second budget below.
+    let deadline = Instant::now() + Duration::from_secs(30);
     while !started.exists() && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(10));
     }
@@ -1279,7 +1281,12 @@ esac"#);
     }
     let out = child.wait_with_output().unwrap();
     assert!(
-        reached_removal && !timed_out,
+        reached_removal,
+        "fixture did not reach native removal: {}",
+        text(&out)
+    );
+    assert!(
+        !timed_out,
         "cleanup must stop promptly after native removal: {}",
         text(&out)
     );

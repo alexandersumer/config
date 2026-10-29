@@ -74,8 +74,10 @@ workctl auth exec --profile code -- bb pr list
 
 | Profile | Credentials |
 | --- | --- |
-| `work` (default) | `code` + `logs` + `services` (seven targets) |
-| `code` | Bitbucket CLI OAuth and TWG OAuth |
+| `work` (default) | `code` + `logs` + `services` (eight targets) |
+| `code` | Bitbucket CLI OAuth, TWG OAuth, and TWG Bitbucket token |
+| `bitbucket`, `twg`, `twg-bitbucket` | One selected client credential |
+| `runtime` | Default-cache Kerberos TGT and principal |
 | `logs` | Production Splunk |
 | `risk` | Risk Mitigation SLAuth, with MFA |
 | `checks` | Pollinator SLAuth, with MFA |
@@ -86,8 +88,10 @@ workctl auth exec --profile code -- bb pr list
 All built-in SLAuth targets use `prod`. Splunk uses `splunk.paas-inf.net`, group
 `atlassian-all`, with MFA; the other audiences require no groups. Select the
 narrowest profile or use `--config FILE --profile NAME` for explicit descriptors.
-TWG's separate Bitbucket token requires `twg setup bitbucket`; the verified `bb`
-credential does not prove `twg bb` access. Runtime/service identities, browser
+TWG's separate Bitbucket token is checked by `code`/`work`; a missing or invalid
+token blocks with `twg setup bitbucket --force`. It is never automatically rotated.
+Add `--include-profile runtime` when the task needs Kerberos; use custom descriptors
+for an exact principal or service audience. Runtime/service identities, browser
 sessions, and registry credentials require their own checks; see the
 [coverage boundaries](authentication.md#coverage-evidence-and-boundaries).
 
@@ -95,11 +99,11 @@ sessions, and registry credentials require their own checks; see the
 
 | Mode | Behavior |
 | --- | --- |
-| Default | Request one renewal per target, then verify access; failed renewal remains a failure even if an older credential works |
+| Default | Request one renewal per renewable target, check manual tokens, then verify access; failed renewal remains a failure even if an older credential works |
 | `--reuse-valid` | Reuse credentials that meet the validity threshold; renew missing or short-lived credentials |
 | `--check` | Check access without explicit refresh or login calls; providers may still renew transparently |
 
-Bitbucket, TWG, and Atlas checks can overlap. Targets within each provider stay
+Bitbucket, TWG, Atlas, and Kerberos checks can overlap. Targets within each provider stay
 sequential, and browser/MFA issuance runs one flow at a time. Reports retain
 profile order. Concurrent preflights share a whole-operation lock; use
 `--coordination-timeout SECONDS` to change its wait independently of `--timeout`.

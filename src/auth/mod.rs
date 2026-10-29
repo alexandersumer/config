@@ -21,7 +21,12 @@ fn result(options: &Options, human: bool) -> Value {
             writeln!(
                 std::io::stderr(),
                 "Authentication preflight · profile {} · {mode}",
-                inline(&options.profile)
+                inline(
+                    &std::iter::once(options.profile.as_str())
+                        .chain(options.include_profiles.iter().map(String::as_str))
+                        .collect::<Vec<_>>()
+                        .join(" + ")
+                )
             )
             .map_err(|_| "Cannot display authentication progress")?;
         }
@@ -29,11 +34,12 @@ fn result(options: &Options, human: bool) -> Value {
             process::Lock::acquire(options.coordination_timeout.unwrap_or(options.timeout))?;
         let session = process::Session::default();
         let total = targets.len();
-        let mut queues: [Vec<_>; 3] = std::array::from_fn(|_| Vec::new());
+        let mut queues: [Vec<_>; 4] = std::array::from_fn(|_| Vec::new());
         for (index, target) in targets.into_iter().enumerate() {
             let provider = match &target {
                 config::Target::Bitbucket { .. } => 0,
-                config::Target::Twg {} => 1,
+                config::Target::Twg {} | config::Target::TwgBitbucket {} => 1,
+                config::Target::Kerberos { .. } => 3,
                 config::Target::Slauth { .. } => 2,
             };
             queues[provider].push((index, target));
@@ -145,7 +151,7 @@ fn result(options: &Options, human: bool) -> Value {
             .iter()
             .all(|v| matches!(v["status"].as_str(), Some("valid" | "refreshed")));
         Ok(
-            json!({"schema_version":1,"operation":"auth.preflight","profile":options.profile,"status":if crate::runtime::cancelled() {"interrupted"} else if ready {"completed"} else {"blocked"}, "check_only":options.check,"min_valid_for_seconds":options.min_valid_for,"targets":results,
+            json!({"schema_version":1,"operation":"auth.preflight","profile":options.profile,"included_profiles":options.include_profiles,"status":if crate::runtime::cancelled() {"interrupted"} else if ready {"completed"} else {"blocked"}, "check_only":options.check,"min_valid_for_seconds":options.min_valid_for,"targets":results,
             "duration_guaranteed":false,"note":"Readiness is checked now. OAuth revocation, provider policy, unknown expiry, and future MFA can shorten access. Only workctl refreshes share this coordination lock."}),
         )
     };

@@ -71,7 +71,7 @@ impl Fixture {
         let script = root.path().join("provider.py");
         fs::write(&script, provider_source()).unwrap();
         fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
-        for name in ["bb", "twg", "atlas"] {
+        for name in ["bb", "twg", "atlas", "klist", "kinit"] {
             symlink(&script, root.path().join("bin").join(name)).unwrap();
         }
         let f = Self { root, _slot: slot };
@@ -97,7 +97,7 @@ impl Fixture {
         f
     }
     fn state(&self, state: Value) {
-        for provider in ["bb", "twg", "atlas"] {
+        for provider in ["bb", "twg", "atlas", "klist", "kinit"] {
             let _ = fs::remove_file(self.root.path().join(format!("{provider}-state.json")));
         }
         fs::write(self.root.path().join("state.json"), state.to_string()).unwrap();
@@ -181,21 +181,22 @@ fn valid_cache_reuse_is_read_only_and_json_never_contains_credentials() {
         assert_eq!(r["targets"][2]["status"], "valid");
         assert_eq!(r["duration_guaranteed"], false);
     }
-    assert_eq!(f.calls().len(), 16);
+    assert_eq!(f.calls().len(), 18);
     assert!(f.calls().iter().all(|c| c[1][1] == "status"
         || c[1][0] == "workspace"
         || c[1][0] == "doctor"
         || c[1].as_array().unwrap().contains(&json!("--cached"))));
 }
 #[test]
-fn all_missing_credentials_are_refreshed_once_and_normal_cache_is_rechecked() {
+fn all_missing_renewable_credentials_are_refreshed_once_and_normal_cache_is_rechecked() {
     let f = Fixture::new(json!({"bb_valid":false,"twg_valid":false,"atlas_valid":false}));
     let r = f.run(&[], 0);
     assert!(r["targets"]
         .as_array()
         .unwrap()
         .iter()
-        .all(|v| v["status"] == "refreshed"));
+        .all(|v| v["status"] == "refreshed"
+            || (v["target"] == "twg-bitbucket" && v["status"] == "valid")));
     let calls = f.calls();
     assert_eq!(
         calls
@@ -227,7 +228,7 @@ fn all_missing_credentials_are_refreshed_once_and_normal_cache_is_rechecked() {
     );
     let before = calls.len();
     f.run(&[], 0);
-    assert_eq!(f.calls().len() - before, 8);
+    assert_eq!(f.calls().len() - before, 9);
 }
 #[test]
 fn silent_oauth_refresh_succeeds_without_browser_in_noninteractive_mode() {
@@ -251,7 +252,7 @@ fn check_only_never_makes_any_refresh_or_login_call() {
     let f = Fixture::new(json!({"bb_valid":false,"twg_valid":false,"atlas_valid":false}));
     let r = f.run(&["--check"], 1);
     assert_eq!(r["status"], "blocked");
-    assert_eq!(f.calls().len(), 7);
+    assert_eq!(f.calls().len(), 8);
 }
 #[test]
 fn noninteractive_blocks_mfa_instead_of_launching_a_browser() {
@@ -282,7 +283,7 @@ fn malformed_permission_and_outage_errors_do_not_trigger_auth_refresh() {
     for mode in ["malformed", "permission", "outage"] {
         let f = Fixture::new(json!({"mode":mode}));
         let r = f.run(&[], 1);
-        assert_eq!(f.calls().len(), 7);
+        assert_eq!(f.calls().len(), 8);
         assert!(r["targets"]
             .as_array()
             .unwrap()
@@ -855,7 +856,7 @@ fn issuance_outage_is_not_mislabeled_as_missing_human_mfa() {
 }
 
 #[test]
-fn default_preflight_forces_every_valid_provider_once_on_every_invocation() {
+fn default_preflight_forces_every_renewable_provider_once_on_every_invocation() {
     let f = Fixture::new(json!({}));
     for _ in 0..2 {
         let out = f
@@ -869,7 +870,8 @@ fn default_preflight_forces_every_valid_provider_once_on_every_invocation() {
             .as_array()
             .unwrap()
             .iter()
-            .all(|v| v["status"] == "refreshed"));
+            .all(|v| v["status"] == "refreshed"
+                || (v["target"] == "twg-bitbucket" && v["status"] == "valid")));
     }
     for provider in ["bb", "twg", "atlas"] {
         let calls = f.calls();
@@ -908,6 +910,7 @@ fn forced_preflight_does_not_hide_failed_renewal_behind_valid_cache() {
         .as_array()
         .unwrap()
         .iter()
+        .filter(|v| v["target"] != "twg-bitbucket")
         .all(|v| v["status"] != "refreshed" && v["status"] != "valid"));
     assert_eq!(
         f.calls()
@@ -965,28 +968,28 @@ fn human_report_identifies_mode_account_readiness_and_unknown_expiry() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("profile code · check only"), "{stderr}");
-    assert!(stderr.contains("[1/2] Checking Bitbucket"), "{stderr}");
-    assert!(stderr.contains("[2/2] Checking TWG"), "{stderr}");
+    assert!(stderr.contains("[1/3] Checking Bitbucket"), "{stderr}");
+    assert!(stderr.contains("[2/3] Checking TWG"), "{stderr}");
     for expected in [
         "Authentication preflight: ready",
         "Bitbucket  valid",
         "Account: office",
         "expiry unknown",
-        "2/2 credentials ready",
+        "3/3 credentials ready",
         "Elapsed ",
     ] {
         assert!(stdout.contains(expected), "missing {expected}: {stdout}");
     }
     let lifetime =
-        regex::Regex::new(r"(?m)^  Bitbucket  valid +[0-9]+[hms](?: [0-9]+[hms])* remaining$")
+        regex::Regex::new(r"(?m)^  Bitbucket +valid +[0-9]+[hms](?: [0-9]+[hms])* remaining$")
             .unwrap();
     assert!(
         lifetime.is_match(&stdout),
         "missing readable lifetime: {stdout}"
     );
     assert!(stdout.contains("TWG OAuth API access verified"));
-    assert!(stdout.contains("twg bb"));
-    assert!(stdout.contains("not covered"));
+    assert!(stdout.contains("TWG Bitbucket API access verified"));
+    assert!(stdout.contains("never automatically rotated"));
     assert!(!stdout.contains("bitbucket:active"));
     assert!(!text(&out).contains(SECRET));
     assert!(!text(&out).contains('\u{1b}'));
@@ -1064,10 +1067,11 @@ fn work_covers_recent_service_dependencies_with_exact_descriptors() {
             "slauth:prod:pollinator::mfa=true",
             "slauth:prod:mlp-config::mfa=false",
             "slauth:prod:phobos::mfa=false",
+            "twg-bitbucket",
         ]
     );
     let note = r["targets"][1]["note"].as_str().unwrap();
-    assert!(note.contains("twg bb") && note.contains("not covered"));
+    assert!(note.contains("TWG Bitbucket") && note.contains("separately"));
     let calls = f.calls();
     let atlas: Vec<_> = calls.iter().filter(|c| c[0] == "atlas").collect();
     assert_eq!(atlas.len(), 5);
@@ -1283,7 +1287,7 @@ fn provider_checks_overlap_and_completion_order_does_not_change_report_order() {
         .iter()
         .map(|v| v["target"].as_str().unwrap())
         .collect();
-    assert_eq!(labels.len(), 7);
+    assert_eq!(labels.len(), 8);
     assert_eq!(&labels[..2], &["bitbucket:active", "twg"]);
     assert!(labels[2].contains("splunk.paas-inf.net"));
     assert!(labels[6].contains("phobos"));
@@ -1346,7 +1350,8 @@ fn interactive_commands_are_exclusive_while_background_work_continues() {
         .as_array()
         .unwrap()
         .iter()
-        .all(|v| v["status"] == "refreshed"));
+        .all(|v| v["status"] == "refreshed"
+            || (v["target"] == "twg-bitbucket" && v["status"] == "valid")));
     assert!(!f.root.path().join("interaction-overlap").exists());
 }
 
@@ -1504,4 +1509,241 @@ fn coordination_timeout_is_independent_of_provider_command_timeout() {
     f.release("atlas-cache-splunk.paas-inf.net");
     first.finish(0);
     second.finish(0);
+}
+
+#[test]
+fn default_work_blocks_missing_twg_bitbucket_even_when_oauth_and_bb_work() {
+    let f = Fixture::new(json!({"twg_bb_valid": false}));
+    let r = f.run(&["--check"], 1);
+    let targets = r["targets"].as_array().unwrap();
+    let token = targets
+        .iter()
+        .find(|t| t["target"] == "twg-bitbucket")
+        .unwrap();
+    assert_eq!(token["status"], "blocked");
+    assert!(token["action"]
+        .as_str()
+        .unwrap()
+        .contains("twg setup bitbucket --force"));
+    assert_eq!(targets[0]["status"], "valid");
+    assert_eq!(targets[1]["status"], "valid");
+    assert!(f.calls().iter().all(|c| c[1][0] != "setup"));
+}
+
+#[test]
+fn missing_twg_bitbucket_prevents_wrapped_command_without_renewing_other_auth() {
+    let f = Fixture::new(json!({"twg_bb_valid": false}));
+    let marker = f.root.path().join("must-not-run");
+    let out = f
+        .command(&[
+            "auth",
+            "exec",
+            "--profile",
+            "code",
+            "--reuse-valid",
+            "--",
+            "/usr/bin/touch",
+            marker.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+    assert!(!marker.exists());
+    assert!(!text(&out).contains(SECRET));
+    assert!(f
+        .calls()
+        .iter()
+        .all(|c| c[1][0] != "setup" && c[1][1] != "refresh" && c[1][1] != "login"));
+}
+
+#[test]
+fn twg_bitbucket_checks_only_its_own_evidence_and_never_rotates_a_valid_token() {
+    for args in [vec![], vec!["--check"], vec!["--non-interactive"]] {
+        let f = Fixture::new(json!({"twg_valid":false}));
+        let mut command = f.command(&["auth", "preflight", "--profile", "twg-bitbucket", "--json"]);
+        let out = command.args(args).output().unwrap();
+        assert!(out.status.success(), "{}", text(&out));
+        let r: Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(r["targets"][0]["status"], "valid");
+        assert!(r["targets"][0]["note"]
+            .as_str()
+            .unwrap()
+            .contains("never automatically rotated"));
+        assert_eq!(f.calls().len(), 1);
+        assert_eq!(f.calls()[0][1][0], "doctor");
+    }
+}
+
+#[test]
+fn twg_bitbucket_failures_are_classified_without_refresh_or_secret_output() {
+    for (response, expected) in [
+        (
+            json!({"attempted":false,"status":"missing","ok":false}),
+            "blocked",
+        ),
+        (
+            json!({"attempted":true,"status":"invalid-or-expired","ok":false}),
+            "blocked",
+        ),
+        (
+            json!({"attempted":true,"status":"forbidden","ok":false}),
+            "failed",
+        ),
+        (
+            json!({"attempted":true,"status":"error","ok":false,"message":SECRET}),
+            "failed",
+        ),
+        (
+            json!({"attempted":true,"status":"valid","ok":false}),
+            "failed",
+        ),
+        (json!({"ok":true}), "failed"),
+        (json!({}), "failed"),
+        (
+            json!({"attempted":false,"status":"valid","ok":true}),
+            "failed",
+        ),
+    ] {
+        let f = Fixture::new(json!({"twg_bb_response":response}));
+        let r = f.run(&["--profile", "twg-bitbucket"], 1);
+        assert_eq!(r["targets"][0]["status"], expected);
+        assert_eq!(f.calls().len(), 1);
+    }
+}
+
+#[test]
+fn kerberos_checks_principal_and_renews_only_once_without_interactive_login() {
+    let f = Fixture::new(json!({}));
+    let config = f.profile(json!([{"provider":"kerberos","principal":"fixture@EXAMPLE.COM"}]));
+    let r = f.run(&["--config", &config, "--check"], 0);
+    assert_eq!(r["targets"][0]["account"], "fixture@EXAMPLE.COM");
+    assert_eq!(r["targets"][0]["remaining_seconds"], Value::Null);
+    assert_eq!(f.calls().len(), 2);
+    f.state(json!({"kerberos_valid":false}));
+    let before = f.calls().len();
+    f.run(&["--config", &config, "--check"], 1);
+    assert_eq!(f.calls().len() - before, 1);
+    let r = f.run(&["--config", &config, "--non-interactive"], 0);
+    assert_eq!(r["targets"][0]["status"], "refreshed");
+    assert_eq!(f.calls().iter().filter(|c| c[0] == "kinit").count(), 1);
+    assert!(f
+        .calls()
+        .iter()
+        .filter(|c| c[0] == "kinit")
+        .all(|c| c[1] == json!(["-R"])));
+}
+
+#[test]
+fn kerberos_wrong_identity_and_provider_failures_never_trigger_renewal() {
+    for state in [
+        json!({"kerberos_principal":"someone@EXAMPLE.COM"}),
+        json!({"mode":"malformed"}),
+        json!({"mode":"permission"}),
+        json!({"mode":"outage"}),
+    ] {
+        let f = Fixture::new(state);
+        let config = f.profile(json!([{"provider":"kerberos","principal":"fixture@EXAMPLE.COM"}]));
+        let r = f.run(&["--config", &config], 1);
+        assert_eq!(r["targets"][0]["status"], "failed");
+        assert!(f.calls().iter().all(|c| c[0] == "klist"));
+    }
+    let f = Fixture::new(json!({"kerberos_valid":false,"refresh_fails":true}));
+    let r = f.run(&["--profile", "runtime", "--non-interactive"], 1);
+    assert_eq!(r["targets"][0]["status"], "blocked");
+    assert_eq!(f.calls().iter().filter(|c| c[0] == "kinit").count(), 1);
+}
+
+#[test]
+fn included_profiles_add_requirements_deduplicate_and_validate_before_auth() {
+    let f = Fixture::new(json!({}));
+    let r = f.run(
+        &[
+            "--profile",
+            "code",
+            "--include-profile",
+            "runtime",
+            "--include-profile",
+            "twg",
+            "--check",
+        ],
+        0,
+    );
+    assert_eq!(r["targets"].as_array().unwrap().len(), 4);
+    assert_eq!(r["targets"][3]["target"], "kerberos:default");
+    assert_eq!(f.calls().iter().filter(|c| c[0] == "twg").count(), 2);
+    let f = Fixture::new(json!({"kerberos_valid":false}));
+    let r = f.run(
+        &[
+            "--profile",
+            "code",
+            "--include-profile",
+            "runtime",
+            "--check",
+        ],
+        1,
+    );
+    assert_eq!(r["targets"][3]["status"], "blocked");
+    let f = Fixture::new(json!({}));
+    f.run(
+        &[
+            "--profile",
+            "code",
+            "--include-profile",
+            "unknown",
+            "--check",
+        ],
+        1,
+    );
+    assert!(f.calls().is_empty());
+}
+
+#[test]
+fn expired_kerberos_for_another_principal_cannot_be_renewed_as_the_requested_identity() {
+    let f =
+        Fixture::new(json!({"kerberos_valid":false,"kerberos_principal":"someone@EXAMPLE.COM"}));
+    let config = f.profile(json!([{"provider":"kerberos","principal":"fixture@EXAMPLE.COM"}]));
+    let r = f.run(&["--config", &config, "--non-interactive"], 1);
+    assert_eq!(r["targets"][0]["status"], "failed");
+    assert!(f.calls().iter().all(|c| c[0] == "klist"));
+}
+
+#[test]
+fn included_custom_profiles_preserve_scope_and_block_child_on_missing_runtime_auth() {
+    let f = Fixture::new(json!({"kerberos_valid":false}));
+    let path = f.root.path().join("combined.json");
+    fs::write(
+        &path,
+        json!({"schema_version":1,"profiles":{
+            "work":[{"provider":"twg_bitbucket"}],
+            "runtime":[{"provider":"kerberos","principal":"fixture@EXAMPLE.COM"}]
+        }})
+        .to_string(),
+    )
+    .unwrap();
+    let marker = f.root.path().join("must-not-run");
+    let out = f
+        .command(&[
+            "auth",
+            "exec",
+            "--config",
+            path.to_str().unwrap(),
+            "--include-profile",
+            "runtime",
+            "--check",
+            "--",
+            "/usr/bin/touch",
+            marker.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+    assert!(!marker.exists());
+    assert!(f.calls().iter().all(|c| c[0] == "twg" || c[0] == "klist"));
+    assert!(!text(&out).contains(SECRET));
+    for principal in ["unqualified", "user@", "@REALM", "-user@REALM"] {
+        let f = Fixture::new(json!({}));
+        let config = f.profile(json!([{"provider":"kerberos","principal":principal}]));
+        f.run(&["--config", &config], 1);
+        assert!(f.calls().is_empty());
+    }
 }

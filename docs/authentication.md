@@ -4,12 +4,14 @@
 
 Use `workctl auth preflight` before a work session, or `workctl auth exec` to check credentials before launching a command.
 
-`workctl auth preflight` force-renews every declared credential target, even when
+`workctl auth preflight` renews every renewable credential target, even when
 its cached credential is still valid, and then verifies the provider's normal cache.
 Run it before leaving and complete the browser/MFA prompts. Bitbucket uses browser
 OAuth login for the selected account because its CLI has no force-refresh command;
-TWG uses forced OAuth refresh and SLAuth uses forced issuance. Each target is
-attempted once. Failed renewal is reported even when an older token still works.
+TWG uses forced OAuth refresh and SLAuth uses forced issuance. TWG Bitbucket API tokens
+are manually managed: every mode checks them without rotating or collecting secrets.
+Kerberos uses one silent `kinit -R` attempt; it never initiates password entry.
+Each target is attempted once. Failed renewal is reported even when an older token still works.
 Use `--reuse-valid` to renew only missing or short-lived credentials, or `--check`
 to check access without explicitly renewing.
 `workctl auth exec` does that automatically before starting another command:
@@ -24,11 +26,13 @@ workctl auth exec --profile code -- bb pr list
 
 ## Choose a profile
 
-The built-in `work` profile contains seven independent credential targets:
+The built-in `work` profile contains eight independent credential targets:
 
 | Profile | Targets | SLAuth environment, groups, MFA |
 | --- | --- | --- |
-| `code` | Bitbucket CLI OAuth and TWG OAuth | Not SLAuth |
+| `code` | Bitbucket CLI OAuth, TWG OAuth, and TWG Bitbucket token | Not SLAuth |
+| `bitbucket` / `twg` / `twg-bitbucket` | One corresponding credential | Not SLAuth |
+| `runtime` | Default-cache Kerberos TGT and principal | Not SLAuth |
 | `logs` | `splunk.paas-inf.net` | `prod`, `atlassian-all`, MFA |
 | `risk` | `risk-mitigation-service` | `prod`, no groups, MFA |
 | `checks` | `pollinator` | `prod`, no groups, MFA |
@@ -41,6 +45,25 @@ Select the narrowest profile for the work. These are explicit requirements, not
 guesses about other running chats. For example, use `--profile risk` before a risk
 metadata query and `--profile metrics` before collecting Tome objectives. Custom
 profiles can combine these descriptors with other audiences or environments.
+Use repeatable `--include-profile` to require more than one profile in a single
+preflight or wrapped command. Overlapping targets are checked once, in first-seen
+order; every requested profile is validated before any provider call. With
+`--config`, all profile names resolve in that explicit file.
+
+```sh
+workctl auth preflight --profile work --include-profile runtime --reuse-valid
+workctl auth exec --profile code --include-profile runtime --reuse-valid -- COMMAND
+```
+
+`runtime` checks the current default Kerberos cache, not every available identity.
+On macOS it uses Heimdal `klist -t`; on Linux it uses MIT `klist -s`. A separate
+`klist` read identifies the principal. Unsupported formats and wrong requested
+principals fail closed. Expiry is unknown, so `--min-valid-for` cannot establish a
+Kerberos lifetime guarantee. Use a custom `kerberos` descriptor with `principal`
+when the runtime requires a particular identity. Named-principal renewal verifies the cache identity before `kinit -R`, including
+when the existing TGT is expired. Cache readiness does not prove
+Nebulae endpoint access, ASAP signing, or tenant/user-context authorization.
+
 Splunk issuance also warms the underlying Atlas login, but does not populate the
 other audience-specific caches or refresh service-signed runtime credentials.
 
@@ -60,16 +83,21 @@ requested cache's audience and lifetime; they do not probe each service's resour
 permissions. The productive service call must still handle authorization failures.
 In particular:
 
-- TWG OAuth and TWG's optional Bitbucket API token are separate. Recent sessions
-  repeatedly saw `AUTH_INVALID` from `twg bb` while `bb` worked. The TWG result
-  explicitly names this boundary. Use `twg setup bitbucket` for that token's
-  interactive setup; refreshing TWG OAuth or `bb` cannot repair it.
+- TWG OAuth and TWG's Bitbucket API token are separate targets. `code` and `work`
+  require both, so a valid native `bb` credential cannot hide a broken `twg bb`
+  token. `twg doctor` must report both `status: valid` and `ok: true` for the token.
+  Missing/expired tokens block with `twg setup bitbucket --force`; scope denial,
+  connectivity errors, missing fields and contradictory statuses fail closed.
+  Token setup requires a controlling terminal and secret entry, so workctl never
+  launches it through its pipe-based supervisor. Enter the token directly in the
+  provider's terminal prompt, never chat. Narrow `bitbucket` or `twg` profiles
+  remain available for tasks using only that client.
 - Micros, Sliver, Spinnaker, browser sessions, and package-registry credentials
   retain their provider-specific checks. Registry reads succeeded in the reviewed
   sessions; an unpublished package was not an auth failure. These are not covered
   merely because another Atlas audience succeeds.
-- Nebulae ingress Kerberos, local ASAP signing keys, service-to-service principals,
-  and tenant/user-context tokens are runtime-specific. A local `User context
+- Kerberos is covered by the explicit `runtime` profile. Local ASAP signing keys,
+  service-to-service principals, and tenant/user-context tokens are runtime-specific. A local `User context
   missing` failure and a deployed principal rejection in the reviewed sessions
   were not repairable by renewing workstation OAuth or Splunk. Resolve these in
   the selected runtime; do not issue broad bot tokens, change access policy, or
@@ -86,11 +114,10 @@ TWG OAuth refresh (and Bitbucket silent refresh with `--reuse-valid`), but never
 starts Bitbucket browser login or SLAuth
 issuance that could require browser/MFA. Missing TWG refresh authorization reports
 an actionable `twg login` requirement: the installed TWG login requires a
-controlling terminal for account/site selection. TWG's separate optional Bitbucket
-token is reported by `twg doctor`, but does not invalidate a working TWG OAuth
-credential; workctl verifies the separate `bb` CLI credential for Bitbucket use.
-It does not repair TWG's optional Bitbucket API token or claim `twg bb` is ready;
-this limitation is also shown in human and JSON reports.
+controlling terminal for account/site selection. TWG Bitbucket is checked separately
+in `code`/`work`, including forced-renewal mode. A healthy manual token reports
+`valid`, never `refreshed`; token repair never renews unrelated credentials. Other
+selected targets still follow the requested renewal mode.
 
 ## Expiry and access guarantees
 
@@ -106,6 +133,7 @@ requested audience, expiry and not-before claims; Atlas owns token issuance and
 validation. SLAuth TTL is capped by policy at one hour or the remaining underlying
 login lifetime. Asking for two hours therefore blocks, even after successful
 issuance. No preflight can guarantee future access after revocation or future MFA.
+Kerberos cache checks and TWG Bitbucket also report unknown expiry explicitly.
 Known expiry is preserved throughout verification. Bitbucket's relative lifetime
 is measured from the start of its status check, so time spent checking API access
 does not extend it. Credentials are aged again at handoff in case a later MFA flow
@@ -130,7 +158,7 @@ credential files. Only a narrowly validated Okta activation URL can be forwarded
 from provider output; provider diagnostics and credential output are never printed.
 Complete the browser opened by Bitbucket if it needs a new login.
 
-Within one preflight, Bitbucket, TWG, and Atlas run in at most three provider
+Within one preflight, Bitbucket, TWG, Atlas, and Kerberos run in at most four provider
 workers. Every target's probe, renewal, and verification stays ordered; targets
 using the same provider run sequentially, including all SLAuth cache reads and
 issuance. Bitbucket browser login and Atlas issuance share one interaction gate,
@@ -171,7 +199,7 @@ prompts still go to stderr when interaction is necessary.
 
 ## JSON and command execution
 
-`auth preflight --json` emits one schema-versioned result with per-target status,
+`auth preflight --json` reports `included_profiles` and emits one schema-versioned result with per-target status,
 remaining lifetime where known, expiry/check timestamps, actions, and honest
 unknown-expiry notes. No provider output is embedded. `auth exec` sends its report
 to stderr and replaces itself with the supplied argv, preserving stdin, terminal,
@@ -192,6 +220,8 @@ Custom profiles contain only credential descriptors, never tokens or commands:
     "staging": [
       {"provider": "bitbucket", "account": "default"},
       {"provider": "twg"},
+      {"provider": "twg_bitbucket"},
+      {"provider": "kerberos", "principal": "user@EXAMPLE.COM"},
       {"provider": "slauth", "audience": "micros-log-insight", "environment": "prod", "groups": [], "mfa": false}
     ]
   }
@@ -214,9 +244,21 @@ cargo test --locked --test auth_live -- --ignored --nocapture
 # Narrow service-specific live proof; this does not prove Splunk MFA:
 WORKCTL_AUTH_LIVE_CONFIG=/path/to/auth.json WORKCTL_AUTH_LIVE_PROFILE=staging \
   cargo test --locked --test auth_live real_slauth -- --ignored --nocapture
-# Check every built-in service cache without initiating renewal or MFA:
+# Check every built-in credential without initiating renewal or MFA:
 cargo test --locked --test auth_live real_work_cache -- --ignored --nocapture
 ```
+
+Read-only live proof for the new adapters is also available:
+
+```sh
+cargo test --locked --test auth_live real_twg_bitbucket_reports -- --ignored --nocapture
+cargo test --locked --test auth_live real_kerberos_cache -- --ignored --nocapture
+```
+
+The TWG test accepts an explicitly blocked missing/expired token as correct
+detection; it is not proof of usable Bitbucket access. The Kerberos test requires
+a real valid default TGT and proves exact-identity acceptance and wrong-identity
+refusal. Neither test renews credentials.
 
 The required Linux/macOS CI lane runs the auth CLI suite alongside the existing
 Git contracts. It covers cache reuse, refresh/recheck, stale caches, unknown expiry,

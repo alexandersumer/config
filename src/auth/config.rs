@@ -4,18 +4,21 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-#[derive(Args, Debug)]
+#[derive(Args, Debug, Clone)]
 pub(crate) struct Options {
-    /// Named credential set: work, code, logs, services, risk, checks, config, metrics
+    /// Named credential set: work, code, bitbucket, twg, twg-bitbucket, runtime, logs, services, risk, checks, config, metrics
     #[arg(long, default_value = "work")]
     pub profile: String,
+    /// Also require another profile; repeatable, overlapping targets checked once
+    #[arg(long = "include-profile")]
+    pub include_profiles: Vec<String>,
     /// Explicit JSON profile file; never reads a provider's credential store
     #[arg(long)]
     pub config: Option<PathBuf>,
     /// Check current access without explicitly refreshing or logging in
     #[arg(long)]
     pub check: bool,
-    /// Reuse valid credentials; by default every target is explicitly renewed
+    /// Reuse valid credentials; by default every renewable target is explicitly renewed
     #[arg(long)]
     pub reuse_valid: bool,
     /// Do not initiate browser/MFA login; silent OAuth refresh remains allowed
@@ -42,6 +45,11 @@ pub(crate) enum Target {
         account: Option<String>,
     },
     Twg {},
+    TwgBitbucket {},
+    Kerberos {
+        #[serde(default)]
+        principal: Option<String>,
+    },
     Slauth {
         audience: String,
         #[serde(default = "production")]
@@ -60,11 +68,19 @@ impl Target {
         match self {
             Self::Bitbucket { .. } => "Bitbucket",
             Self::Twg {} => "TWG",
+            Self::TwgBitbucket {} => "TWG Bitbucket",
+            Self::Kerberos { .. } => "Kerberos",
             Self::Slauth { .. } => "SLAuth",
         }
     }
     pub fn scope(&self) -> Option<String> {
         match self {
+            Self::Kerberos { principal } => Some(
+                principal
+                    .as_deref()
+                    .unwrap_or("default credential cache")
+                    .into(),
+            ),
             Self::Slauth {
                 audience,
                 environment,
@@ -89,6 +105,10 @@ impl Target {
                 format!("bitbucket:{}", account.as_deref().unwrap_or("active"))
             }
             Self::Twg {} => "twg".into(),
+            Self::TwgBitbucket {} => "twg-bitbucket".into(),
+            Self::Kerberos { principal } => {
+                format!("kerberos:{}", principal.as_deref().unwrap_or("default"))
+            }
             Self::Slauth {
                 audience,
                 environment,
@@ -109,6 +129,15 @@ impl Target {
                 && !s.starts_with('-')
         }
         match self {
+            Self::Kerberos {
+                principal: Some(principal),
+            } if !identifier(principal)
+                || !principal.split_once('@').is_some_and(|(user, realm)| {
+                    !user.is_empty() && !realm.is_empty() && !realm.contains('@')
+                }) =>
+            {
+                Err("Kerberos principal must be a qualified identifier".into())
+            }
             Self::Bitbucket {
                 account: Some(account),
             } if !identifier(account) => {
@@ -142,6 +171,27 @@ struct Config {
     profiles: BTreeMap<String, Vec<Target>>,
 }
 pub(crate) fn targets(options: &Options) -> Result<Vec<Target>, String> {
+    if !options.include_profiles.is_empty() {
+        if options.include_profiles.len() > 16 {
+            return Err("At most 16 additional auth profiles are supported".into());
+        }
+        let mut combined = Vec::new();
+        let mut seen = std::collections::BTreeSet::new();
+        for profile in std::iter::once(&options.profile).chain(&options.include_profiles) {
+            let mut scoped = options.clone();
+            scoped.profile = profile.clone();
+            scoped.include_profiles.clear();
+            for target in targets(&scoped)? {
+                if seen.insert(target.label()) {
+                    combined.push(target);
+                }
+            }
+        }
+        if combined.len() > 32 {
+            return Err("Auth profiles require at most 32 distinct targets".into());
+        }
+        return Ok(combined);
+    }
     let mut selected = if let Some(path) = &options.config {
         use std::io::Read;
         use std::os::unix::fs::OpenOptionsExt;
@@ -194,17 +244,21 @@ pub(crate) fn targets(options: &Options) -> Result<Vec<Target>, String> {
             metrics.clone(),
         ];
         match options.profile.as_str() {
-            "code" => code,
+            "code" => code.into_iter().chain([Target::TwgBitbucket {}]).collect(),
+            "bitbucket" => vec![Target::Bitbucket { account: None }],
+            "twg" => vec![Target::Twg {}],
+            "twg-bitbucket" => vec![Target::TwgBitbucket {}],
+            "runtime" => vec![Target::Kerberos { principal: None }],
             "logs" => logs,
             "risk" => vec![risk],
             "checks" => vec![checks],
             "config" => vec![config],
             "metrics" => vec![metrics],
             "services" => services,
-            "work" => code.into_iter().chain(logs).chain(services).collect(),
+            "work" => code.into_iter().chain(logs).chain(services).chain([Target::TwgBitbucket {}]).collect(),
             _ => {
                 return Err(
-                    "Unknown built-in auth profile; use work, code, logs, services, risk, checks, config, metrics, or --config".into(),
+                    "Unknown built-in auth profile; use work, code, bitbucket, twg, twg-bitbucket, runtime, logs, services, risk, checks, config, metrics, or --config".into(),
                 )
             }
         }

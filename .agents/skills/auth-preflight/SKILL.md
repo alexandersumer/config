@@ -37,8 +37,15 @@ services.
 | Explicitly renew | `workctl auth preflight --profile PROFILE --json` |
 
 Workctl owns checks, renewal, bounded retries, and verification. Read the exit
-status and structured outcome. After success, continue the requested action
-without duplicating provider checks. Readiness at handoff does not guarantee
+status and structured outcome. For common code work, `code` requires native
+Bitbucket, TWG OAuth, and TWG Bitbucket independently. Use a single-client profile only when that is the actual
+task scope. For Nebulae/local runtime work, add `--include-profile runtime`; use a
+custom descriptor for an exact Kerberos principal or additional SLAuth audience.
+Resolve runtime signing keys, service/user-context tokens, source-access identity,
+browser and registry auth separately; the default profile does not prove them.
+Manually managed tokens are checked in every mode, never automatically rotated.
+
+After success, continue the requested action without duplicating provider checks. Readiness at handoff does not guarantee
 future access or permission for every operation.
 
 On failure, address the reported target and recovery action before rerunning.

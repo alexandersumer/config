@@ -26,18 +26,23 @@ workspace. Prefer `--json` for structured results.
 
 ## Choose and execute
 
-Profiles: `code` = Bitbucket CLI + TWG OAuth; `logs` = production Splunk;
+Profiles: `code` = Bitbucket CLI + TWG OAuth + TWG Bitbucket token; `logs` = production Splunk;
 `risk` = Risk Mitigation (MFA); `checks` = Pollinator (MFA); `config` = MLP Config;
 `metrics` = Phobos; `services` = risk + checks + config + metrics;
-`work` = code + logs + services. All built-in SLAuth targets use production.
+`work` = code + logs + services. `bitbucket`, `twg`, and `twg-bitbucket` select
+one credential; `runtime` checks the default-cache Kerberos TGT and principal.
+Add repeatable `--include-profile runtime` when the selected task needs Kerberos. All built-in SLAuth targets use production.
 Choose the narrowest matching set. Use `--config FILE --profile NAME` for exact
 account or audience requirements. `auth exec` preserves child output and exit
 status; omit `--json` there.
 
-TWG's separate Bitbucket token requires `twg setup bitbucket`; neither TWG OAuth
-nor the independent `bb` credential proves `twg bb` access. Runtime principals,
-Nebulae ingress Kerberos, user-context tokens, browser sessions, and registry
-credentials retain their provider-specific paths.
+TWG's Bitbucket token is checked by `code`/`work`, never automatically rotated.
+When missing or invalid, run `twg setup bitbucket --force` in a terminal; secret
+entry stays in that terminal. Use a custom `kerberos` descriptor with `principal`
+for an exact identity. Runtime signing keys, service/user-context tokens, browser
+sessions, registry auth, and endpoint permissions need provider-specific checks.
+Successful default preflight does not prove these. Preflight runs only when
+invoked; `auth exec` does not renew credentials during the child command.
 
 Use the requested paths. Preview cleanup, then apply when removal is authorized.
 Cleanup removes ignored files in eligible worktrees and retains committed history
