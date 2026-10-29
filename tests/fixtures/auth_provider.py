@@ -4,6 +4,8 @@
 Matches the installed bb/TWG/Atlas command/output contracts. CI never gets real
 credentials. Live provider validation is a separate explicit lane.
 """
+import atexit
+import fcntl
 import base64
 import json
 import os
@@ -17,8 +19,44 @@ state_path = root / 'state.json'
 state = json.loads(state_path.read_text())
 name = pathlib.Path(sys.argv[0]).name
 args = sys.argv[1:]
-with (root / 'calls.jsonl').open('a') as log:
-    log.write(json.dumps([name, args]) + '\n')
+# Each provider owns its state, just as the installed CLIs do. Base test
+# configuration is immutable while providers run; no shared read/modify/write.
+provider_state = root / (name + '-state.json')
+if provider_state.exists():
+    state = json.loads(provider_state.read_text())
+log = os.open(root / 'calls.jsonl', os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+os.write(log, (json.dumps([name, args]) + '\n').encode())
+os.close(log)
+if name == 'atlas':
+    audience = args[args.index('--aud') + 1]
+    key = 'atlas-' + ('cache-' if '--cached' in args else 'force-') + audience
+else:
+    key = '-'.join([name] + (args[:1] if args[0] == 'doctor' else args[:2]))
+
+# Fail on forbidden overlap rather than relying on elapsed-time guesses.
+if state.get('assert_serial'):
+    provider_lock = (root / (name + '-active.lock')).open('a')
+    try:
+        fcntl.flock(provider_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        (root / 'provider-overlap').touch()
+        sys.exit(97)
+interactive = (name == 'bb' and args[:2] == ['auth', 'login']) or (name == 'atlas' and '--force' in args)
+if interactive and state.get('assert_interaction'):
+    interaction_lock = (root / 'interaction-active.lock').open('a')
+    try:
+        fcntl.flock(interaction_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        (root / 'interaction-overlap').touch()
+        sys.exit(98)
+if key in state.get('hang_keys', []):
+    descendant = subprocess.Popen(['/bin/sleep', '30'])
+    (root / ('descendant-' + key)).write_text(str(descendant.pid))
+(root / ('started-' + key)).touch()
+atexit.register(lambda: (root / ('finished-' + key)).touch())
+if key in state.get('hold_keys', []) or key in state.get('hang_keys', []):
+    while not (root / ('release-' + key)).exists():
+        time.sleep(.01)
 secret = 'AUTH_SECRET_MUST_NEVER_APPEAR'
 mode = state.get('mode')
 if name == 'twg' and state.get('twg_delay'):
@@ -45,7 +83,7 @@ if mode == 'malformed':
     sys.exit(0)
 
 def save():
-    state_path.write_text(json.dumps(state))
+    provider_state.write_text(json.dumps(state))
 
 def jwt():
     audience = args[args.index('--aud') + 1]

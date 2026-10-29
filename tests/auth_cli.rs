@@ -7,22 +7,75 @@ use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
 const BIN: &str = env!("CARGO_BIN_EXE_workctl");
 const SECRET: &str = "AUTH_SECRET_MUST_NEVER_APPEAR";
+
+fn provider_source() -> &'static str {
+    static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    SOURCE.get_or_init(|| {
+        // macOS /usr/bin/python3 is a developer-tool launcher. Resolve it once
+        // before any auth deadline starts, rather than launching it per probe.
+        let output = Command::new("/usr/bin/python3")
+            .args(["-c", "import sys; print(sys.executable)"])
+            .output()
+            .expect("resolve provider simulator interpreter");
+        assert!(
+            output.status.success(),
+            "Python 3 is required for auth CLI fixtures"
+        );
+        let python = String::from_utf8(output.stdout).unwrap();
+        let python = python.trim();
+        assert!(
+            std::path::Path::new(python).is_absolute() && !python.chars().any(char::is_whitespace),
+            "simulator needs an absolute interpreter path without whitespace"
+        );
+        let (_, body) = include_str!("fixtures/auth_provider.py")
+            .split_once('\n')
+            .unwrap();
+        format!("#!{python}\n{body}")
+    })
+}
+
+// Bound independent fixture groups, not concurrency inside the system under
+// test. Each group may now launch several providers (and two workctl processes).
+// Unbounded test-harness parallelism would measure host scheduling delays against
+// short credential lifetimes instead of the intended auth contracts.
+static FIXTURE_SLOTS: (std::sync::Mutex<usize>, std::sync::Condvar) =
+    (std::sync::Mutex::new(0), std::sync::Condvar::new());
+struct FixtureSlot;
+impl FixtureSlot {
+    fn acquire() -> Self {
+        let (mutex, ready) = &FIXTURE_SLOTS;
+        let mut active = mutex.lock().unwrap();
+        while *active >= 4 {
+            active = ready.wait(active).unwrap();
+        }
+        *active += 1;
+        Self
+    }
+}
+impl Drop for FixtureSlot {
+    fn drop(&mut self) {
+        let (mutex, ready) = &FIXTURE_SLOTS;
+        *mutex.lock().unwrap() -= 1;
+        ready.notify_one();
+    }
+}
 struct Fixture {
     root: tempfile::TempDir,
+    _slot: FixtureSlot,
 }
 impl Fixture {
     fn new(state: Value) -> Self {
+        let slot = FixtureSlot::acquire();
         let root = tempfile::tempdir().unwrap();
         fs::create_dir(root.path().join("bin")).unwrap();
         let script = root.path().join("provider.py");
-        fs::write(&script, include_str!("fixtures/auth_provider.py")).unwrap();
+        fs::write(&script, provider_source()).unwrap();
         fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
         for name in ["bb", "twg", "atlas"] {
             symlink(&script, root.path().join("bin").join(name)).unwrap();
         }
-        let f = Self { root };
-        // Fresh executables can incur OS launch checks before the provider runs.
-        // Prepare them before testing provider deadlines or short credential TTLs.
+        let f = Self { root, _slot: slot };
+        // Prepare cold executable launches before testing provider deadlines.
         let startup = f.command(&["--help"]).output().unwrap();
         assert!(startup.status.success(), "{}", text(&startup));
         f.state(json!({}));
@@ -33,11 +86,20 @@ impl Fixture {
             .output()
             .unwrap();
         assert!(startup.status.success(), "{}", text(&startup));
-        fs::remove_file(f.root.path().join("calls.jsonl")).unwrap();
+        for name in [
+            "calls.jsonl",
+            "started-bb-auth-status",
+            "finished-bb-auth-status",
+        ] {
+            fs::remove_file(f.root.path().join(name)).unwrap();
+        }
         f.state(state);
         f
     }
     fn state(&self, state: Value) {
+        for provider in ["bb", "twg", "atlas"] {
+            let _ = fs::remove_file(self.root.path().join(format!("{provider}-state.json")));
+        }
         fs::write(self.root.path().join("state.json"), state.to_string()).unwrap();
     }
     fn command(&self, args: &[&str]) -> Command {
@@ -88,9 +150,9 @@ fn text(out: &Output) -> String {
     )
 }
 fn wait_file(path: &std::path::Path) {
-    let end = Instant::now() + Duration::from_secs(5);
+    let end = Instant::now() + Duration::from_secs(10);
     while !path.exists() {
-        assert!(Instant::now() < end, "fixture did not start");
+        assert!(Instant::now() < end, "fixture did not start: {path:?}");
         std::thread::sleep(Duration::from_millis(10));
     }
 }
@@ -372,13 +434,27 @@ fn deadline_and_cancellation_clean_provider_descendants_and_release_lock() {
                 "logs",
                 "--json",
                 "--timeout",
-                "5",
+                "10",
             ])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
-        wait_file(&f.root.path().join("started"));
+        let started = f.root.path().join("started");
+        let startup_deadline = Instant::now() + Duration::from_secs(10);
+        while !started.exists() {
+            let stopped = child.try_wait().unwrap().is_some();
+            if stopped || Instant::now() >= startup_deadline {
+                if !stopped {
+                    unsafe {
+                        libc::kill(child.id() as i32, libc::SIGTERM);
+                    }
+                }
+                let output = child.wait_with_output().unwrap();
+                panic!("Provider fixture did not start: {}", text(&output));
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
         if interrupt {
             unsafe {
                 libc::kill(child.id() as i32, libc::SIGINT);
@@ -389,7 +465,7 @@ fn deadline_and_cancellation_clean_provider_descendants_and_release_lock() {
             if child.try_wait().unwrap().is_some() {
                 break;
             }
-            assert!(began.elapsed() < Duration::from_secs(7));
+            assert!(began.elapsed() < Duration::from_secs(12));
             std::thread::sleep(Duration::from_millis(10));
         }
         let out = child.wait_with_output().unwrap();
@@ -534,17 +610,23 @@ fn missing_provider_is_a_structured_failure_and_other_targets_continue() {
 
 #[test]
 fn credentials_are_rechecked_for_age_at_command_handoff() {
-    let f = Fixture::new(json!({"bb_seconds":63,"twg_delay":4}));
-    let r = f.run(&["--profile", "code", "--min-valid-for", "60"], 1);
-    assert_eq!(r["targets"][0]["status"], "blocked");
-    assert!(r["targets"][0]["remaining_seconds"].as_u64().unwrap() < 60);
+    let f = Fixture::new(json!({"bb_seconds":8,"hold_keys":["twg-doctor"]}));
+    let child = f.start(&["--profile", "code", "--check", "--min-valid-for", "0"]);
+    f.started("twg-doctor");
+    f.finished("bb-workspace-list");
+    // Let an already verified credential expire while another provider waits.
+    std::thread::sleep(Duration::from_secs(9));
+    f.release("twg-doctor");
+    let r = child.finish(1);
+    assert_eq!(r["targets"][0]["status"], "blocked", "{r}");
+    assert_eq!(r["targets"][0]["remaining_seconds"], 0);
     assert!(r["targets"][0]["reason"].as_str().unwrap().contains("aged"));
 }
 
 #[test]
 fn bitbucket_expiry_during_api_verification_blocks_preflight_and_exec() {
     for exec in [false, true] {
-        let f = Fixture::new(json!({"bb_seconds":3,"bb_api_delay":4}));
+        let f = Fixture::new(json!({"bb_seconds":8,"bb_api_delay":9}));
         let profile = f.profile(json!([{"provider":"bitbucket"}]));
         let marker = f.root.path().join("child-started");
         let mut command = f.command(&["auth", if exec { "exec" } else { "preflight" }]);
@@ -1105,4 +1187,321 @@ fn service_progress_identifies_the_audience_before_any_browser_prompt() {
     let prompt = stderr.find("Complete browser sign-in or MFA").unwrap();
     assert!(target < prompt);
     assert!(!text(&out).contains(SECRET));
+}
+
+// Barrier-driven concurrency contracts: no elapsed-time speedup assertions.
+struct RunningAuth(std::process::Child);
+impl RunningAuth {
+    fn finish(mut self, expected: i32) -> Value {
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while self.0.try_wait().unwrap().is_none() {
+            assert!(Instant::now() < deadline, "auth workers did not finish");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let mut stdout = String::new();
+        let mut stderr = String::new();
+        use std::io::Read;
+        self.0
+            .stdout
+            .take()
+            .unwrap()
+            .read_to_string(&mut stdout)
+            .unwrap();
+        self.0
+            .stderr
+            .take()
+            .unwrap()
+            .read_to_string(&mut stderr)
+            .unwrap();
+        assert_eq!(
+            self.0.wait().unwrap().code(),
+            Some(expected),
+            "{stderr}\n{stdout}"
+        );
+        assert!(!stdout.contains(SECRET) && !stderr.contains(SECRET));
+        serde_json::from_str(&stdout).unwrap()
+    }
+}
+impl Drop for RunningAuth {
+    fn drop(&mut self) {
+        if self.0.try_wait().ok().flatten().is_none() {
+            unsafe {
+                libc::kill(self.0.id() as i32, libc::SIGTERM);
+            }
+            let _ = self.0.wait();
+        }
+    }
+}
+impl Fixture {
+    fn start(&self, extra: &[&str]) -> RunningAuth {
+        RunningAuth(
+            self.command(&["auth", "preflight", "--json", "--timeout", "30"])
+                .args(extra)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap(),
+        )
+    }
+    fn started(&self, key: &str) {
+        wait_file(&self.root.path().join(format!("started-{key}")));
+    }
+    fn finished(&self, key: &str) {
+        wait_file(&self.root.path().join(format!("finished-{key}")));
+    }
+    fn release(&self, key: &str) {
+        fs::write(self.root.path().join(format!("release-{key}")), "").unwrap();
+    }
+    fn has_started(&self, key: &str) -> bool {
+        self.root.path().join(format!("started-{key}")).exists()
+    }
+}
+
+#[test]
+fn provider_checks_overlap_and_completion_order_does_not_change_report_order() {
+    let f = Fixture::new(json!({"assert_serial":true,
+        "hold_keys":["bb-auth-status", "twg-doctor", "atlas-cache-splunk.paas-inf.net"]}));
+    let child = f.start(&["--check"]);
+    // Current sequential implementation cannot reach all three barriers.
+    for key in [
+        "bb-auth-status",
+        "twg-doctor",
+        "atlas-cache-splunk.paas-inf.net",
+    ] {
+        f.started(key);
+    }
+    f.release("twg-doctor");
+    f.finished("twg-doctor");
+    f.release("atlas-cache-splunk.paas-inf.net");
+    f.finished("atlas-cache-phobos");
+    assert!(!f.has_started("bb-workspace-list"));
+    f.release("bb-auth-status");
+    let result = child.finish(0);
+    let labels: Vec<_> = result["targets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v["target"].as_str().unwrap())
+        .collect();
+    assert_eq!(labels.len(), 7);
+    assert_eq!(&labels[..2], &["bitbucket:active", "twg"]);
+    assert!(labels[2].contains("splunk.paas-inf.net"));
+    assert!(labels[6].contains("phobos"));
+    assert!(!f.root.path().join("provider-overlap").exists());
+}
+
+#[test]
+fn custom_targets_share_one_worker_per_provider() {
+    let f = Fixture::new(
+        json!({"assert_serial":true,"hold_keys":["bb-auth-status", "atlas-cache-first"]}),
+    );
+    let config = f.profile(json!([
+        {"provider":"slauth","audience":"first"},
+        {"provider":"bitbucket","account":"office"},
+        {"provider":"slauth","audience":"second"},
+        {"provider":"bitbucket","account":"other"}
+    ]));
+    let child = f.start(&["--check", "--config", &config]);
+    f.started("bb-auth-status");
+    f.started("atlas-cache-first");
+    assert!(!f.has_started("atlas-cache-second"));
+    assert_eq!(f.calls().iter().filter(|v| v[0] == "bb").count(), 1);
+    f.release("bb-auth-status");
+    f.release("atlas-cache-first");
+    let result = child.finish(0);
+    assert_eq!(result["targets"][3]["target"], "bitbucket:other");
+    assert!(!f.root.path().join("provider-overlap").exists());
+}
+
+#[test]
+fn interactive_commands_are_exclusive_while_background_work_continues() {
+    let f = Fixture::new(json!({"assert_interaction":true,"assert_serial":true,
+        "hold_keys":["bb-auth-login", "atlas-force-service", "twg-doctor"]}));
+    let config = f.profile(json!([
+        {"provider":"bitbucket"}, {"provider":"twg"}, {"provider":"slauth","audience":"service"}
+    ]));
+    let child = f.start(&["--config", &config]);
+    f.started("twg-doctor");
+    let end = Instant::now() + Duration::from_secs(5);
+    while !f.has_started("bb-auth-login") && !f.has_started("atlas-force-service") {
+        assert!(Instant::now() < end);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let (first, second) = if f.has_started("bb-auth-login") {
+        ("bb-auth-login", "atlas-force-service")
+    } else {
+        ("atlas-force-service", "bb-auth-login")
+    };
+    f.finished("bb-auth-status");
+    f.finished("atlas-cache-service");
+    f.release("twg-doctor");
+    f.finished("twg-auth-refresh");
+    assert!(!f.root.path().join("interaction-overlap").exists());
+    assert!(!f.has_started(second));
+    f.release(first);
+    f.started(second);
+    f.release(second);
+    let result = child.finish(0);
+    assert!(result["targets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|v| v["status"] == "refreshed"));
+    assert!(!f.root.path().join("interaction-overlap").exists());
+}
+
+#[test]
+fn queued_login_receives_its_full_command_deadline() {
+    let f = Fixture::new(json!({"assert_interaction":true,
+        "hold_keys":["bb-auth-status", "atlas-force-service", "bb-auth-login"]}));
+    let config = f.profile(json!([
+        {"provider":"slauth","audience":"service"}, {"provider":"bitbucket"}
+    ]));
+    let child = f.start(&[
+        "--config",
+        &config,
+        "--timeout",
+        "2",
+        "--login-timeout",
+        "5",
+    ]);
+    f.started("bb-auth-status");
+    f.started("atlas-force-service");
+    f.release("bb-auth-status");
+    f.finished("bb-workspace-list");
+    std::thread::sleep(Duration::from_secs(3));
+    f.release("atlas-force-service");
+    f.started("bb-auth-login");
+    std::thread::sleep(Duration::from_secs(3));
+    f.release("bb-auth-login");
+    let result = child.finish(0);
+    assert_eq!(result["status"], "completed");
+    assert_eq!(result["targets"].as_array().unwrap().len(), 2);
+    for target in result["targets"].as_array().unwrap() {
+        assert_eq!(target["status"], "refreshed", "{result}");
+    }
+    assert!(!f.root.path().join("interaction-overlap").exists());
+}
+
+#[test]
+fn provider_timeout_preserves_results_and_continues_other_provider_queues() {
+    let f = Fixture::new(json!({"hang_keys":["twg-doctor"],
+        "hold_keys":["atlas-cache-first", "atlas-cache-second"]}));
+    let config = f.profile(json!([
+        {"provider":"twg"},
+        {"provider":"slauth","audience":"first"},
+        {"provider":"slauth","audience":"second"},
+        {"provider":"slauth","audience":"third"},
+        {"provider":"bitbucket"}
+    ]));
+    let child = f.start(&["--check", "--config", &config, "--timeout", "5"]);
+    f.started("twg-doctor");
+    f.started("atlas-cache-first");
+    std::thread::sleep(Duration::from_secs(2));
+    f.release("atlas-cache-first");
+    f.started("atlas-cache-second");
+    let descendant: i32 = fs::read_to_string(f.root.path().join("descendant-twg-doctor"))
+        .unwrap()
+        .parse()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(8);
+    while alive(descendant) {
+        assert!(
+            Instant::now() < deadline,
+            "timed-out provider descendant is still active"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    f.release("atlas-cache-second");
+    let result = child.finish(1);
+    assert_eq!(result["status"], "blocked", "{result}");
+    let targets = result["targets"].as_array().unwrap();
+    assert_eq!(targets.len(), 5);
+    assert_eq!(targets[0]["target"], "twg");
+    assert_eq!(targets[0]["status"], "failed");
+    assert!(targets[0]["reason"].as_str().unwrap().contains("deadline"));
+    for (target, label) in targets[1..].iter().zip([
+        "slauth:prod:first::mfa=false",
+        "slauth:prod:second::mfa=false",
+        "slauth:prod:third::mfa=false",
+        "bitbucket:active",
+    ]) {
+        assert_eq!(target["target"], label);
+        assert_eq!(target["status"], "valid", "{result}");
+    }
+    assert!(f.has_started("atlas-cache-third"));
+}
+
+#[test]
+fn cancellation_cleans_multiple_workers_and_does_not_launch_queued_interaction() {
+    let f = Fixture::new(json!({"assert_interaction":true,
+        "hold_keys":["bb-auth-login", "atlas-force-service"],
+        "hang_keys":["twg-doctor", "bb-auth-login", "atlas-force-service"]}));
+    let config = f.profile(json!([
+        {"provider":"bitbucket"}, {"provider":"twg"}, {"provider":"slauth","audience":"service"}
+    ]));
+    let child = f.start(&["--config", &config]);
+    f.started("twg-doctor");
+    f.finished("bb-auth-status");
+    f.finished("atlas-cache-service");
+    let end = Instant::now() + Duration::from_secs(5);
+    while !f.has_started("bb-auth-login") && !f.has_started("atlas-force-service") {
+        assert!(Instant::now() < end);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    unsafe {
+        libc::kill(child.0.id() as i32, libc::SIGTERM);
+    }
+    child.finish(130);
+    assert_ne!(
+        f.has_started("bb-auth-login"),
+        f.has_started("atlas-force-service")
+    );
+    for entry in fs::read_dir(f.root.path()).unwrap().flatten() {
+        if entry
+            .file_name()
+            .to_string_lossy()
+            .starts_with("descendant-")
+        {
+            let pid = fs::read_to_string(entry.path()).unwrap().parse().unwrap();
+            assert!(!alive(pid));
+        }
+    }
+    f.state(json!({}));
+    f.run(&["--check"], 0); // Every worker stopped and the coordination lock released.
+}
+
+#[test]
+fn coordination_timeout_is_independent_of_provider_command_timeout() {
+    let f = Fixture::new(json!({"hold_keys":["atlas-cache-splunk.paas-inf.net"]}));
+    let first = f.start(&["--profile", "logs", "--check"]);
+    f.started("atlas-cache-splunk.paas-inf.net");
+    let result = f
+        .start(&[
+            "--profile",
+            "logs",
+            "--check",
+            "--coordination-timeout",
+            "1",
+        ])
+        .finish(1);
+    assert!(result["error"]
+        .as_str()
+        .unwrap()
+        .contains("coordination deadline"));
+    assert_eq!(f.calls().len(), 1);
+    let second = f.start(&[
+        "--profile",
+        "logs",
+        "--check",
+        "--timeout",
+        "1",
+        "--coordination-timeout",
+        "5",
+    ]);
+    // Exceed the provider timeout while the second invocation is queued.
+    std::thread::sleep(Duration::from_millis(1200));
+    f.release("atlas-cache-splunk.paas-inf.net");
+    first.finish(0);
+    second.finish(0);
 }

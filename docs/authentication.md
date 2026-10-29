@@ -130,9 +130,27 @@ credential files. Only a narrowly validated Okta activation URL can be forwarded
 from provider output; provider diagnostics and credential output are never printed.
 Complete the browser opened by Bitbucket if it needs a new login.
 
+Within one preflight, Bitbucket, TWG, and Atlas run in at most three provider
+workers. Every target's probe, renewal, and verification stays ordered; targets
+using the same provider run sequentially, including all SLAuth cache reads and
+issuance. Bitbucket browser login and Atlas issuance share one interaction gate,
+held from before process launch through descendant cleanup. Silent checks and
+refreshes in other providers can continue during browser/MFA waits. Provider
+adapters invoke their own CLIs; they do not use another worker to renew access.
+Atlas cache concurrency is not assumed, even across different audiences.
+Command deadlines start after the interaction gate is acquired, so queued time
+does not consume the login budget. Queued work remains cancelable. All workers
+finish before the final expiry check, lock release, or `auth exec` launch. Ordinary
+provider failures do not cancel independent work; uncertain process cleanup stops
+further work and prevents command execution.
+
 Concurrent workctl preflights coordinate through an owned, private regular lock in
 the OS temporary directory, wait for a bounded interval, and recheck caches after
-acquiring it. The lock does not coordinate unrelated tools or invocations using a
+acquiring it. `--coordination-timeout SECONDS` sets this wait independently
+(1–3600 seconds); when omitted it retains the `--timeout` value. For example,
+`workctl auth preflight --reuse-valid --coordination-timeout 600` can wait for a
+long-running MFA preflight without lengthening individual status-command deadlines.
+The lock does not coordinate unrelated tools or invocations using a
 different temporary directory. Unsafe symlink/FIFO/public lock files are refused.
 The persistent lock contains no credentials and is not deleted on release.
 
@@ -140,7 +158,9 @@ The persistent lock contains no credentials and is not deleted on release.
 
 Human output identifies the selected profile and renewal mode on stderr before
 checking credentials. Each target is announced before its provider
-check, so browser/MFA waits have context. The final report lists aligned statuses,
+check; concurrent announcements can arrive out of profile order. Progress lines and
+authentication prompts are written intact, and prompts identify the credential
+target. Final reports retain profile order. The final report lists aligned statuses,
 verified accounts, readable scope details, remaining lifetime or explicitly unknown expiry, and labeled
 reasons and recovery actions. It ends with the ready count and elapsed time.
 Failed checks say access is not ready rather than implying a verified credential
@@ -202,9 +222,14 @@ The required Linux/macOS CI lane runs the auth CLI suite alongside the existing
 Git contracts. It covers cache reuse, refresh/recheck, stale caches, unknown expiry,
 TTL limits, account preservation, exact descriptors, noninteractive/check-only
 behavior, partial failure, malformed responses, secret suppression, live activation
-prompts, output bounds, unsafe files, concurrency, deadlines, cancellation,
+prompts, output bounds, unsafe files, provider overlap and serialization, exclusive
+interaction, ordered results, separate coordination deadlines, cancellation,
 descendant cleanup, and command argv/stdin/exit behavior. These simulator-backed
-adapter tests are distinct from real account acceptance. The explicit live lane
+adapter tests bound independent fixture groups to four while exercising concurrent
+providers and invocations inside each group; this avoids treating host startup
+contention as token-expiry behavior. The simulator resolves its Python interpreter
+once before starting auth deadlines, avoiding repeated developer-tool launcher
+work on macOS. These tests are distinct from real account acceptance. The explicit live lane
 fails if a required provider, credential, network or browser/MFA step is unavailable;
 it verifies real preflight, cached reuse, wrapped output/exit, and the impossible
 SLAuth lifetime case. Ordinary CI skips this account-dependent lane explicitly.

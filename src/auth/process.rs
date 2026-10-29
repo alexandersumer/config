@@ -4,8 +4,44 @@ use std::os::fd::AsRawFd;
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::{mpsc, Arc, Mutex, MutexGuard, TryLockError};
 use std::time::{Duration, Instant};
+
+/// Shared by one preflight; provider workers never share credential operations.
+#[derive(Default)]
+pub(crate) struct Session {
+    interaction: Mutex<()>,
+    cleanup_failed: AtomicBool,
+}
+impl Session {
+    pub fn message(&self, message: &str) -> Result<(), String> {
+        // A single locked write keeps concurrent progress and prompts intact.
+        writeln!(std::io::stderr().lock(), "{message}")
+            .map_err(|_| "Cannot display authentication progress".into())
+    }
+    fn interactive(&self) -> Result<MutexGuard<'_, ()>, String> {
+        loop {
+            if crate::runtime::cancelled() {
+                return Err("Interrupted waiting for authentication interaction".into());
+            }
+            match self.interaction.try_lock() {
+                Ok(guard) => return Ok(guard),
+                Err(TryLockError::WouldBlock) => std::thread::sleep(Duration::from_millis(10)),
+                Err(TryLockError::Poisoned(_)) => {
+                    self.fail_cleanup();
+                    return Err("Authentication interaction worker failed".into());
+                }
+            }
+        }
+    }
+    pub fn fail_cleanup(&self) {
+        self.cleanup_failed.store(true, Ordering::SeqCst);
+        crate::runtime::cancel();
+    }
+    pub fn cleanup_failed(&self) -> bool {
+        self.cleanup_failed.load(Ordering::SeqCst)
+    }
+}
 
 const LIMIT: usize = 256 * 1024;
 struct Capture {
@@ -85,7 +121,51 @@ pub(crate) struct Output {
     pub stdout: Vec<u8>,
     pub stderr: Vec<u8>,
 }
-pub(crate) fn capture(mut command: Command, timeout: u64, login: bool) -> Result<Output, String> {
+// Keep process ownership during unwinding too; releasing the interaction gate
+// must never leave a live provider behind.
+struct ProviderChild<'a> {
+    child: std::process::Child,
+    session: &'a Session,
+    cleaned: bool,
+}
+impl ProviderChild<'_> {
+    fn stop(&mut self) -> Result<std::process::ExitStatus, String> {
+        let result = crate::runtime::stop_group(&mut self.child);
+        if result.is_ok() {
+            self.cleaned = true;
+        } else {
+            self.session.fail_cleanup();
+        }
+        result
+    }
+}
+impl Drop for ProviderChild<'_> {
+    fn drop(&mut self) {
+        if !self.cleaned {
+            let _ = self.stop();
+        }
+    }
+}
+pub(crate) fn capture(
+    session: &Session,
+    label: &str,
+    mut command: Command,
+    timeout: u64,
+    login: bool,
+) -> Result<Output, String> {
+    // Acquire before launching any flow, and hold through descendant cleanup.
+    // No command deadline runs while waiting for another interactive operation.
+    let _interaction = if login {
+        Some(session.interactive()?)
+    } else {
+        None
+    };
+    if login {
+        session.message(&format!(
+            "    {}: Complete browser sign-in or MFA if prompted ({timeout}s timeout).",
+            super::inline(label)
+        ))?;
+    }
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -97,12 +177,16 @@ pub(crate) fn capture(mut command: Command, timeout: u64, login: bool) -> Result
         return Err("Interrupted before auth command".into());
     }
     // Spawn errors can include user-controlled filenames; do not echo them.
-    let mut child = command
-        .spawn()
-        .map_err(|_| "Auth CLI could not be launched; check installation and permissions")?;
+    let mut child = ProviderChild {
+        child: command
+            .spawn()
+            .map_err(|_| "Auth CLI could not be launched; check installation and permissions")?,
+        session,
+        cleaned: false,
+    };
     let (send, receive) = mpsc::sync_channel(16);
-    let stdout = child.stdout.take().expect("piped stdout");
-    let stderr = child.stderr.take().expect("piped stderr");
+    let stdout = child.child.stdout.take().expect("piped stdout");
+    let stderr = child.child.stderr.take().expect("piped stderr");
     let other = send.clone();
     let stop = Arc::new(AtomicBool::new(false));
     let stop_out = stop.clone();
@@ -116,7 +200,13 @@ pub(crate) fn capture(mut command: Command, timeout: u64, login: bool) -> Result
         for url in receive.try_iter() {
             if login && !prompt_seen {
                 prompt_seen = true;
-                if writeln!(std::io::stderr(), "Complete authentication: {url}").is_err() {
+                if session
+                    .message(&format!(
+                        "Complete authentication: {url} ({})",
+                        super::inline(label)
+                    ))
+                    .is_err()
+                {
                     failure = Some("Cannot display authentication prompt");
                 }
             }
@@ -127,7 +217,7 @@ pub(crate) fn capture(mut command: Command, timeout: u64, login: bool) -> Result
         if Instant::now() >= deadline {
             failure = Some("Auth command deadline exceeded");
         }
-        match child.try_wait() {
+        match child.child.try_wait() {
             Ok(Some(_)) => break,
             Ok(None) if failure.is_none() => std::thread::sleep(Duration::from_millis(10)),
             Ok(None) => break,
@@ -138,7 +228,7 @@ pub(crate) fn capture(mut command: Command, timeout: u64, login: bool) -> Result
         }
     }
     // Terminate descendants even when the provider leader exits first.
-    let stopped = crate::runtime::stop_group(&mut child);
+    let stopped = child.stop();
     stop.store(true, Ordering::SeqCst);
     // Nonblocking readers also stop if a faulty provider detaches with an open pipe.
     let stdout = out
@@ -215,5 +305,38 @@ impl Drop for Lock {
         unsafe {
             libc::flock(self.0.as_raw_fd(), libc::LOCK_UN);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn interaction_wait_does_not_consume_the_command_deadline() {
+        let session = Session::default();
+        let gate = session.interaction.lock().unwrap();
+        let (entered, waiting) = mpsc::sync_channel(1);
+        let marker = tempfile::NamedTempFile::new().unwrap();
+        let marker_path = marker.path().to_owned();
+        std::thread::scope(|scope| {
+            let session = &session;
+            let worker = scope.spawn(|| {
+                let mut command = Command::new("/bin/sh");
+                command
+                    .args(["-c", "printf started > \"$1\"; printf ready", "sh"])
+                    .arg(&marker_path);
+                entered.send(()).unwrap();
+                capture(session, "test", command, 1, true)
+            });
+            waiting.recv().unwrap();
+            // Longer than the command budget, but no provider may launch yet.
+            std::thread::sleep(Duration::from_millis(1200));
+            assert_eq!(std::fs::read(&marker_path).unwrap(), b"");
+            drop(gate);
+            let output = worker.join().unwrap().unwrap();
+            assert_eq!(output.code, 0);
+            assert_eq!(output.stdout, b"ready");
+        });
     }
 }

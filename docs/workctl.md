@@ -99,6 +99,11 @@ sessions, and registry credentials require their own checks; see the
 | `--reuse-valid` | Reuse credentials that meet the validity threshold; renew missing or short-lived credentials |
 | `--check` | Check access without explicit refresh or login calls; providers may still renew transparently |
 
+Bitbucket, TWG, and Atlas checks can overlap. Targets within each provider stay
+sequential, and browser/MFA issuance runs one flow at a time. Reports retain
+profile order. Concurrent preflights share a whole-operation lock; use
+`--coordination-timeout SECONDS` to change its wait independently of `--timeout`.
+
 Complete browser or MFA prompts when requested. `--non-interactive` permits
 silent refresh but prevents browser/MFA issuance. Known expiry must meet
 `--min-valid-for` (default: 300 seconds). Unknown expiry is reported explicitly.

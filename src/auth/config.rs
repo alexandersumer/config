@@ -27,6 +27,9 @@ pub(crate) struct Options {
     /// Deadline in seconds for each status or silent refresh command
     #[arg(long, default_value = "30", value_parser = clap::value_parser!(u64).range(1..=600))]
     pub timeout: u64,
+    /// Wait for another preflight in seconds; defaults to --timeout
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..=3600))]
+    pub coordination_timeout: Option<u64>,
     /// Deadline in seconds for each browser/MFA login command
     #[arg(long, default_value = "180", value_parser = clap::value_parser!(u64).range(1..=900))]
     pub login_timeout: u64,

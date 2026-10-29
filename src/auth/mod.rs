@@ -25,41 +25,103 @@ fn result(options: &Options, human: bool) -> Value {
             )
             .map_err(|_| "Cannot display authentication progress")?;
         }
-        let _lock = process::Lock::acquire(options.timeout)?;
-        let mut results = Vec::new();
+        let _lock =
+            process::Lock::acquire(options.coordination_timeout.unwrap_or(options.timeout))?;
+        let session = process::Session::default();
         let total = targets.len();
+        let mut queues: [Vec<_>; 3] = std::array::from_fn(|_| Vec::new());
         for (index, target) in targets.into_iter().enumerate() {
-            if crate::runtime::cancelled() {
-                break;
-            }
-            if human {
-                writeln!(
-                    std::io::stderr(),
-                    "  [{}/{}] {} {}{}…",
-                    index + 1,
-                    total,
-                    if options.check {
-                        "Checking"
-                    } else if options.reuse_valid {
-                        "Preparing"
-                    } else {
-                        "Renewing"
-                    },
-                    target.display_name(),
-                    target
-                        .scope()
-                        .map(|scope| format!(" ({scope})"))
-                        .unwrap_or_default()
-                )
-                .map_err(|_| "Cannot display authentication progress")?;
-            }
-            let mut checked = providers::check(&target, options);
-            if human {
-                checked["display_name"] = json!(target.display_name());
-                checked["scope"] = json!(target.scope());
-            }
-            results.push(checked);
+            let provider = match &target {
+                config::Target::Bitbucket { .. } => 0,
+                config::Target::Twg {} => 1,
+                config::Target::Slauth { .. } => 2,
+            };
+            queues[provider].push((index, target));
         }
+        let mut indexed = std::thread::scope(|scope| -> Result<Vec<_>, String> {
+            let mut workers = Vec::new();
+            let mut failure = None;
+            for queue in queues.into_iter().filter(|queue| !queue.is_empty()) {
+                let session = &session;
+                let worker = std::thread::Builder::new().spawn_scoped(scope, move || {
+                    // Catch worker failures here so siblings stop before join waits.
+                    let work = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        let mut completed = Vec::new();
+                        for (index, target) in queue {
+                            if crate::runtime::cancelled() {
+                                break;
+                            }
+                            if human {
+                                session.message(&format!(
+                                    "  [{}/{}] {} {}{}…",
+                                    index + 1,
+                                    total,
+                                    if options.check {
+                                        "Checking"
+                                    } else if options.reuse_valid {
+                                        "Preparing"
+                                    } else {
+                                        "Renewing"
+                                    },
+                                    target.display_name(),
+                                    target
+                                        .scope()
+                                        .map(|s| format!(" ({s})"))
+                                        .unwrap_or_default()
+                                ))?;
+                            }
+                            let mut checked = providers::check(&target, options, session);
+                            if human {
+                                checked["display_name"] = json!(target.display_name());
+                                checked["scope"] = json!(target.scope());
+                            }
+                            completed.push((index, checked));
+                        }
+                        Ok::<_, String>(completed)
+                    }));
+                    match work {
+                        Ok(result) => result,
+                        Err(_) => {
+                            session.fail_cleanup();
+                            Err("Authentication worker failed; process cleanup is uncertain".into())
+                        }
+                    }
+                });
+                match worker {
+                    Ok(worker) => workers.push(worker),
+                    Err(_) => {
+                        session.fail_cleanup();
+                        failure = Some("Cannot start authentication worker".into());
+                        break;
+                    }
+                }
+            }
+            let mut completed = Vec::new();
+            // Always join every worker before releasing coordination or exec.
+            for worker in workers {
+                match worker.join() {
+                    Ok(Ok(results)) => completed.extend(results),
+                    Ok(Err(error)) => {
+                        failure = Some(error);
+                    }
+                    Err(_) => {
+                        session.fail_cleanup();
+                        failure = Some("Authentication worker failed".into());
+                    }
+                }
+            }
+            if session.cleanup_failed() {
+                return Err(
+                    "Cannot confirm authentication worker cleanup; command will not launch".into(),
+                );
+            }
+            if let Some(error) = failure {
+                return Err(error);
+            }
+            Ok(completed)
+        })?;
+        indexed.sort_by_key(|(index, _)| *index);
+        let mut results: Vec<_> = indexed.into_iter().map(|(_, value)| value).collect();
         // Earlier targets may age while a later MFA flow waits. Evaluate
         // readiness at handoff, not only when each individual check started.
         let now = std::time::SystemTime::now()
@@ -90,7 +152,7 @@ fn result(options: &Options, human: bool) -> Value {
     match execute() {
         Ok(value) => value,
         Err(reason) => {
-            json!({"schema_version":1,"operation":"auth.preflight","status":if crate::runtime::cancelled() {"interrupted"} else {"failed"},"error":reason})
+            json!({"schema_version":1,"operation":"auth.preflight","status":if crate::runtime::interrupted() {"interrupted"} else {"failed"},"error":reason})
         }
     }
 }
