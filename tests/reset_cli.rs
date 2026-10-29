@@ -1151,7 +1151,8 @@ fn output_failure_after_workers_start_cancels_their_process_groups() {
     let marker = f.temp.path().join("started");
     let escaped = f.temp.path().join("escaped");
     let release = f.temp.path().join("release-descendant");
-    let dir=f.shim(&format!("case \"$PWD\" in *zz-dirty) case \"$*\" in *status*) sleep 2;; esac;; esac\nfor arg in \"$@\"; do if [ \"$arg\" = fetch ]; then touch '{}'; (while [ ! -e '{}' ]; do sleep 0.05; done; touch '{}') & sleep 20; fi; done",marker.display(),release.display(),escaped.display()));
+    let stderr_closed = f.temp.path().join("stderr-closed");
+    let dir=f.shim(&format!("case \"$PWD\" in *zz-dirty) case \"$*\" in *status*) while [ ! -e '{}' ]; do sleep 0.05; done; sleep 2;; esac;; esac\nfor arg in \"$@\"; do if [ \"$arg\" = fetch ]; then touch '{}'; (while [ ! -e '{}' ]; do sleep 0.05; done; touch '{}') & sleep 20; fi; done",stderr_closed.display(),marker.display(),release.display(),escaped.display()));
     let mut cmd = f.cli(&f.workspace, &[]);
     f.with_shim(&mut cmd, &dir);
     let mut child = cmd
@@ -1159,8 +1160,17 @@ fn output_failure_after_workers_start_cancels_their_process_groups() {
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
+    struct Release(std::path::PathBuf);
+    impl Drop for Release {
+        fn drop(&mut self) {
+            let _ = fs::write(&self.0, "closed\n");
+        }
+    }
+    // A failed startup assertion must also release the waiting fixture process.
+    let _release_on_failure = Release(stderr_closed.clone());
     wait_marker(&marker);
     drop(child.stderr.take());
+    fs::write(stderr_closed, "closed\n").unwrap();
     let out = wait_child(child);
     assert_eq!(out.status.code(), Some(1));
     assert!(!escaped.exists());
@@ -1189,13 +1199,15 @@ fn public_diagnostics_escape_terminal_controls_and_closed_help_output_is_an_erro
     failure(&out, "corrupt");
     assert!(!text(&out).contains('\x1b'));
     assert!(text(&out).contains("\\u{1b}"));
-    let mut child = f
+    // Close the read end before spawning, so even a fast child must see EPIPE.
+    let (reader, writer) = std::io::pipe().unwrap();
+    drop(reader);
+    let child = f
         .cli(&f.repo, &[OsStr::new("--help")])
-        .stdout(Stdio::piped())
+        .stdout(writer)
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    drop(child.stdout.take());
     assert_eq!(wait_child(child).status.code(), Some(1));
 }
 
