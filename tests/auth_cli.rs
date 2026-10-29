@@ -21,6 +21,19 @@ impl Fixture {
             symlink(&script, root.path().join("bin").join(name)).unwrap();
         }
         let f = Self { root };
+        // Fresh executables can incur OS launch checks before the provider runs.
+        // Prepare them before testing provider deadlines or short credential TTLs.
+        let startup = f.command(&["--help"]).output().unwrap();
+        assert!(startup.status.success(), "{}", text(&startup));
+        f.state(json!({}));
+        let startup = Command::new(f.root.path().join("bin/bb"))
+            .args(["auth", "status"])
+            .env("AUTH_FIXTURE", f.root.path())
+            .env("PATH", "/usr/bin:/bin")
+            .output()
+            .unwrap();
+        assert!(startup.status.success(), "{}", text(&startup));
+        fs::remove_file(f.root.path().join("calls.jsonl")).unwrap();
         f.state(state);
         f
     }
