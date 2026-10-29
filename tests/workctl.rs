@@ -2666,27 +2666,45 @@ fn local_recovery_cleanup_scans_dependency_trees_twice_and_preserves_history() {
 
 #[test]
 fn local_recovery_cleanup_preserves_changes_created_while_saving_history() {
-    for (strict, existing) in [(false, false), (true, false), (false, true), (true, true)] {
-        for kind in [
-            "nested",
-            "bare",
-            "tracked",
-            "untracked",
-            "masked",
-            "operation",
-            "modules",
-            "registration",
-        ] {
-            let f = Fixture::new();
-            fs::write(f.repo.join(".git/info/exclude"), "ignored/\n").unwrap();
-            fs::create_dir(f.worktree.join("ignored")).unwrap();
-            let head = git(&f.worktree, &["rev-parse", "HEAD"]);
-            let recovery = format!("refs/workctl/cleanup/{head}");
-            if existing {
-                git(&f.repo, &["update-ref", &recovery, &head]);
-            }
-            let injected = f.temp.path().join("injected");
-            let shim = f.shim(r#"
+    assert_changes_preserved_during_recovery(false, false);
+}
+
+#[test]
+fn local_recovery_cleanup_preserves_changes_created_while_saving_history_strict() {
+    assert_changes_preserved_during_recovery(true, false);
+}
+
+#[test]
+fn local_recovery_cleanup_preserves_changes_created_while_saving_history_existing_pin() {
+    assert_changes_preserved_during_recovery(false, true);
+}
+
+#[test]
+fn local_recovery_cleanup_preserves_changes_created_while_saving_history_strict_existing_pin() {
+    assert_changes_preserved_during_recovery(true, true);
+}
+
+fn assert_changes_preserved_during_recovery(strict: bool, existing: bool) {
+    for kind in [
+        "nested",
+        "bare",
+        "tracked",
+        "untracked",
+        "masked",
+        "operation",
+        "modules",
+        "registration",
+    ] {
+        let f = Fixture::new();
+        fs::write(f.repo.join(".git/info/exclude"), "ignored/\n").unwrap();
+        fs::create_dir(f.worktree.join("ignored")).unwrap();
+        let head = git(&f.worktree, &["rev-parse", "HEAD"]);
+        let recovery = format!("refs/workctl/cleanup/{head}");
+        if existing {
+            git(&f.repo, &["update-ref", &recovery, &head]);
+        }
+        let injected = f.temp.path().join("injected");
+        let shim = f.shim(r#"
 trigger=0
 case " $* " in
   *' update-ref '*) [ "$PROBE_EXISTING" = false ] && trigger=1;;
@@ -2706,106 +2724,105 @@ if [ "$trigger" = 1 ] && [ ! -f "$PROBE_INJECTED" ]; then
   esac
 fi
 "#);
-            let real = Command::new("sh")
-                .args(["-c", "command -v git"])
-                .output()
-                .unwrap();
-            let mut command = Command::new(BIN);
-            env(&mut command);
-            command
-                .args(["git", "worktree", "clean", "--apply", "--json"])
-                .arg(&f.worktree)
-                .env("PROBE_KIND", kind)
-                .env("PROBE_EXISTING", existing.to_string())
-                .env("PROBE_RECOVERY", &recovery)
-                .env("PROBE_INJECTED", &injected)
-                .env("PROBE_WORKTREE", &f.worktree)
-                .env(
-                    "PROBE_GIT_DIR",
-                    git(&f.worktree, &["rev-parse", "--absolute-git-dir"]),
-                )
-                .env("REAL_GIT", String::from_utf8(real.stdout).unwrap().trim());
-            if strict {
-                command.args([
-                    "--strict",
-                    "--preserve-commits",
-                    f.worktree.to_str().unwrap(),
-                    "--discard-ignored",
-                    f.worktree.to_str().unwrap(),
-                ]);
-            }
-            with_shim(&mut command, &shim);
-            let out = command.output().unwrap();
-            assert!(
-                injected.exists(),
-                "mutation was not reached: {kind}, strict={strict}, existing={existing}: {}",
-                text(&out)
-            );
-            let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-            let protected = !strict && matches!(kind, "tracked" | "untracked" | "masked");
-            assert_eq!(
-                out.status.code(),
-                Some(if protected { 0 } else { 1 }),
-                "{kind}, strict={strict}, existing={existing}: {}",
-                text(&out)
-            );
-            assert_eq!(
-                result["summary"][if protected {
-                    "protected_worktrees"
-                } else {
-                    "blocked"
-                }],
-                1
-            );
-            assert_eq!(result["results"][0]["evidence"]["recovery_saved"], true);
-            assert_eq!(
-                result["summary"]["removed"],
-                0,
-                "{kind}, strict={strict}, existing={existing}: {}",
-                text(&out)
-            );
-            assert!(
-                text(&out).contains("recovery ref retained"),
-                "{kind}, strict={strict}, existing={existing}: {}",
-                text(&out)
-            );
-            f.unchanged();
-            assert_eq!(
-                git(
-                    &f.repo,
-                    &["rev-parse", &format!("refs/workctl/cleanup/{head}")]
-                ),
-                head
-            );
-            let preserved = match kind {
-                "nested" => "ignored/nested/.git/config",
-                "bare" => "ignored/bare/HEAD",
-                "untracked" => "new-work",
-                "modules" => {
-                    let own = git(&f.worktree, &["rev-parse", "--absolute-git-dir"]);
-                    assert_eq!(
-                        fs::read_to_string(Path::new(&own).join("modules/local/HEAD")).unwrap(),
-                        "precious"
-                    );
-                    continue;
-                }
-                "registration" => {
-                    assert!(git(&f.repo, &["worktree", "list", "--porcelain"]).contains("locked"));
-                    continue;
-                }
-                "operation" => {
-                    let own = git(&f.worktree, &["rev-parse", "--absolute-git-dir"]);
-                    assert!(Path::new(&own).join("index.lock").exists());
-                    continue;
-                }
-                _ => "file",
-            };
-            assert_eq!(
-                fs::read_to_string(f.worktree.join(preserved)).unwrap(),
-                "precious",
-                "{kind}"
-            );
+        let real = Command::new("sh")
+            .args(["-c", "command -v git"])
+            .output()
+            .unwrap();
+        let mut command = Command::new(BIN);
+        env(&mut command);
+        command
+            .args(["git", "worktree", "clean", "--apply", "--json"])
+            .arg(&f.worktree)
+            .env("PROBE_KIND", kind)
+            .env("PROBE_EXISTING", existing.to_string())
+            .env("PROBE_RECOVERY", &recovery)
+            .env("PROBE_INJECTED", &injected)
+            .env("PROBE_WORKTREE", &f.worktree)
+            .env(
+                "PROBE_GIT_DIR",
+                git(&f.worktree, &["rev-parse", "--absolute-git-dir"]),
+            )
+            .env("REAL_GIT", String::from_utf8(real.stdout).unwrap().trim());
+        if strict {
+            command.args([
+                "--strict",
+                "--preserve-commits",
+                f.worktree.to_str().unwrap(),
+                "--discard-ignored",
+                f.worktree.to_str().unwrap(),
+            ]);
         }
+        with_shim(&mut command, &shim);
+        let out = command.output().unwrap();
+        assert!(
+            injected.exists(),
+            "mutation was not reached: {kind}, strict={strict}, existing={existing}: {}",
+            text(&out)
+        );
+        let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        let protected = !strict && matches!(kind, "tracked" | "untracked" | "masked");
+        assert_eq!(
+            out.status.code(),
+            Some(if protected { 0 } else { 1 }),
+            "{kind}, strict={strict}, existing={existing}: {}",
+            text(&out)
+        );
+        assert_eq!(
+            result["summary"][if protected {
+                "protected_worktrees"
+            } else {
+                "blocked"
+            }],
+            1
+        );
+        assert_eq!(result["results"][0]["evidence"]["recovery_saved"], true);
+        assert_eq!(
+            result["summary"]["removed"],
+            0,
+            "{kind}, strict={strict}, existing={existing}: {}",
+            text(&out)
+        );
+        assert!(
+            text(&out).contains("recovery ref retained"),
+            "{kind}, strict={strict}, existing={existing}: {}",
+            text(&out)
+        );
+        f.unchanged();
+        assert_eq!(
+            git(
+                &f.repo,
+                &["rev-parse", &format!("refs/workctl/cleanup/{head}")]
+            ),
+            head
+        );
+        let preserved = match kind {
+            "nested" => "ignored/nested/.git/config",
+            "bare" => "ignored/bare/HEAD",
+            "untracked" => "new-work",
+            "modules" => {
+                let own = git(&f.worktree, &["rev-parse", "--absolute-git-dir"]);
+                assert_eq!(
+                    fs::read_to_string(Path::new(&own).join("modules/local/HEAD")).unwrap(),
+                    "precious"
+                );
+                continue;
+            }
+            "registration" => {
+                assert!(git(&f.repo, &["worktree", "list", "--porcelain"]).contains("locked"));
+                continue;
+            }
+            "operation" => {
+                let own = git(&f.worktree, &["rev-parse", "--absolute-git-dir"]);
+                assert!(Path::new(&own).join("index.lock").exists());
+                continue;
+            }
+            _ => "file",
+        };
+        assert_eq!(
+            fs::read_to_string(f.worktree.join(preserved)).unwrap(),
+            "precious",
+            "{kind}"
+        );
     }
 }
 
@@ -3323,6 +3340,114 @@ finally:
             }
         }
     }
+}
+
+#[test]
+fn post_removal_verification_waits_for_concurrent_native_removals() {
+    let f = Fixture::new();
+    let fast = f.temp.path().join("fast-worktree");
+    git(
+        &f.repo,
+        &["worktree", "add", "--detach", fast.to_str().unwrap()],
+    );
+    let state = f.temp.path().join("coordination");
+    fs::create_dir(&state).unwrap();
+    let release = state.join("release");
+    struct Release(PathBuf);
+    impl Drop for Release {
+        fn drop(&mut self) {
+            let _ = fs::write(&self.0, "release");
+        }
+    }
+    let _release = Release(release.clone());
+    let gate = f.temp.path().join("registration-gate.py");
+    fs::write(
+        &gate,
+        r#"import fcntl, json, os, pathlib, subprocess, sys, time
+root = pathlib.Path(os.environ['PROBE_STATE'])
+args = sys.argv[1:]
+def counter(delta):
+    with (root / 'counter').open('a+') as file:
+        fcntl.flock(file, fcntl.LOCK_EX)
+        file.seek(0); data = json.loads(file.read() or '{"active":0,"maximum":0}')
+        data['active'] += delta
+        data['maximum'] = max(data['maximum'], data['active'])
+        file.seek(0); file.truncate(); json.dump(data, file); file.flush()
+        return data
+if 'remove' not in args:
+    if (root / 'fast-finished').exists() and counter(0)['active']:
+        (root / 'verification-overlapped-removal').touch()
+    sys.exit(subprocess.run([os.environ['REAL_GIT']] + args).returncode)
+counter(1)
+(root / ('ready-' + str(os.getpid()))).touch()
+try:
+    deadline = time.monotonic() + 10
+    slow = pathlib.Path(args[-1]).resolve() == pathlib.Path(os.environ['PROBE_SLOW']).resolve()
+    if slow: (root / 'slow-started').touch()
+    while len(list(root.glob('ready-*'))) < 2 or (slow and not (root / 'release').exists()):
+        if time.monotonic() > deadline: sys.exit(74)
+        time.sleep(0.01)
+    result = subprocess.run([os.environ['REAL_GIT']] + args)
+    if not slow: (root / 'fast-finished').touch()
+    sys.exit(result.returncode)
+finally:
+    counter(-1)
+"#,
+    )
+    .unwrap();
+    let shim = f.shim("case \" $* \" in *' worktree remove '*|*' worktree list '*) exec python3 \"$PROBE_GATE\" \"$@\";; esac");
+    let real = Command::new("sh")
+        .args(["-c", "command -v git"])
+        .output()
+        .unwrap();
+    let mut cmd = Command::new(BIN);
+    env(&mut cmd);
+    with_shim(&mut cmd, &shim);
+    let child = cmd
+        .args([
+            "git",
+            "worktree",
+            "clean",
+            "--apply",
+            "--json",
+            "--jobs",
+            "2",
+            "--timeout",
+            "15",
+        ])
+        .arg(&f.repo)
+        .env("PROBE_STATE", &state)
+        .env("PROBE_GATE", &gate)
+        .env("PROBE_SLOW", &f.worktree)
+        .env("REAL_GIT", String::from_utf8_lossy(&real.stdout).trim())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    wait(&state.join("slow-started"));
+    wait(&state.join("fast-finished"));
+    assert!(
+        f.worktree.exists(),
+        "slow native removal must still be gated"
+    );
+    let overlap = state.join("verification-overlapped-removal");
+    let until = Instant::now() + Duration::from_secs(1);
+    while !overlap.exists() && Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    fs::write(&release, "release").unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(
+        !overlap.exists(),
+        "verification raced an active native removal"
+    );
+    let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(result["summary"]["removed"], 2);
+    assert!(!f.worktree.exists() && !fast.exists());
+    let count: serde_json::Value =
+        serde_json::from_slice(&fs::read(state.join("counter")).unwrap()).unwrap();
+    assert_eq!(count["maximum"], 2, "native removals must still overlap");
 }
 
 #[test]

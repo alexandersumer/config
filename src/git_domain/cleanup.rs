@@ -12,7 +12,7 @@ use std::os::unix::{ffi::OsStringExt, fs::MetadataExt, process::CommandExt};
 use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
-    Mutex,
+    Mutex, RwLock,
 };
 use std::time::{Duration, Instant};
 
@@ -325,6 +325,7 @@ pub(crate) fn worker(args: &[OsString]) -> u8 {
 struct Repository {
     lock: fs::File,
     recovery: Mutex<()>,
+    registrations: RwLock<()>,
 }
 #[derive(Default)]
 struct Timings {
@@ -359,6 +360,30 @@ struct Session<'a> {
     timings: &'a Timings,
 }
 impl Session<'_> {
+    fn coordinate<T>(
+        &self,
+        acquire: impl Fn() -> std::sync::TryLockResult<T>,
+    ) -> Result<T, String> {
+        loop {
+            if runtime::cancelled() {
+                return Err("Interrupted waiting for worktree registration coordination".into());
+            }
+            if Instant::now() >= self.deadline {
+                return Err(
+                    "Deadline exceeded waiting for worktree registration coordination".into(),
+                );
+            }
+            match acquire() {
+                Ok(guard) => return Ok(guard),
+                Err(std::sync::TryLockError::WouldBlock) => {
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                Err(std::sync::TryLockError::Poisoned(_)) => {
+                    return Err("worktree registration coordination failed".into());
+                }
+            }
+        }
+    }
     fn call(&self, path: &Path, args: &[&OsStr]) -> Result<Vec<u8>, String> {
         self.call_with_lock(path, args, false)
     }
@@ -1181,13 +1206,21 @@ fn execute(
         remove.push(path.as_os_str());
         let removal = {
             let _timing = PhaseTimer::new(&timings.removal);
-            session.call_with_lock(&candidate.primary, &remove, true)
-        };
-        let verification = git::exists(path).and_then(|exists| {
+            // Native removals may overlap. Git's worktree-list reader must not
+            // race another removal deleting the final .git/worktrees directory.
             session
-                .list(&candidate.primary)
-                .map(|registrations| !exists && !registrations.iter().any(|r| r.path == *path))
-        });
+                .coordinate(|| repository.registrations.try_read())
+                .and_then(|_guard| session.call_with_lock(&candidate.primary, &remove, true))
+        };
+        let verification = session
+            .coordinate(|| repository.registrations.try_write())
+            .and_then(|_guard| {
+                git::exists(path).and_then(|exists| {
+                    session.list(&candidate.primary).map(|registrations| {
+                        !exists && !registrations.iter().any(|r| r.path == *path)
+                    })
+                })
+            });
         let (status, reason) = match (removal, verification) {
             (Ok(_), Ok(true)) => return Ok(first),
             (Err(e), Ok(true)) => (
@@ -1395,6 +1428,7 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
                 lock::acquire(&candidate.common).map(|lock| Repository {
                     lock,
                     recovery: Mutex::new(()),
+                    registrations: RwLock::new(()),
                 })
             });
     }

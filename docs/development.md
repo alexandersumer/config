@@ -91,3 +91,53 @@ The executable-file check should print only:
 ```
 
 `.githooks/pre-commit` delegates to Rust and should contain no config-tool logic beyond `cargo run -- pre-commit`.
+
+### Parallel test execution
+
+`check`, `prepare`, and staged `pre-commit` build the complete test inventory with
+Cargo, then run the independent test executables concurrently. Full validation
+also runs doctests. The hosted Linux/macOS workflow uses the same runner with its
+existing explicit target list, plus a regression test for the runner itself:
+
+```sh
+cargo run --locked -- test-parallel --locked --lib --test reset_cli --test reset_e2e --test workctl --test auth_cli --test validation
+```
+
+Cargo remains responsible for compilation and dependency invalidation. No test
+results are cached, and no paths or branch names select which checks run. The
+staged snapshot and its Cargo target directory are still new for each invocation.
+Auth prompt-latency contracts run first without competing Git fixtures. The
+pre-commit integration suite then runs alone because it recursively validates
+snapshots. Remaining independent suites use at most two processes, with the long
+Git suites started first. The Cargo-building runner regression suite runs after
+the Git suites alongside doctests, so compiler startups cannot compete with
+their timing contracts. Every selected executable is awaited, including after an
+earlier phase or suite fails. Each suite is bounded by available CPUs. The
+desktop worker budget is eight, with at most four workers per suite; the heavy
+Git suites divide it when both are selected. Isolated hosted jobs explicitly use
+`--worker-budget 8`, retaining their original per-suite CPU concurrency. This
+changes scheduling only: every selected test still executes. An existing
+`RUST_TEST_THREADS` setting can lower each suite’s concurrency; malformed values
+fail validation.
+Large suite output goes to separate files to avoid pipe deadlocks and interleaved
+diagnostics; logs are replayed and failure logs remain under
+`target/validation-logs` while that checkout exists. Staged snapshot cleanup
+removes its temporary files after replaying the complete output. Hosted logs
+live in the existing runtime artifact directory, so timeout diagnostics can be uploaded by the always-run
+artifact step. Tests retain their existing assertions and time limits.
+
+Hosted jobs cache dependency build outputs by OS, architecture, exact Rust
+compiler identity, manifest, lockfile, and Cargo configuration. There are no
+fallback restore keys. Every non-registry package's outputs, including shared
+path dependencies, are deleted after restoration and before saving. A stale root
+executable cannot replace current-source validation. Cargo still checks dependency fingerprints. Cache misses and new
+lockfiles compile normally; all tests run on every invocation. Cache restoration,
+cleanup, and saving are included in the reported end-to-end hosted times.
+
+The hosted matrix separates auth, reset, and worktree contracts on both operating
+systems.
+Auth timing assertions therefore retain resource isolation while its tests overlap
+Git contracts on different runners. All six jobs must finish; queue time and
+artifacts from all groups are included in developer waiting time. This trades
+additional runner setup/build work for a shorter critical path. Dependency caches
+remain shared by compatible inputs, and each job rebuilds the package itself.
