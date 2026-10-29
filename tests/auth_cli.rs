@@ -40,20 +40,32 @@ fn provider_source() -> &'static str {
 // short credential lifetimes instead of the intended auth contracts.
 static FIXTURE_SLOTS: (std::sync::Mutex<usize>, std::sync::Condvar) =
     (std::sync::Mutex::new(0), std::sync::Condvar::new());
-struct FixtureSlot;
+thread_local! {
+    static OWNS_FIXTURE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+// Fixture groups belong to one test thread, including their slot accounting.
+struct FixtureSlot(std::marker::PhantomData<std::rc::Rc<()>>);
 impl FixtureSlot {
     fn acquire() -> Self {
+        OWNS_FIXTURE.with(|owned| {
+            assert!(
+                !owned.get(),
+                "drop the completed fixture before acquiring another fixture group"
+            )
+        });
         let (mutex, ready) = &FIXTURE_SLOTS;
         let mut active = mutex.lock().unwrap();
         while *active >= 4 {
             active = ready.wait(active).unwrap();
         }
         *active += 1;
-        Self
+        OWNS_FIXTURE.with(|owned| owned.set(true));
+        Self(std::marker::PhantomData)
     }
 }
 impl Drop for FixtureSlot {
     fn drop(&mut self) {
+        OWNS_FIXTURE.with(|owned| owned.set(false));
         let (mutex, ready) = &FIXTURE_SLOTS;
         *mutex.lock().unwrap() -= 1;
         ready.notify_one();
@@ -811,6 +823,7 @@ fn bitbucket_api_outage_and_inactive_named_account_do_not_launch_login() {
         .calls()
         .iter()
         .any(|c| c[1][1] == "login" || c[1][1] == "token"));
+    drop(f);
     let f = Fixture::new(json!({"bb_inactive":true,"bb_other_active":true}));
     let path = f.profile(json!([{"provider":"bitbucket","account":"office"}]));
     f.run(&["--config", &path], 1);
@@ -1169,6 +1182,7 @@ fn service_cache_cannot_substitute_a_different_audience_or_start_noninteractive_
         let r = f.run(&["--profile", profile], 1);
         assert_eq!(r["targets"][0]["status"], "failed");
         assert_eq!(f.calls().len(), 1);
+        drop(f);
         let f = Fixture::new(json!({"atlas_valid":false}));
         let r = f.run(&["--profile", profile, "--non-interactive"], 1);
         assert_eq!(r["targets"][0]["status"], "blocked");
@@ -1671,6 +1685,7 @@ fn included_profiles_add_requirements_deduplicate_and_validate_before_auth() {
     assert_eq!(r["targets"].as_array().unwrap().len(), 4);
     assert_eq!(r["targets"][3]["target"], "kerberos:default");
     assert_eq!(f.calls().iter().filter(|c| c[0] == "twg").count(), 2);
+    drop(f);
     let f = Fixture::new(json!({"kerberos_valid":false}));
     let r = f.run(
         &[
@@ -1683,6 +1698,7 @@ fn included_profiles_add_requirements_deduplicate_and_validate_before_auth() {
         1,
     );
     assert_eq!(r["targets"][3]["status"], "blocked");
+    drop(f);
     let f = Fixture::new(json!({}));
     f.run(
         &[
@@ -1740,6 +1756,7 @@ fn included_custom_profiles_preserve_scope_and_block_child_on_missing_runtime_au
     assert!(!marker.exists());
     assert!(f.calls().iter().all(|c| c[0] == "twg" || c[0] == "klist"));
     assert!(!text(&out).contains(SECRET));
+    drop(f);
     for principal in ["unqualified", "user@", "@REALM", "-user@REALM"] {
         let f = Fixture::new(json!({}));
         let config = f.profile(json!([{"provider":"kerberos","principal":principal}]));
@@ -1810,4 +1827,13 @@ fn twg_oauth_expiry_is_still_classified_as_auth_when_a_token_is_present() {
     let r = f.run(&["--profile", "twg", "--check"], 1);
     assert_eq!(r["targets"][0]["status"], "blocked");
     assert_eq!(f.calls().len(), 1);
+}
+
+#[test]
+fn fixture_groups_reject_nested_acquisition_without_leaking_slots() {
+    let first = FixtureSlot::acquire();
+    assert!(std::panic::catch_unwind(FixtureSlot::acquire).is_err());
+    drop(first);
+    // Rejection must neither poison the pool nor retain a slot.
+    let _next = FixtureSlot::acquire();
 }
