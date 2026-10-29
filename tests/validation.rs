@@ -1,0 +1,71 @@
+use std::fs;
+use std::process::Command;
+
+fn run(root: &std::path::Path, args: &[&str]) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_config-tools"))
+        .arg("test-parallel")
+        .args(args)
+        .current_dir(root)
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn parallel_validation_discovers_targets_joins_failures_and_runs_doctests() {
+    let fixture = tempfile::tempdir().unwrap();
+    let root = fixture.path();
+    fs::create_dir(root.join("src")).unwrap();
+    fs::create_dir(root.join("tests")).unwrap();
+    fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname = \"runner-fixture\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("src/lib.rs"),
+        "/// ```\n/// assert_eq!(1, 2);\n/// ```\npub fn value() {}\n",
+    )
+    .unwrap();
+    for name in ["alpha", "beta"] {
+        let other = if name == "alpha" { "beta" } else { "alpha" };
+        fs::write(
+            root.join(format!("tests/{name}.rs")),
+            format!(
+                r#"
+#[test]
+fn rendezvous() {{
+    std::fs::write("{name}.started", "yes").unwrap();
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !std::path::Path::new("{other}.started").exists() {{
+        assert!(std::time::Instant::now() < until, "suites did not overlap");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }}
+    println!("{{}}", "diagnostic".repeat(20000));
+    std::fs::write("{name}.finished", "yes").unwrap();
+    assert!("{name}" != "alpha", "representative integration regression");
+}}
+"#
+            ),
+        )
+        .unwrap();
+    }
+    let result = run(root, &[]);
+    assert!(!result.status.success());
+    let output = String::from_utf8_lossy(&result.stdout);
+    assert!(
+        output.contains("representative integration regression"),
+        "{output}"
+    );
+    assert!(output.contains("Doc-tests runner_fixture"), "{output}");
+    assert!(output.contains("diagnosticdiagnostic"));
+    assert!(root.join("alpha.finished").exists());
+    assert!(root.join("beta.finished").exists());
+
+    // Changing source after a successful build must not reuse a stale result or binary.
+    fs::write(root.join("src/lib.rs"), "invalid Rust\n").unwrap();
+    let result = run(root, &["--lib"]);
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("cargo test build failed"));
+    assert!(!run(root, &["--test", "absent"]).status.success());
+    assert!(!run(root, &["--", "rendezvous"]).status.success());
+}
