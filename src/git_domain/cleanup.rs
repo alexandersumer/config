@@ -12,7 +12,7 @@ use std::os::unix::{ffi::OsStringExt, fs::MetadataExt, process::CommandExt};
 use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
-    Mutex,
+    Mutex, RwLock,
 };
 use std::time::{Duration, Instant};
 
@@ -325,13 +325,32 @@ pub(crate) fn worker(args: &[OsString]) -> u8 {
 struct Repository {
     lock: fs::File,
     recovery: Mutex<()>,
+    registrations: RwLock<()>,
+    active_removals: AtomicUsize,
+    mutation_epoch: AtomicUsize,
 }
+struct RemovalActivity<'a>(&'a Repository);
+impl<'a> RemovalActivity<'a> {
+    fn new(repository: &'a Repository) -> Self {
+        repository.active_removals.fetch_add(1, Ordering::SeqCst);
+        repository.mutation_epoch.fetch_add(1, Ordering::SeqCst);
+        Self(repository)
+    }
+}
+impl Drop for RemovalActivity<'_> {
+    fn drop(&mut self) {
+        self.0.mutation_epoch.fetch_add(1, Ordering::SeqCst);
+        self.0.active_removals.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 #[derive(Default)]
 struct Timings {
     inspection: Cell<f64>,
     recovery: Cell<f64>,
     removal: Cell<f64>,
     inspections: Cell<usize>,
+    registration_revalidations: Cell<usize>,
 }
 struct PhaseTimer<'a> {
     started: Instant,
@@ -357,8 +376,33 @@ struct Session<'a> {
     lock_fd: i32,
     common: &'a Path,
     timings: &'a Timings,
+    repository: &'a Repository,
 }
 impl Session<'_> {
+    fn coordinate<T>(
+        &self,
+        acquire: impl Fn() -> std::sync::TryLockResult<T>,
+    ) -> Result<T, String> {
+        loop {
+            if runtime::cancelled() {
+                return Err("Interrupted waiting for worktree registration coordination".into());
+            }
+            if Instant::now() >= self.deadline {
+                return Err(
+                    "Deadline exceeded waiting for worktree registration coordination".into(),
+                );
+            }
+            match acquire() {
+                Ok(guard) => return Ok(guard),
+                Err(std::sync::TryLockError::WouldBlock) => {
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                Err(std::sync::TryLockError::Poisoned(_)) => {
+                    return Err("worktree registration coordination failed".into());
+                }
+            }
+        }
+    }
     fn call(&self, path: &Path, args: &[&OsStr]) -> Result<Vec<u8>, String> {
         self.call_with_lock(path, args, false)
     }
@@ -711,6 +755,50 @@ impl Session<'_> {
         Ok(())
     }
     fn local_state(
+        &self,
+        c: &Candidate,
+        discard: bool,
+        discard_ignored: bool,
+    ) -> Result<(Snapshot, PathBuf), String> {
+        let epoch = self.repository.mutation_epoch.load(Ordering::SeqCst);
+        let removing = self.repository.active_removals.load(Ordering::SeqCst) > 0;
+        match self.local_state_once(c, discard, discard_ignored) {
+            Err(error)
+                if error.starts_with("git worktree list --porcelain -z failed (exit 128):")
+                    && (error.contains("Invalid path")
+                        || (error.contains("failed to read .git/worktrees/")
+                            && error.contains("/commondir:")))
+                    && error.contains("No such file or directory")
+                    && (removing
+                        || self.repository.active_removals.load(Ordering::SeqCst) > 0
+                        || self.repository.mutation_epoch.load(Ordering::SeqCst) != epoch) =>
+            {
+                // Git can lose a sibling registration while enumerating it.
+                // Repeat the entire local-state check exactly once, with fresh
+                // ownership and data facts, after our own mutations are quiet.
+                self.timings
+                    .registration_revalidations
+                    .set(self.timings.registration_revalidations.get() + 1);
+                writeln!(
+                    std::io::stderr(),
+                    "Revalidating registration after an overlapping owned removal: {error}"
+                )
+                .map_err(|report| {
+                    format!("{error}; cannot report registration revalidation: {report}")
+                })?;
+                let _guard = self
+                    .coordinate(|| self.repository.registrations.try_write())
+                    .map_err(|wait| format!("{error}; cannot revalidate registration: {wait}"))?;
+                self.local_state_once(c, discard, discard_ignored)
+                    .map_err(|again| {
+                        format!("{again}; registration revalidation followed: {error}")
+                    })
+            }
+            result => result,
+        }
+    }
+
+    fn local_state_once(
         &self,
         c: &Candidate,
         discard: bool,
@@ -1083,6 +1171,7 @@ fn execute(
         lock_fd: repository.lock.as_raw_fd(),
         common: &candidate.common,
         timings,
+        repository,
     };
     let mut first = session.inspect(candidate, discard, discard_ignored)?;
     if !preserve_commits {
@@ -1181,13 +1270,24 @@ fn execute(
         remove.push(path.as_os_str());
         let removal = {
             let _timing = PhaseTimer::new(&timings.removal);
-            session.call_with_lock(&candidate.primary, &remove, true)
-        };
-        let verification = git::exists(path).and_then(|exists| {
+            // Native removals may overlap. Git's worktree-list reader must not
+            // race another removal deleting the final .git/worktrees directory.
             session
-                .list(&candidate.primary)
-                .map(|registrations| !exists && !registrations.iter().any(|r| r.path == *path))
-        });
+                .coordinate(|| repository.registrations.try_read())
+                .and_then(|_guard| {
+                    let _activity = RemovalActivity::new(repository);
+                    session.call_with_lock(&candidate.primary, &remove, true)
+                })
+        };
+        let verification = session
+            .coordinate(|| repository.registrations.try_write())
+            .and_then(|_guard| {
+                git::exists(path).and_then(|exists| {
+                    session.list(&candidate.primary).map(|registrations| {
+                        !exists && !registrations.iter().any(|r| r.path == *path)
+                    })
+                })
+            });
         let (status, reason) = match (removal, verification) {
             (Ok(_), Ok(true)) => return Ok(first),
             (Err(e), Ok(true)) => (
@@ -1395,6 +1495,9 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
                 lock::acquire(&candidate.common).map(|lock| Repository {
                     lock,
                     recovery: Mutex::new(()),
+                    registrations: RwLock::new(()),
+                    active_removals: AtomicUsize::new(0),
+                    mutation_epoch: AtomicUsize::new(0),
                 })
             });
     }
@@ -1427,6 +1530,7 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
                     };
                     let timing = serde_json::json!({"elapsed_seconds":started.elapsed().as_secs_f64(),
                         "inspection_seconds":timings.inspection.get(), "inspection_count":timings.inspections.get(),
+                        "registration_revalidations":timings.registration_revalidations.get(),
                         "recovery_seconds":timings.recovery.get(), "removal_seconds":timings.removal.get()});
                     if tx.send((index, action, timing)).is_err() { break }
                 }
