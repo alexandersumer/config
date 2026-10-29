@@ -38,7 +38,7 @@ fn config_root_from_home_agents() -> Result<Option<PathBuf>> {
 }
 
 fn discover_config_root_from_home(home: &Path) -> Result<Option<PathBuf>> {
-    let agents_link = home.join(".agents");
+    let agents_link = home.join(".agents/skills");
     let agents_dir = match agents_link.canonicalize() {
         Ok(path) => path,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -61,7 +61,7 @@ fn discover_config_root_from_home(home: &Path) -> Result<Option<PathBuf>> {
 }
 
 fn is_config_root(candidate: &Path) -> bool {
-    candidate.join(".agents/skills").is_dir() && candidate.join("Cargo.toml").is_file()
+    candidate.join("skills").is_dir() && candidate.join("Cargo.toml").is_file()
 }
 
 #[cfg(test)]
@@ -74,7 +74,7 @@ mod tests {
     fn discover_config_root_walks_up_from_nested_path() {
         let temp = tempfile::tempdir().expect("tempdir");
         let root = temp.path().join("config");
-        fs::create_dir_all(root.join(".agents/skills")).expect("agents skills");
+        fs::create_dir_all(root.join("skills")).expect("agents skills");
         fs::write(
             root.join("Cargo.toml"),
             "[package]\nname = \"config-tools\"\n",
@@ -95,14 +95,14 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let root = temp.path().join("config");
         let home = temp.path().join("home");
-        fs::create_dir_all(root.join(".agents/skills")).expect("agents skills");
-        fs::create_dir_all(&home).expect("home");
+        fs::create_dir_all(root.join("skills")).expect("agents skills");
+        fs::create_dir_all(home.join(".agents")).expect("home");
         fs::write(
             root.join("Cargo.toml"),
             "[package]\nname = \"config-tools\"\n",
         )
         .expect("cargo");
-        unix_fs::symlink(root.join(".agents"), home.join(".agents")).expect("agents link");
+        unix_fs::symlink(root.join("skills"), home.join(".agents/skills")).expect("agents link");
 
         assert_eq!(
             discover_config_root_from_home(&home).expect("fallback"),

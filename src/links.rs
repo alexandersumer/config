@@ -218,19 +218,19 @@ mod tests {
     #[test]
     fn symlink_source_counts_parent_components_for_nested_targets() {
         let config_root = Path::new("/config");
-        let source = Path::new("/config/.agents/skills");
+        let source = Path::new("/config/skills");
         let target = Path::new("/config/a/b/c/prompts");
 
         assert_eq!(
             symlink_source(source, target, config_root),
-            PathBuf::from("../../../.agents/skills")
+            PathBuf::from("../../../skills")
         );
     }
 
     #[test]
     fn symlink_source_preserves_absolute_path_outside_config_root() {
         let config_root = Path::new("/config");
-        let source = Path::new("/other/.agents/skills");
+        let source = Path::new("/other/skills");
         let target = Path::new("/config/generated/prompts");
 
         assert_eq!(symlink_source(source, target, config_root), source);

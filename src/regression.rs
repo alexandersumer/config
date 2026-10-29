@@ -67,7 +67,7 @@ pub(crate) fn run_regression_tests() -> Result<()> {
 
 fn test_new_skill_validate_flow() -> Result<()> {
     let fixture = copy_fixture()?;
-    let skill_dir = fixture.path().join(".agents/skills/real-e2e-fixture");
+    let skill_dir = fixture.path().join("skills/real-e2e-fixture");
     fs::create_dir(&skill_dir).map_err(|err| {
         format!(
             "{}: cannot create fixture skill directory: {err}",
@@ -89,7 +89,7 @@ fn test_new_skill_validate_flow() -> Result<()> {
 
 fn test_required_custom_skill_inventory_matches_current_skills() -> Result<()> {
     let config_root = config_root_from_exe()?;
-    let skills_root = config_root.join(".agents/skills");
+    let skills_root = config_root.join("skills");
     let mut actual = BTreeSet::new();
     for entry in fs::read_dir(&skills_root)
         .map_err(|err| format!("{}: cannot read skills: {err}", skills_root.display()))?
@@ -119,7 +119,7 @@ fn test_required_custom_skill_inventory_matches_current_skills() -> Result<()> {
         let missing_from_tree: Vec<&str> =
             expected.difference(&actual).map(String::as_str).collect();
         return Err(format!(
-            "required custom skill inventory drifted; missing from REQUIRED_CUSTOM_SKILL_NAMES: {:?}; missing from .agents/skills: {:?}",
+            "required custom skill inventory drifted; missing from REQUIRED_CUSTOM_SKILL_NAMES: {:?}; missing from skills: {:?}",
             missing_from_required, missing_from_tree
         ));
     }
@@ -129,7 +129,7 @@ fn test_required_custom_skill_inventory_matches_current_skills() -> Result<()> {
 
 fn test_one_clear_sentence_skill_rewrites_recent_context() -> Result<()> {
     let config_root = config_root_from_exe()?;
-    let skill_path = config_root.join(".agents/skills/one-clear-sentence/SKILL.md");
+    let skill_path = config_root.join("skills/one-clear-sentence/SKILL.md");
     let text = fs::read_to_string(&skill_path).map_err(|err| {
         format!(
             "{}: cannot read one-clear-sentence skill: {err}",
@@ -159,7 +159,7 @@ fn test_one_clear_sentence_skill_rewrites_recent_context() -> Result<()> {
 }
 
 fn test_clear_merge_blockers_ci_green_gate_helper() -> Result<()> {
-    let scripts_dir = config_root_from_exe()?.join(".agents/skills/clear-merge-blockers/scripts");
+    let scripts_dir = config_root_from_exe()?.join("skills/clear-merge-blockers/scripts");
     run_command(&scripts_dir, "python3", &["test_ci_green_gate.py"])
 }
 
@@ -223,10 +223,7 @@ fn test_mutating_skill_write_boundaries() -> Result<()> {
     ];
 
     for (skill_name, expected_fragments) in contracts {
-        let skill_path = config_root
-            .join(".agents/skills")
-            .join(skill_name)
-            .join("SKILL.md");
+        let skill_path = config_root.join("skills").join(skill_name).join("SKILL.md");
         let text = fs::read_to_string(&skill_path)
             .map_err(|err| format!("{}: cannot read skill: {err}", skill_path.display()))?;
         for expected in *expected_fragments {
@@ -244,7 +241,7 @@ fn test_mutating_skill_write_boundaries() -> Result<()> {
 
 fn test_deep_review_skills_require_portable_managed_reviewer_contract() -> Result<()> {
     let config_root = config_root_from_exe()?;
-    let skills_root = config_root.join(".agents/skills");
+    let skills_root = config_root.join("skills");
 
     for skill_name in [
         "architecture-review-deep",
@@ -337,7 +334,7 @@ fn test_deep_review_skills_require_portable_managed_reviewer_contract() -> Resul
 
 fn test_custom_skills_reject_accidental_environment_coupling() -> Result<()> {
     let config_root = config_root_from_exe()?;
-    let skills_root = config_root.join(".agents/skills");
+    let skills_root = config_root.join("skills");
     let mac_home = Regex::new(r"/Users/[A-Za-z0-9._-]+")
         .map_err(|err| format!("invalid macOS home-path regression regex: {err}"))?;
     let linux_home = Regex::new(r"/home/[A-Za-z0-9._-]+")
@@ -391,10 +388,7 @@ fn test_custom_skills_reject_accidental_environment_coupling() -> Result<()> {
 fn test_study_skills_resolve_portable_collection_roots() -> Result<()> {
     let config_root = config_root_from_exe()?;
     for skill_name in ["study-code-oss", "study-code-atlassian"] {
-        let skill_path = config_root
-            .join(".agents/skills")
-            .join(skill_name)
-            .join("SKILL.md");
+        let skill_path = config_root.join("skills").join(skill_name).join("SKILL.md");
         let text = fs::read_to_string(&skill_path)
             .map_err(|err| format!("{}: cannot read study skill: {err}", skill_path.display()))?;
 
@@ -423,7 +417,7 @@ fn test_study_skills_resolve_portable_collection_roots() -> Result<()> {
 
 pub(crate) fn test_install_command() -> Result<()> {
     let fixture = copy_fixture()?;
-    let hidden_skill_dir = fixture.path().join(".agents/skills/.system");
+    let hidden_skill_dir = fixture.path().join("skills/.system");
     fs::create_dir_all(&hidden_skill_dir).map_err(|err| {
         format!(
             "{}: cannot create hidden fixture skill: {err}",
@@ -432,7 +426,7 @@ pub(crate) fn test_install_command() -> Result<()> {
     })?;
     fs::write(hidden_skill_dir.join("SKILL.md"), "hidden fixture\n")
         .map_err(|err| format!("cannot write hidden fixture skill: {err}"))?;
-    let non_skill_dir = fixture.path().join(".agents/skills/not-a-skill");
+    let non_skill_dir = fixture.path().join("skills/not-a-skill");
     fs::create_dir(&non_skill_dir).map_err(|err| {
         format!(
             "{}: cannot create non-skill fixture directory: {err}",
@@ -489,6 +483,19 @@ pub(crate) fn test_install_command() -> Result<()> {
             codex_config.display()
         )
     })?;
+    #[cfg(unix)]
+    {
+        unix_fs::symlink(fixture.path().join(".agents"), home.path().join(".agents"))
+            .map_err(|err| err.to_string())?;
+        fs::create_dir_all(home.path().join(".claude/skills")).map_err(|err| err.to_string())?;
+        for consumer in [".codex/skills", ".claude/skills"] {
+            unix_fs::symlink(
+                fixture.path().join(".agents/skills/surgical-edit"),
+                home.path().join(consumer).join("surgical-edit"),
+            )
+            .map_err(|err| err.to_string())?;
+        }
+    }
     let stale_managed_skill = home.path().join(".codex/skills/review-code");
     let browser_skill_links = [
         ".codex/skills/chatgpt-browser-use",
@@ -502,7 +509,7 @@ pub(crate) fn test_install_command() -> Result<()> {
         fs::create_dir_all(target.parent().unwrap())
             .map_err(|err| format!("cannot create browser skill fixture directory: {err}"))?;
         let source = target.file_name().unwrap();
-        unix_fs::symlink(fixture.path().join(".agents/skills").join(source), &target)
+        unix_fs::symlink(fixture.path().join("skills").join(source), &target)
             .map_err(|err| format!("cannot create browser skill link fixture: {err}"))?;
     }
     let external_skill_dir = home.path().join("external-skill");
@@ -511,7 +518,7 @@ pub(crate) fn test_install_command() -> Result<()> {
     #[cfg(unix)]
     {
         unix_fs::symlink(
-            fixture.path().join(".agents/skills/review-code"),
+            fixture.path().join("skills/review-code"),
             &stale_managed_skill,
         )
         .map_err(|err| format!("cannot create stale managed skill symlink: {err}"))?;
@@ -593,20 +600,38 @@ pub(crate) fn test_install_command() -> Result<()> {
     }
 
     assert_symlink_resolves_to(
-        &home.path().join(".agents"),
-        &fixture.path().join(".agents"),
+        &home.path().join(".agents/skills"),
+        &fixture.path().join("skills"),
     )?;
-    assert_symlink_resolves_to(
-        &home.path().join(".codex/skills/surgical-edit"),
-        &fixture.path().join(".agents/skills/surgical-edit"),
-    )?;
-    assert_symlink_resolves_to(
-        &home.path().join(".codex/skills/browser-use"),
-        &fixture.path().join(".agents/skills/browser-use"),
-    )?;
+    if home
+        .path()
+        .join(".agents/skills/surgical-edit")
+        .canonicalize()
+        .map_err(|err| err.to_string())?
+        != fixture
+            .path()
+            .join("skills/surgical-edit")
+            .canonicalize()
+            .map_err(|err| err.to_string())?
+    {
+        return Err("personal skill does not resolve to canonical source".into());
+    }
+    if home
+        .path()
+        .join(".agents/skills/browser-use")
+        .canonicalize()
+        .map_err(|err| err.to_string())?
+        != fixture
+            .path()
+            .join("skills/browser-use")
+            .canonicalize()
+            .map_err(|err| err.to_string())?
+    {
+        return Err("personal skill does not resolve to canonical source".into());
+    }
     assert_symlink_resolves_to(
         &home.path().join(".claude/skills/browser-use"),
-        &fixture.path().join(".agents/skills/browser-use"),
+        &fixture.path().join("skills/browser-use"),
     )?;
     for link in browser_skill_links {
         let path = home.path().join(link);
@@ -616,17 +641,26 @@ pub(crate) fn test_install_command() -> Result<()> {
             ));
         }
     }
-    assert_symlink_resolves_to(
-        &home.path().join(".codex/skills/branch-description"),
-        &fixture.path().join(".agents/skills/branch-description"),
-    )?;
+    if home
+        .path()
+        .join(".agents/skills/branch-description")
+        .canonicalize()
+        .map_err(|err| err.to_string())?
+        != fixture
+            .path()
+            .join("skills/branch-description")
+            .canonicalize()
+            .map_err(|err| err.to_string())?
+    {
+        return Err("personal skill does not resolve to canonical source".into());
+    }
     assert_symlink_resolves_to(
         &home.path().join(".claude/skills/surgical-edit"),
-        &fixture.path().join(".agents/skills/surgical-edit"),
+        &fixture.path().join("skills/surgical-edit"),
     )?;
     assert_symlink_resolves_to(
         &home.path().join(".claude/skills/branch-description"),
-        &fixture.path().join(".agents/skills/branch-description"),
+        &fixture.path().join("skills/branch-description"),
     )?;
     assert_symlink_resolves_to(
         &home.path().join(".zshrc"),
@@ -703,6 +737,9 @@ pub(crate) fn test_install_command() -> Result<()> {
     if home.path().join(".codex/skills/not-a-skill").exists() {
         return Err("install linked a directory without SKILL.md as a Codex skill".to_string());
     }
+    if home.path().join(".codex/skills/surgical-edit").is_symlink() {
+        return Err("install left duplicate legacy Codex discovery".into());
+    }
     if stale_managed_skill.exists() || stale_managed_skill.is_symlink() {
         return Err("install left a stale managed Codex skill symlink behind".to_string());
     }
@@ -732,7 +769,7 @@ pub(crate) fn test_install_command() -> Result<()> {
     let removed_claude_skill = home.path().join(".claude/skills/removed-skill");
     #[cfg(unix)]
     unix_fs::symlink(
-        fixture.path().join(".agents/skills/removed-skill"),
+        fixture.path().join("skills/removed-skill"),
         &removed_claude_skill,
     )
     .map_err(|err| format!("cannot create removed managed Claude skill symlink: {err}"))?;
@@ -777,11 +814,8 @@ pub(crate) fn test_install_command() -> Result<()> {
 
     let removed_skill = home.path().join(".codex/skills/removed-skill");
     #[cfg(unix)]
-    unix_fs::symlink(
-        fixture.path().join(".agents/skills/removed-skill"),
-        &removed_skill,
-    )
-    .map_err(|err| format!("cannot create removed managed skill symlink: {err}"))?;
+    unix_fs::symlink(fixture.path().join("skills/removed-skill"), &removed_skill)
+        .map_err(|err| format!("cannot create removed managed skill symlink: {err}"))?;
     let stale_drift = check_codex_skills_command(&[
         "--config-root".to_string(),
         fixture.path().display().to_string(),
@@ -810,7 +844,7 @@ pub(crate) fn test_install_command() -> Result<()> {
         home.path().display().to_string(),
     ])?;
 
-    let missing_source_skill = fixture.path().join(".agents/skills/address-comments");
+    let missing_source_skill = fixture.path().join("skills/address-comments");
     fs::remove_dir_all(&missing_source_skill).map_err(|err| {
         format!(
             "{}: cannot remove required source skill fixture: {err}",
@@ -873,10 +907,8 @@ pub(crate) fn test_link_safety() -> Result<()> {
         .tempdir()
         .map_err(|err| format!("cannot create Codex conflict home: {err}"))?;
     create_codex_system_skills(codex_conflict_home.path())?;
-    let conflicting_skill = codex_conflict_home
-        .path()
-        .join(".codex/skills/surgical-edit");
-    fs::create_dir(&conflicting_skill).map_err(|err| {
+    let conflicting_skill = codex_conflict_home.path().join(".agents/skills");
+    fs::create_dir_all(&conflicting_skill).map_err(|err| {
         format!(
             "{}: cannot create conflicting Codex skill: {err}",
             conflicting_skill.display()
@@ -939,9 +971,9 @@ pub(crate) fn test_link_safety() -> Result<()> {
         .tempdir()
         .map_err(|err| format!("cannot create temp install home: {err}"))?;
     create_codex_system_skills(home.path())?;
-    fs::create_dir(home.path().join(".agents"))
+    fs::create_dir_all(home.path().join(".agents/skills"))
         .map_err(|err| format!("cannot create fixture .agents directory: {err}"))?;
-    fs::write(home.path().join(".agents/keep"), "do not delete")
+    fs::write(home.path().join(".agents/skills/keep"), "do not delete")
         .map_err(|err| format!("cannot write fixture .agents file: {err}"))?;
     let install_error = install_command(&[
         "--config-root".to_string(),
@@ -950,10 +982,10 @@ pub(crate) fn test_link_safety() -> Result<()> {
         home.path().display().to_string(),
     ])
     .expect_err("install should reject non-empty home .agents directories");
-    if !install_error.contains("not an empty directory") {
+    if !install_error.contains("expected Codex skill symlink") {
         return Err(format!("unexpected install error: {install_error}"));
     }
-    if !home.path().join(".agents/keep").is_file() {
+    if !home.path().join(".agents/skills/keep").is_file() {
         return Err("install removed data from non-empty home .agents directory".to_string());
     }
 
@@ -1482,10 +1514,7 @@ fn copy_fixture() -> Result<TempDir> {
         .prefix("tmp_config_skill_validation_")
         .tempdir()
         .map_err(|err| format!("cannot create temp fixture: {err}"))?;
-    copy_tree(
-        &config_root.join(".agents"),
-        &temp_dir.path().join(".agents"),
-    )?;
+    copy_tree(&config_root.join("skills"), &temp_dir.path().join("skills"))?;
     copy_tree(&config_root.join("zsh"), &temp_dir.path().join("zsh"))?;
     copy_tree(
         &config_root.join("ghostty"),
@@ -1598,7 +1627,7 @@ fn assert_mutation_fails(name: &str, mutate: Mutation) -> Result<()> {
 }
 
 fn first_skill_name(config_root: &Path) -> Result<String> {
-    for entry in fs::read_dir(config_root.join(".agents/skills"))
+    for entry in fs::read_dir(config_root.join("skills"))
         .map_err(|err| format!("cannot read fixture skills: {err}"))?
     {
         let entry = entry.map_err(|err| format!("cannot inspect fixture skill: {err}"))?;
@@ -1616,7 +1645,7 @@ fn first_skill_name(config_root: &Path) -> Result<String> {
 }
 
 fn mutate_missing_skill_file(config_root: &Path) -> Result<&'static str> {
-    for entry in fs::read_dir(config_root.join(".agents/skills"))
+    for entry in fs::read_dir(config_root.join("skills"))
         .map_err(|err| format!("cannot read fixture skills: {err}"))?
     {
         let entry = entry.map_err(|err| format!("cannot inspect fixture skill: {err}"))?;
@@ -1642,7 +1671,7 @@ fn mutate_missing_skill_file(config_root: &Path) -> Result<&'static str> {
 }
 
 fn mutate_missing_required_custom_skill(config_root: &Path) -> Result<&'static str> {
-    let skill_dir = config_root.join(".agents/skills/address-comments");
+    let skill_dir = config_root.join("skills/address-comments");
     fs::remove_dir_all(&skill_dir).map_err(|err| {
         format!(
             "{}: cannot remove required fixture skill directory: {err}",
@@ -1654,10 +1683,7 @@ fn mutate_missing_required_custom_skill(config_root: &Path) -> Result<&'static s
 
 fn mutate_front_matter_name_mismatch(config_root: &Path) -> Result<&'static str> {
     let name = first_skill_name(config_root)?;
-    let skill_path = config_root
-        .join(".agents/skills")
-        .join(&name)
-        .join("SKILL.md");
+    let skill_path = config_root.join("skills").join(&name).join("SKILL.md");
     let text = fs::read_to_string(&skill_path)
         .map_err(|err| format!("{}: cannot read fixture skill: {err}", skill_path.display()))?;
     fs::write(
@@ -1675,10 +1701,7 @@ fn mutate_front_matter_name_mismatch(config_root: &Path) -> Result<&'static str>
 
 fn mutate_front_matter_only_skill(config_root: &Path) -> Result<&'static str> {
     let name = first_skill_name(config_root)?;
-    let skill_path = config_root
-        .join(".agents/skills")
-        .join(&name)
-        .join("SKILL.md");
+    let skill_path = config_root.join("skills").join(&name).join("SKILL.md");
     let text = fs::read_to_string(&skill_path)
         .map_err(|err| format!("{}: cannot read fixture skill: {err}", skill_path.display()))?;
     let closing = text
@@ -1708,10 +1731,7 @@ fn mutate_front_matter_only_skill(config_root: &Path) -> Result<&'static str> {
 
 fn mutate_thin_skill_body(config_root: &Path) -> Result<&'static str> {
     let name = first_skill_name(config_root)?;
-    let skill_path = config_root
-        .join(".agents/skills")
-        .join(&name)
-        .join("SKILL.md");
+    let skill_path = config_root.join("skills").join(&name).join("SKILL.md");
     let text = fs::read_to_string(&skill_path)
         .map_err(|err| format!("{}: cannot read fixture skill: {err}", skill_path.display()))?;
     let closing = text
@@ -1745,10 +1765,7 @@ fn mutate_thin_skill_body(config_root: &Path) -> Result<&'static str> {
 
 fn mutate_placeholder_skill_body(config_root: &Path) -> Result<&'static str> {
     let name = first_skill_name(config_root)?;
-    let skill_path = config_root
-        .join(".agents/skills")
-        .join(&name)
-        .join("SKILL.md");
+    let skill_path = config_root.join("skills").join(&name).join("SKILL.md");
     let text = fs::read_to_string(&skill_path)
         .map_err(|err| format!("{}: cannot read fixture skill: {err}", skill_path.display()))?;
     let closing = text
@@ -1795,10 +1812,7 @@ fn mutate_narrow_proof_policy_guidance(config_root: &Path) -> Result<&'static st
 
 fn replace_first_skill_body(config_root: &Path, body: &str) -> Result<()> {
     let name = first_skill_name(config_root)?;
-    let skill_path = config_root
-        .join(".agents/skills")
-        .join(&name)
-        .join("SKILL.md");
+    let skill_path = config_root.join("skills").join(&name).join("SKILL.md");
     let text = fs::read_to_string(&skill_path)
         .map_err(|err| format!("{}: cannot read fixture skill: {err}", skill_path.display()))?;
     let closing = text

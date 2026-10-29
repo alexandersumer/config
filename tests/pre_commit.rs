@@ -15,11 +15,11 @@ fn run(command: &str, root: &Path) -> Output {
 fn pre_commit_checks_repository_without_requiring_home_installation() {
     let fixture = tempfile::tempdir().expect("fixture checkout");
     let root = fixture.path();
-    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join(".agents");
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("skills");
     for entry in walkdir::WalkDir::new(&source) {
         let entry = entry.expect("walk skills");
         let destination = root
-            .join(".agents")
+            .join("skills")
             .join(entry.path().strip_prefix(&source).unwrap());
         if entry.file_type().is_dir() {
             fs::create_dir_all(destination).expect("create skill directory");
@@ -50,7 +50,7 @@ fn pre_commit_checks_repository_without_requiring_home_installation() {
         String::from_utf8_lossy(&result.stderr)
     );
 
-    let skill = root.join(".agents/skills/surgical-edit/SKILL.md");
+    let skill = root.join("skills/surgical-edit/SKILL.md");
     let valid_skill = fs::read(&skill).expect("valid skill");
     fs::write(&skill, "invalid skill\n").expect("break skill");
     let result = run("pre-commit", root);
@@ -122,7 +122,7 @@ fn pre_commit_validates_index_and_preserves_local_changes() {
     git(root, &["add", "."]);
     let source_file = root.join("src/main.rs");
     fs::write(&source_file, "invalid unstaged Rust\n").unwrap();
-    let unrelated = root.join(".agents/skills/unrelated-local-skill");
+    let unrelated = root.join("skills/unrelated-local-skill");
     fs::create_dir_all(&unrelated).unwrap();
     fs::write(unrelated.join("SKILL.md"), "untracked work\n").unwrap();
     let result = run("pre-commit", root);
@@ -141,10 +141,10 @@ fn pre_commit_validates_index_and_preserves_local_changes() {
         "untracked work\n"
     );
 
-    let skill = root.join(".agents/skills/surgical-edit/SKILL.md");
+    let skill = root.join("skills/surgical-edit/SKILL.md");
     let valid = fs::read(&skill).unwrap();
     fs::write(&skill, "invalid staged skill\n").unwrap();
-    git(root, &["add", ".agents/skills/surgical-edit/SKILL.md"]);
+    git(root, &["add", "skills/surgical-edit/SKILL.md"]);
     fs::write(&skill, &valid).unwrap();
     let result = run("pre-commit", root);
     assert!(

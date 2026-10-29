@@ -699,13 +699,13 @@ fn deadline_and_cancellation_terminate_groups_without_retrying_cleanup() {
         let mut cmd = f.command(&["--apply", "--timeout", if cancel { "30" } else { "4" }]);
         cmd.arg(&f.worktree);
         with_shim(&mut cmd, &bin);
-        let execution = Instant::now();
         let child = cmd
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
         wait(&started);
+        let fetch_started = Instant::now();
         let mut concurrent = Command::new(BIN);
         env(&mut concurrent);
         let other = concurrent
@@ -715,6 +715,11 @@ fn deadline_and_cancellation_terminate_groups_without_retrying_cleanup() {
             .unwrap();
         assert_eq!(other.status.code(), Some(1));
         assert!(text(&other).contains("Repository is busy"));
+        let execution = if cancel {
+            Instant::now()
+        } else {
+            fetch_started
+        };
         if cancel {
             unsafe {
                 libc::kill(child.id() as i32, libc::SIGINT);

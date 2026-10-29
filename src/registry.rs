@@ -299,7 +299,7 @@ fn require_known_keys(mapping: &Mapping, allowed: &[&str], context: &str) -> Res
 }
 
 fn collect_skill_names(config_root: &Path) -> Result<HashSet<String>> {
-    let skills_root = config_root.join(".agents/skills");
+    let skills_root = config_root.join("skills");
     if !skills_root.is_dir() {
         return Err(format!(
             "{}: canonical skills directory does not exist",
@@ -403,6 +403,13 @@ pub(crate) fn required_custom_skill_names() -> &'static [&'static str] {
 }
 
 pub(crate) fn validate_registry(config_root: &Path) -> Vec<String> {
+    let legacy = config_root.join(".agents/skills");
+    if legacy.exists() || legacy.is_symlink() {
+        return vec![format!(
+            "{} creates duplicate repository discovery; canonical skills belong in skills/",
+            legacy.display()
+        )];
+    }
     match collect_skill_names(config_root) {
         Ok(_) => Vec::new(),
         Err(err) => vec![err],
@@ -412,6 +419,13 @@ pub(crate) fn validate_registry(config_root: &Path) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rejects_repository_discovery_alias() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join(".agents/skills")).unwrap();
+        assert!(validate_registry(root.path())[0].contains("duplicate repository discovery"));
+    }
 
     fn yaml_value(text: &str) -> Value {
         serde_yaml::from_str(text).expect("valid test YAML")
@@ -481,7 +495,7 @@ description: Apply a narrow requested code change.
 "#,
         );
         let metadata = value.as_mapping().expect("front matter mapping");
-        let path = Path::new(".agents/skills/surgical-edit/SKILL.md");
+        let path = Path::new("skills/surgical-edit/SKILL.md");
 
         assert!(validate_skill_body(path, metadata, "").is_err());
         assert!(validate_skill_body(path, metadata, "TODO").is_err());
@@ -500,7 +514,7 @@ description: Apply a narrow requested code change.
 "#,
         );
         let metadata = value.as_mapping().expect("front matter mapping");
-        let path = Path::new(".agents/skills/surgical-edit/SKILL.md");
+        let path = Path::new("skills/surgical-edit/SKILL.md");
         let body = r#"
 Read the relevant files before editing, then make the smallest correct change that matches the existing naming, layering, error handling, and tests.
 Do not add dependencies, abstractions, broad refactors, or explanatory comments unless the requested change requires them.
@@ -519,7 +533,7 @@ description: Apply a narrow requested code change.
 "#,
         );
         let metadata = value.as_mapping().expect("front matter mapping");
-        let path = Path::new(".agents/skills/surgical-edit/SKILL.md");
+        let path = Path::new("skills/surgical-edit/SKILL.md");
         let body = r#"
 ## Proof policy
 
@@ -541,7 +555,7 @@ description: Apply a narrow requested code change.
 "#,
         );
         let metadata = value.as_mapping().expect("front matter mapping");
-        let path = Path::new(".agents/skills/surgical-edit/SKILL.md");
+        let path = Path::new("skills/surgical-edit/SKILL.md");
         let tail = "Read the relevant files before editing. Make the smallest correct change that matches existing naming, layering, error handling, tests, and comment density. If the request remains ambiguous after reading context, ask one focused question and stop instead of guessing.";
 
         for (body, expected) in [

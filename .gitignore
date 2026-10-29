@@ -1,5 +1,5 @@
 .DS_Store
 target/
-.agents/skills/twg*/.twg-install.json
+skills/twg*/.twg-install.json
 
 __pycache__/

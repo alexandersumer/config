@@ -12,14 +12,11 @@ use std::process::Command;
 
 pub(crate) fn install_command(args: &[String]) -> Result<()> {
     let (config_root, home_dir) = parse_install_args(args)?;
-    let agents_dir = config_root.join(".agents");
-    let skills_dir = agents_dir.join("skills");
-    let global_agents_dir = home_dir.join(".agents");
+    let skills_dir = config_root.join("skills");
     let zsh_dir = config_root.join("zsh");
     let ghostty_dir = config_root.join("ghostty");
     let relay_dir = config_root.join("relay");
 
-    require_dir(&agents_dir, "config agents directory")?;
     require_dir(&skills_dir, "config skills directory")?;
     validate_config_skills(&config_root)?;
     require_dir(&zsh_dir, "config zsh directory")?;
@@ -41,12 +38,7 @@ pub(crate) fn install_command(args: &[String]) -> Result<()> {
         )
     })?;
 
-    link_path(
-        &agents_dir,
-        &global_agents_dir,
-        "global agents directory",
-        &config_root,
-    )?;
+    install_personal_skills(&config_root, &home_dir)?;
     link_path(
         &zsh_dir,
         &home_dir.join(".zsh"),
@@ -73,7 +65,10 @@ pub(crate) fn install_command(args: &[String]) -> Result<()> {
         &config_root,
     )?;
     cleanup_legacy_relay_config(&home_dir, &relay_dir.join("config.toml"))?;
-    apply_skill_links(codex_skill_plan)?;
+    apply_skill_links(SkillLinkPlan {
+        links: Vec::new(),
+        ..codex_skill_plan
+    })?;
     let claude_skills_dir = home_dir.join(".claude/skills");
     fs::create_dir_all(&claude_skills_dir).map_err(|err| {
         format!(
@@ -89,7 +84,7 @@ pub(crate) fn install_command(args: &[String]) -> Result<()> {
         "Done. Agent config is now managed from {}.",
         config_root.display()
     );
-    println!("~/.agents points at {}.", agents_dir.display());
+    println!("~/.agents/skills points at {}.", skills_dir.display());
     println!("Custom Codex skills point at {}.", skills_dir.display());
     println!(
         "Custom Claude Code skills point at {}.",
@@ -275,7 +270,7 @@ pub(crate) fn check_codex_skills_command(args: &[String]) -> Result<()> {
         output.push_str(&error);
     }
     output.push_str(
-        "\nRun `cargo run -- install` from the config checkout to converge ~/.codex/skills.",
+        "\nRun `cargo run -- install` from the config checkout to converge ~/.agents/skills.",
     );
     Err(output)
 }
@@ -312,10 +307,8 @@ fn codex_skill_installation_check(
     config_root: &Path,
     home_dir: &Path,
 ) -> Result<CodexSkillInstallationCheck> {
-    let agents_dir = config_root.join(".agents");
-    let skills_dir = agents_dir.join("skills");
+    let skills_dir = config_root.join("skills");
 
-    require_dir(&agents_dir, "config agents directory")?;
     require_dir(&skills_dir, "config skills directory")?;
     validate_config_skills(config_root)?;
     let codex_skill_plan = prepare_codex_skill_links(&skills_dir, home_dir)?;
@@ -354,10 +347,8 @@ fn claude_skill_installation_check(
     config_root: &Path,
     home_dir: &Path,
 ) -> Result<ClaudeSkillInstallationCheck> {
-    let agents_dir = config_root.join(".agents");
-    let skills_dir = agents_dir.join("skills");
+    let skills_dir = config_root.join("skills");
 
-    require_dir(&agents_dir, "config agents directory")?;
     require_dir(&skills_dir, "config skills directory")?;
     validate_config_skills(config_root)?;
     let claude_skill_plan = prepare_claude_skill_links(&skills_dir, home_dir)?;
@@ -370,8 +361,8 @@ fn managed_install_link_errors(config_root: &Path, home_dir: &Path) -> Result<Ve
     let managed_links = [
         ManagedLink {
             label: "global agents directory",
-            source: config_root.join(".agents"),
-            target: home_dir.join(".agents"),
+            source: config_root.join("skills"),
+            target: home_dir.join(".agents/skills"),
         },
         ManagedLink {
             label: "zsh config directory",
@@ -885,12 +876,80 @@ fn skill_allows_implicit_invocation(skill_dir: &Path) -> Result<bool> {
     })
 }
 
+fn legacy_agents_link(config_root: &Path, home_dir: &Path) -> Result<bool> {
+    let target = home_dir.join(".agents");
+    match fs::symlink_metadata(&target) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            let link = fs::read_link(&target).map_err(|err| err.to_string())?;
+            Ok(
+                normalize_existing_ancestor(&resolve_link_target(&target, &link)?)
+                    == normalize_existing_ancestor(&config_root.join(".agents")),
+            )
+        }
+        _ => Ok(false),
+    }
+}
+
+fn validate_personal_skills_target(skills_dir: &Path, home_dir: &Path) -> Result<()> {
+    let config_root = skills_dir.parent().unwrap();
+    if legacy_agents_link(config_root, home_dir)? {
+        return Ok(());
+    }
+    let agents = home_dir.join(".agents");
+    if agents.is_symlink() {
+        return Err(format!(
+            "{} is an unrelated symlink; preserve it and resolve the conflict before installing",
+            agents.display()
+        ));
+    }
+    let target = agents.join("skills");
+    if target.is_dir()
+        && !target.is_symlink()
+        && fs::read_dir(&target)
+            .map_err(|err| err.to_string())?
+            .next()
+            .is_none()
+    {
+        return Ok(());
+    }
+    verify_skill_target(skills_dir, &target, "Codex")
+}
+
+fn install_personal_skills(config_root: &Path, home_dir: &Path) -> Result<()> {
+    let agents = home_dir.join(".agents");
+    if legacy_agents_link(config_root, home_dir)? {
+        fs::remove_file(&agents).map_err(|err| err.to_string())?;
+    }
+    fs::create_dir_all(&agents).map_err(|err| err.to_string())?;
+    link_path(
+        &config_root.join("skills"),
+        &agents.join("skills"),
+        "personal skills",
+        config_root,
+    )
+}
+
 fn prepare_codex_skill_links(skills_dir: &Path, home_dir: &Path) -> Result<SkillLinkPlan> {
     let codex_skills_dir = home_dir.join(".codex/skills");
     let system_skills_dir = codex_skills_dir.join(".system");
     require_dir(&system_skills_dir, "Codex system skills directory")?;
     verify_codex_system_skills(&system_skills_dir)?;
-    prepare_skill_links(skills_dir, &codex_skills_dir, "Codex")
+    validate_personal_skills_target(skills_dir, home_dir)?;
+    let mut plan = SkillLinkPlan {
+        label: "Codex",
+        links: skill_links(skills_dir, &home_dir.join(".agents/skills"))?,
+        stale_managed_links: Vec::new(),
+    };
+    for root in [
+        skills_dir.to_path_buf(),
+        skills_dir.parent().unwrap().join(".agents/skills"),
+    ] {
+        plan.stale_managed_links
+            .extend(stale_managed_skill_links(&codex_skills_dir, &root, &[])?);
+    }
+    plan.stale_managed_links.sort();
+    plan.stale_managed_links.dedup();
+    Ok(plan)
 }
 
 fn prepare_claude_skill_links(skills_dir: &Path, home_dir: &Path) -> Result<SkillLinkPlan> {
@@ -904,9 +963,19 @@ fn prepare_skill_links(
     label: &'static str,
 ) -> Result<SkillLinkPlan> {
     let links = skill_links(skills_dir, target_skills_dir)?;
-    let stale_managed_links = stale_managed_skill_links(target_skills_dir, skills_dir, &links)?;
+    let mut stale_managed_links = stale_managed_skill_links(target_skills_dir, skills_dir, &links)?;
+    let legacy_root = skills_dir.parent().unwrap().join(".agents/skills");
+    stale_managed_links.extend(stale_managed_skill_links(
+        target_skills_dir,
+        &legacy_root,
+        &[],
+    )?);
+    stale_managed_links.sort();
+    stale_managed_links.dedup();
     for (source, target) in &links {
-        verify_skill_target(source, target, label)?;
+        if !stale_managed_links.contains(target) {
+            verify_skill_target(source, target, label)?;
+        }
     }
     Ok(SkillLinkPlan {
         label,
@@ -1044,17 +1113,32 @@ fn codex_prompt_input_errors(
     let mut text = String::new();
     collect_json_text_fields(&value, &mut text);
 
+    Ok(skill_inventory_errors(
+        &text,
+        cwd,
+        label,
+        expected_skill_names,
+    ))
+}
+
+fn skill_inventory_errors(
+    text: &str,
+    cwd: &Path,
+    label: &str,
+    expected_skill_names: &[String],
+) -> Vec<String> {
     let mut errors = Vec::new();
     for name in expected_skill_names {
         let needle = format!("- {name}:");
-        if !text.contains(&needle) {
+        let count = text.matches(&needle).count();
+        if count != 1 {
             errors.push(format!(
-                "codex debug prompt-input from {label} ({}) did not include managed skill {name:?}",
+                "codex debug prompt-input from {label} ({}) included managed skill {name:?} {count} times; expected exactly once",
                 cwd.display()
             ));
         }
     }
-    Ok(errors)
+    errors
 }
 
 fn collect_json_text_fields(value: &serde_json::Value, output: &mut String) {
@@ -1111,6 +1195,8 @@ fn skill_link_errors(plan: &SkillLinkPlan) -> Vec<String> {
     }
     for (source, target) in &plan.links {
         match fs::symlink_metadata(target) {
+            Ok(metadata)
+                if label == "Codex" && metadata.is_dir() && same_existing_path(source, target) => {}
             Ok(metadata) if metadata.file_type().is_symlink() => {
                 if let Err(err) = verify_skill_target(source, target, label) {
                     errors.push(err);
@@ -1423,9 +1509,25 @@ fn parse_home_arg(args: &[String]) -> Result<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::{remove_disallowed_codex_feature_flags, skill_allows_implicit_invocation};
+    use super::{
+        remove_disallowed_codex_feature_flags, skill_allows_implicit_invocation,
+        skill_inventory_errors,
+    };
     use std::fs;
+    use std::path::Path;
     use tempfile::tempdir;
+
+    #[test]
+    fn discovery_requires_exactly_one_entry_per_skill() {
+        let expected = vec!["one-clear-sentence".to_string()];
+        let check = |text| skill_inventory_errors(text, Path::new("/config"), "fixture", &expected);
+        assert!(check("- one-clear-sentence: rewrite").is_empty());
+        assert!(check("")[0].contains("0 times"));
+        assert!(
+            check("- one-clear-sentence: repo\n- one-clear-sentence: personal")[0]
+                .contains("2 times")
+        );
+    }
 
     #[test]
     fn codex_config_repair_removes_deprecated_and_disabled_feature_flags() {

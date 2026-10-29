@@ -51,8 +51,10 @@ See the [workctl guide](docs/workctl.md) for authentication, Git policies, and r
 
 ## Use custom skills
 
-Custom skills live in [`.agents/skills`](.agents/skills). Installation links the
-same source directories into `~/.codex/skills` and `~/.claude/skills`.
+Custom skills live in [`skills`](skills). Installation links the
+canonical directory at `~/.agents/skills` for Codex and individual skills into
+`~/.claude/skills`. The source lives outside repository discovery paths so each
+skill appears once, including when working in this checkout.
 The shared `browser-use` skill selects guidance for the host running the chat.
 
 In Codex, invoke a skill with a skill mention, for example:
