@@ -25,6 +25,7 @@ enum Probe {
     Valid(Evidence),
     Missing,
     MissingForAccount(String),
+    ManualToken(&'static str),
     Failed(&'static str),
 }
 fn command(program: &str, args: &[&str]) -> Command {
@@ -56,8 +57,11 @@ fn auth_error(output: &Output) -> bool {
         "{} {}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
-    )
-    .to_ascii_lowercase();
+    );
+    auth_error_text(&message)
+}
+fn auth_error_text(message: &str) -> bool {
+    let message = message.to_ascii_lowercase();
     [
         "auth_invalid",
         "invalid token",
@@ -179,7 +183,12 @@ fn twig_probe(ctx: &Context<'_>) -> Result<Probe, String> {
             account: None,
         }));
     }
-    if auth_error(&output)
+    // Doctor includes a separate Bitbucket result. Its token errors must not
+    // cause renewal of OAuth when the OAuth probe failed for another reason.
+    if value
+        .pointer("/data/connectivity/message")
+        .and_then(Value::as_str)
+        .is_some_and(auth_error_text)
         || value
             .pointer("/data/auth/resolved/tokenPresent")
             .and_then(Value::as_bool)
@@ -204,8 +213,8 @@ fn twg_bitbucket_probe(ctx: &Context<'_>) -> Result<Probe, String> {
         .and_then(Value::as_bool);
     Ok(match (status, ok, attempted) {
         (Some("valid"), Some(true), Some(true)) => Probe::Valid(Evidence { expires_at: None, account: None }),
-        (Some("missing"), Some(false), Some(_))
-        | (Some("invalid-or-expired"), Some(false), Some(true)) => Probe::Missing,
+        (Some("missing"), Some(false), Some(_)) => Probe::ManualToken("missing"),
+        (Some("invalid-or-expired"), Some(false), Some(true)) => Probe::ManualToken("invalid-or-expired"),
         (Some("forbidden"), Some(false), Some(true)) => Probe::Failed("TWG Bitbucket token lacks required scopes; verify permissions with twg doctor; refreshing OAuth cannot repair this"),
         _ => Probe::Failed("TWG Bitbucket connectivity check failed or returned an unsupported status; inspect twg doctor"),
     })
@@ -415,6 +424,18 @@ fn ready(target: &Target, evidence: Evidence, refreshed: bool) -> Value {
 fn blocked(target: &Target, reason: &str, action: &str) -> Value {
     json!({"target":target.label(),"status":"blocked","reason":reason,"action":action,"remaining_seconds":null})
 }
+fn manual_token_blocked(target: &Target, status: &str) -> Value {
+    let reason = if status == "missing" {
+        "TWG Bitbucket API token is not configured; native Bitbucket and TWG OAuth are separate credentials"
+    } else {
+        "TWG Bitbucket API token was rejected (invalid or expired); expiration alone is not established"
+    };
+    let mut result = blocked(target, reason,
+        "Run twg setup bitbucket --force in a terminal, then rerun preflight; enter the token directly in that terminal");
+    result["provider_status"] = json!(status);
+    result["note"] = json!("Manually managed token: checked, never automatically rotated. Renewing native Bitbucket or TWG OAuth does not replace it.");
+    result
+}
 fn refresh(
     target: &Target,
     ctx: &Context<'_>,
@@ -557,6 +578,7 @@ pub(crate) fn check(target: &Target, options: &Options, session: &process::Sessi
                 expires_at: Some(0),
                 account: Some(account),
             }),
+            Probe::ManualToken(status) => return Ok(manual_token_blocked(target, status)),
             Probe::Failed(reason) => return Err(reason.into()),
         };
         let action = match target {
@@ -612,6 +634,7 @@ pub(crate) fn check(target: &Target, options: &Options, session: &process::Sessi
                 },
                 action,
             )),
+            Probe::ManualToken(status) => Ok(manual_token_blocked(target, status)),
             Probe::Failed(reason) => Err(reason.into()),
         }
     };

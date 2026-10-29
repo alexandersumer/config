@@ -16,7 +16,7 @@ fn result(options: &Options, human: bool) -> Value {
             } else if options.reuse_valid {
                 "reuse valid credentials"
             } else {
-                "renew all credentials"
+                "renew supported credentials; check manual tokens"
             };
             writeln!(
                 std::io::stderr(),
@@ -62,7 +62,9 @@ fn result(options: &Options, human: bool) -> Value {
                                     "  [{}/{}] {} {}{}…",
                                     index + 1,
                                     total,
-                                    if options.check {
+                                    if options.check
+                                        || matches!(target, config::Target::TwgBitbucket {})
+                                    {
                                         "Checking"
                                     } else if options.reuse_valid {
                                         "Preparing"

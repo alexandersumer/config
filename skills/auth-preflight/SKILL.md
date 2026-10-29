@@ -37,9 +37,10 @@ services.
 | Explicitly renew | `workctl auth preflight --profile PROFILE --json` |
 
 Workctl owns checks, renewal, bounded retries, and verification. Read the exit
-status and structured outcome. For common code work, `code` requires native
-Bitbucket, TWG OAuth, and TWG Bitbucket independently. Use a single-client profile only when that is the actual
-task scope. For Nebulae/local runtime work, add `--include-profile runtime`; use a
+status and structured outcome. Choose profiles from the clients the task actually needs: `bitbucket` for native
+`bb`, `twg` for TWG OAuth, and `twg-bitbucket` for `twg bb`/`twg bitbucket`.
+Use `code` for work requiring all three; its aggregate failure does not make a
+healthy individual client unusable. For Nebulae/local runtime work, add `--include-profile runtime`; use a
 custom descriptor for an exact Kerberos principal or additional SLAuth audience.
 Resolve runtime signing keys, service/user-context tokens, source-access identity,
 browser and registry auth separately; the default profile does not prove them.
@@ -51,6 +52,16 @@ future access or permission for every operation.
 On failure, address the reported target and recovery action before rerunning.
 Do not automatically repeat preflight or fall through to direct provider renewal.
 A credential for a different client, identity, or audience is not equivalent.
+
+Report the exact failing target and observed status. `invalid-or-expired` does not
+prove expiration; an earlier chat's failure is not evidence of current failure.
+For Bitbucket work, a failed TWG token does not invalidate native `bb` OAuth.
+When native `bb` supports the required operation, verify and use it before a
+browser fallback. Discover supported commands with installed help; do not copy
+credentials between clients. Renew a failed native credential through workctl's
+supported flow and retry safely before treating browser access as necessary.
+Use the browser when the user requests it, the CLI lacks the required capability,
+or the relevant CLI path remains blocked after bounded recovery.
 
 ## Provider-specific fallback
 

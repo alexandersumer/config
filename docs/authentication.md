@@ -86,7 +86,11 @@ In particular:
 - TWG OAuth and TWG's Bitbucket API token are separate targets. `code` and `work`
   require both, so a valid native `bb` credential cannot hide a broken `twg bb`
   token. `twg doctor` must report both `status: valid` and `ok: true` for the token.
-  Missing/expired tokens block with `twg setup bitbucket --force`; scope denial,
+  Missing and rejected tokens block with `twg setup bitbucket --force`. Reports
+  preserve `provider_status` (`missing` or `invalid-or-expired`); rejection alone
+  does not prove expiration. Manual tokens are labeled as checks even in renewal
+  mode. OAuth failure classification uses only OAuth connectivity evidence, never
+  the separate Bitbucket error. Scope denial,
   connectivity errors, missing fields and contradictory statuses fail closed.
   Token setup requires a controlling terminal and secret entry, so workctl never
   launches it through its pipe-based supervisor. Enter the token directly in the

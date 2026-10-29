@@ -75,9 +75,17 @@ update, upkeep, forced refresh, connector auth, or other credential commands unl
 requested for setup/auth/repair or required by a specific companion skill.
 
 Bitbucket API tokens and Git SSH credentials are separate from TWG OAuth. Do not
-run `twg auth refresh` for a Bitbucket token failure. Use another available read-only
-source for the needed evidence before asking for credential repair. If access still
-blocks a required fact, name that fact and continue the work the available evidence supports.
+run `twg auth refresh` for a Bitbucket token failure. Report `invalid or expired`
+when that is the provider's evidence; do not assert expiration or reuse an earlier
+chat's auth failure as current evidence. For Bitbucket operations, try the native
+`bb` CLI before browser fallback when it supports the required operation. Native
+`bb` OAuth can remain healthy while TWG's API token fails. Use installed `bb` help
+for command shapes and the `auth-preflight` skill for that client's bounded
+recovery; a failed aggregate `code` profile does not invalidate its healthy targets.
+Use other available read-only sources for missing evidence. Browser fallback is
+appropriate when explicitly requested, the CLI lacks a required capability, or the
+relevant CLI path remains blocked after recovery. If access still blocks a required
+fact, name that fact and continue the work the available evidence supports.
 
 ## Sandboxed Pipeline Logs
 

@@ -1747,3 +1747,67 @@ fn included_custom_profiles_preserve_scope_and_block_child_on_missing_runtime_au
         assert!(f.calls().is_empty());
     }
 }
+
+#[test]
+fn twg_bitbucket_error_cannot_trigger_unrelated_oauth_renewal() {
+    for args in [vec!["--reuse-valid"], vec!["--check"]] {
+        let f = Fixture::new(json!({
+            "twg_valid": false,
+            "twg_token_present": true,
+            "twg_bb_response": {"attempted":true,"ok":false,
+                "status":"invalid-or-expired","message":"Bitbucket token has expired"}
+        }));
+        let mut command = f.command(&["auth", "preflight", "--profile", "twg", "--json"]);
+        let out = command.args(args).output().unwrap();
+        assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+        let r: Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(r["targets"][0]["status"], "failed");
+        assert_eq!(
+            f.calls().len(),
+            1,
+            "must not renew OAuth for a Bitbucket error"
+        );
+    }
+}
+
+#[test]
+fn manual_bitbucket_report_preserves_evidence_without_claiming_renewal() {
+    for (provider_status, attempted, reason) in [
+        ("missing", false, "not configured"),
+        ("invalid-or-expired", true, "rejected"),
+    ] {
+        let f = Fixture::new(json!({"twg_bb_response":{
+            "status":provider_status,"attempted":attempted,"ok":false,"message":SECRET
+        }}));
+        let r = f.run(&["--profile", "twg-bitbucket"], 1);
+        let target = &r["targets"][0];
+        assert_eq!(target["provider_status"], provider_status);
+        assert!(target["reason"].as_str().unwrap().contains(reason));
+        assert!(target["note"]
+            .as_str()
+            .unwrap()
+            .contains("never automatically rotated"));
+        let out = f
+            .command(&["auth", "preflight", "--profile", "twg-bitbucket"])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1));
+        let report = text(&out);
+        assert!(report.contains("Checking TWG Bitbucket"), "{report}");
+        assert!(!report.contains("Renewing TWG Bitbucket"), "{report}");
+        assert!(!report.contains("renew all credentials"), "{report}");
+        assert!(!report.contains(SECRET));
+        assert!(f.calls().iter().all(|c| c[1][0] == "doctor"));
+    }
+}
+
+#[test]
+fn twg_oauth_expiry_is_still_classified_as_auth_when_a_token_is_present() {
+    let f = Fixture::new(json!({
+        "twg_token_present": true,
+        "twg_connectivity_response": {"attempted":true,"ok":false,"message":"OAuth token has expired"}
+    }));
+    let r = f.run(&["--profile", "twg", "--check"], 1);
+    assert_eq!(r["targets"][0]["status"], "blocked");
+    assert_eq!(f.calls().len(), 1);
+}

@@ -143,8 +143,8 @@ elif name == 'twg':
     assert '--output-summary' in args and args[args.index('--output-summary') + 1] == 'none'
     assert os.environ['TWG_AGENT_DEFAULTS'] == '0'
     if args[0] == 'doctor':
-        print(json.dumps({'data': {'connectivity': {'ok': state.get('twg_valid', True)},
-                                 'auth': {'resolved': {'tokenPresent': state.get('twg_valid', True)}},
+        print(json.dumps({'data': {'connectivity': state.get('twg_connectivity_response', {'ok': state.get('twg_valid', True)}),
+                                 'auth': {'resolved': {'tokenPresent': state.get('twg_token_present', state.get('twg_valid', True))}},
                                  'bitbucket': state.get('twg_bb_response', {'attempted': True, 'ok': state.get('twg_bb_valid', True),
                                                'status': state.get('twg_bb_status', 'valid' if state.get('twg_bb_valid', True) else 'invalid-or-expired'),
                                                'username': 'fixture-user'})}}))
