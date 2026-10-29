@@ -3326,6 +3326,266 @@ finally:
 }
 
 #[test]
+fn inspection_revalidates_only_owned_registration_races_and_preserves_new_data() {
+    for mode in ["owned", "unknown", "idle", "repeated", "commondir"] {
+        let f = Fixture::new();
+        let fast = f.temp.path().join("zz-fast-worktree");
+        git(
+            &f.repo,
+            &["worktree", "add", "--detach", fast.to_str().unwrap()],
+        );
+        let state = f.temp.path().join("probe");
+        fs::create_dir(&state).unwrap();
+        struct Release(PathBuf);
+        impl Drop for Release {
+            fn drop(&mut self) {
+                let _ = fs::write(&self.0, "release");
+            }
+        }
+        let release = state.join("release");
+        let _guard = Release(release.clone());
+        let gate = f.temp.path().join("gate.py");
+        fs::write(&gate, r#"import os, pathlib, subprocess, sys, time
+root = pathlib.Path(os.environ['PROBE_STATE'])
+args = sys.argv[1:]; mode = os.environ['PROBE_MODE']
+def wait(name):
+    deadline = time.monotonic() + 10
+    while not (root / name).exists():
+        if time.monotonic() > deadline: sys.exit(74)
+        time.sleep(.01)
+is_fast = pathlib.Path.cwd().resolve() == pathlib.Path(os.environ['PROBE_FAST']).resolve()
+if 'remove' in args and pathlib.Path(args[-1]).resolve() == pathlib.Path(os.environ['PROBE_SLOW']).resolve():
+    (root / 'slow-started').touch(); wait('release')
+if is_fast and '--show-toplevel' in args:
+    count = root / 'top-count'
+    n = int(count.read_text()) + 1 if count.exists() else 1
+    count.write_text(str(n))
+    if mode != 'idle': wait('slow-started')
+    if mode != 'idle' or n >= 2: (root / 'inspect').touch()
+if 'worktree' in args and 'list' in args and (root / 'inspect').exists():
+    if mode == 'repeated' or not (root / 'injected').exists():
+        (root / 'injected').touch()
+        message = 'fatal: Invalid path \'missing-registration\': No such file or directory'
+        if mode == 'unknown': message = 'fatal: Permission denied'
+        if mode == 'commondir': message = 'fatal: failed to read .git/worktrees/sibling/commondir: No such file or directory'
+        print(message, file=sys.stderr); sys.exit(128)
+sys.exit(subprocess.run([os.environ['REAL_GIT']] + args).returncode)
+"#).unwrap();
+        let shim = f.shim(r#"
+case " $* " in
+  *' worktree remove '*)
+    for probe_target do :; done
+    if [ "$probe_target" = "$PROBE_SLOW" ]; then exec python3 "$PROBE_GATE" "$@"; fi ;;
+  *' --show-toplevel '*)
+    if [ "$PWD" = "$PROBE_FAST" ] && { [ "$PROBE_MODE" = idle ] || [ ! -e "$PROBE_STATE/inspect" ]; }; then
+      exec python3 "$PROBE_GATE" "$@"
+    fi ;;
+  *' worktree list '*)
+    if [ -e "$PROBE_STATE/inspect" ]; then exec python3 "$PROBE_GATE" "$@"; fi ;;
+esac
+"#);
+        let real = Command::new("sh")
+            .args(["-c", "command -v git"])
+            .output()
+            .unwrap();
+        let mut cmd = Command::new(BIN);
+        env(&mut cmd);
+        with_shim(&mut cmd, &shim);
+        let child = cmd
+            .args([
+                "git",
+                "worktree",
+                "clean",
+                "--apply",
+                "--json",
+                "--jobs",
+                "2",
+                "--timeout",
+                "15",
+            ])
+            .arg(if mode == "idle" { &fast } else { &f.repo })
+            .env("PROBE_STATE", &state)
+            .env("PROBE_GATE", &gate)
+            .env("PROBE_FAST", fast.canonicalize().unwrap())
+            .env("PROBE_SLOW", f.worktree.canonicalize().unwrap())
+            .env("PROBE_MODE", mode)
+            .env("REAL_GIT", String::from_utf8_lossy(&real.stdout).trim())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let injected = state.join("injected");
+        let until = Instant::now() + Duration::from_secs(10);
+        while !injected.exists() && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        if !injected.exists() {
+            // Preserve the ten-second assertion and reap the failed fixture,
+            // including its diagnostics, after releasing any owned native gate.
+            fs::write(&release, "release").unwrap();
+            let out = child.wait_with_output().unwrap();
+            panic!(
+                "registration fault did not start within ten seconds ({mode}): {}",
+                text(&out)
+            );
+        }
+        if mode == "owned" || mode == "commondir" {
+            fs::write(fast.join("file"), "precious\n").unwrap();
+        }
+        fs::write(&release, "release").unwrap();
+        let out = child.wait_with_output().unwrap();
+        let result: serde_json::Value = serde_json::from_slice(&out.stdout).expect(&text(&out));
+        let entry = result["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|v| v["path"].as_str() == fast.canonicalize().unwrap().to_str())
+            .unwrap();
+        let recovered = mode == "owned" || mode == "commondir";
+        assert_eq!(
+            out.status.success(),
+            recovered,
+            "mode={mode}: {}",
+            text(&out)
+        );
+        assert!(
+            fast.exists(),
+            "failed or newly dirty ownership must preserve worktree"
+        );
+        if recovered {
+            assert_eq!(entry["status"], "protected", "{}", text(&out));
+            assert_eq!(fs::read_to_string(fast.join("file")).unwrap(), "precious\n");
+        } else {
+            assert_eq!(entry["status"], "blocked", "{}", text(&out));
+        }
+        let expected = if recovered || mode == "repeated" {
+            1
+        } else {
+            0
+        };
+        assert_eq!(
+            entry["timing"]["registration_revalidations"],
+            expected,
+            "mode={mode}: {}",
+            text(&out)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&out.stderr).contains("Revalidating registration"),
+            expected == 1
+        );
+        assert_eq!(f.worktree.exists(), mode == "idle");
+    }
+}
+
+#[test]
+fn post_removal_verification_waits_for_concurrent_native_removals() {
+    let f = Fixture::new();
+    let fast = f.temp.path().join("fast-worktree");
+    git(
+        &f.repo,
+        &["worktree", "add", "--detach", fast.to_str().unwrap()],
+    );
+    let state = f.temp.path().join("coordination");
+    fs::create_dir(&state).unwrap();
+    let release = state.join("release");
+    struct Release(PathBuf);
+    impl Drop for Release {
+        fn drop(&mut self) {
+            let _ = fs::write(&self.0, "release");
+        }
+    }
+    let _release = Release(release.clone());
+    let gate = f.temp.path().join("registration-gate.py");
+    fs::write(
+        &gate,
+        r#"import fcntl, json, os, pathlib, subprocess, sys, time
+root = pathlib.Path(os.environ['PROBE_STATE'])
+args = sys.argv[1:]
+def counter(delta):
+    with (root / 'counter').open('a+') as file:
+        fcntl.flock(file, fcntl.LOCK_EX)
+        file.seek(0); data = json.loads(file.read() or '{"active":0,"maximum":0}')
+        data['active'] += delta
+        data['maximum'] = max(data['maximum'], data['active'])
+        file.seek(0); file.truncate(); json.dump(data, file); file.flush()
+        return data
+if 'remove' not in args:
+    if (root / 'fast-finished').exists() and counter(0)['active']:
+        (root / 'verification-overlapped-removal').touch()
+    sys.exit(subprocess.run([os.environ['REAL_GIT']] + args).returncode)
+counter(1)
+(root / ('ready-' + str(os.getpid()))).touch()
+try:
+    deadline = time.monotonic() + 10
+    slow = pathlib.Path(args[-1]).resolve() == pathlib.Path(os.environ['PROBE_SLOW']).resolve()
+    if slow: (root / 'slow-started').touch()
+    while len(list(root.glob('ready-*'))) < 2 or (slow and not (root / 'release').exists()):
+        if time.monotonic() > deadline: sys.exit(74)
+        time.sleep(0.01)
+    result = subprocess.run([os.environ['REAL_GIT']] + args)
+    if not slow: (root / 'fast-finished').touch()
+    sys.exit(result.returncode)
+finally:
+    counter(-1)
+"#,
+    )
+    .unwrap();
+    let shim = f.shim("case \" $* \" in *' worktree remove '*|*' worktree list '*) exec python3 \"$PROBE_GATE\" \"$@\";; esac");
+    let real = Command::new("sh")
+        .args(["-c", "command -v git"])
+        .output()
+        .unwrap();
+    let mut cmd = Command::new(BIN);
+    env(&mut cmd);
+    with_shim(&mut cmd, &shim);
+    let child = cmd
+        .args([
+            "git",
+            "worktree",
+            "clean",
+            "--apply",
+            "--json",
+            "--jobs",
+            "2",
+            "--timeout",
+            "15",
+        ])
+        .arg(&f.repo)
+        .env("PROBE_STATE", &state)
+        .env("PROBE_GATE", &gate)
+        .env("PROBE_SLOW", &f.worktree)
+        .env("REAL_GIT", String::from_utf8_lossy(&real.stdout).trim())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    wait(&state.join("slow-started"));
+    wait(&state.join("fast-finished"));
+    assert!(
+        f.worktree.exists(),
+        "slow native removal must still be gated"
+    );
+    let overlap = state.join("verification-overlapped-removal");
+    let until = Instant::now() + Duration::from_secs(1);
+    while !overlap.exists() && Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    fs::write(&release, "release").unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(
+        !overlap.exists(),
+        "verification raced an active native removal"
+    );
+    let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(result["summary"]["removed"], 2);
+    assert!(!f.worktree.exists() && !fast.exists());
+    let count: serde_json::Value =
+        serde_json::from_slice(&fs::read(state.join("counter")).unwrap()).unwrap();
+    assert_eq!(count["maximum"], 2, "native removals must still overlap");
+}
+
+#[test]
 fn parallel_cleanup_serializes_recovery_of_shared_heads() {
     let f = Fixture::new();
     for n in 0..7 {
