@@ -14,6 +14,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
+        suite: [reset, worktree, auth]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     env:
@@ -24,19 +25,42 @@ jobs:
           persist-credentials: false
       - name: Set up Rust
         run: rustup toolchain install stable --profile minimal
+      - name: Identify compiler cache compatibility
+        id: rust
+        shell: bash
+        run: |
+          compiler_fingerprint=$(rustc +stable -vV | shasum -a 256 | cut -d ' ' -f 1)
+          echo "fingerprint=$compiler_fingerprint" >> "$GITHUB_OUTPUT"
+      - name: Restore dependency build cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: target/debug
+          key: dependencies-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.fingerprint }}-${{ hashFiles('Cargo.toml', 'Cargo.lock', '.cargo/**') }}
+      - name: Discard local package outputs from any restored cache
+        shell: bash
+        run: cargo +stable metadata --locked --format-version 1 | RUSTUP_TOOLCHAIN=stable python3 .github/scripts/clean-local-builds.py
       - name: Install zsh for fresh-shell contracts
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.suite != 'auth'
         run: sudo apt-get update && sudo apt-get install -y zsh
       - name: Secure image-provided zsh completion directories
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.suite != 'auth'
         run: sudo chmod go-w /usr/share/zsh /usr/share/zsh/vendor-completions
       - name: Run real Git CLI regressions and protocol E2E
-        run: cargo +stable test --locked --lib --test reset_cli --test reset_e2e --test workctl --test auth_cli -- --nocapture
+        run: |
+          case '${{ matrix.suite }}' in
+            reset) cargo +stable run --locked -- test-parallel --worker-budget 8 --locked --lib --test reset_cli --test reset_e2e --test validation ;;
+            worktree) cargo +stable run --locked -- test-parallel --worker-budget 8 --locked --test workctl ;;
+            auth) cargo +stable run --locked -- test-parallel --worker-budget 8 --locked --test auth_cli ;;
+            *) echo 'Unknown contract suite' >&2; exit 1 ;;
+          esac
+      - name: Cache only external dependency build outputs
+        shell: bash
+        run: cargo +stable metadata --locked --format-version 1 | RUSTUP_TOOLCHAIN=stable python3 .github/scripts/clean-local-builds.py
       - name: Preserve runtime evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: reset-e2e-${{ matrix.os }}
+          name: reset-e2e-${{ matrix.os }}-${{ matrix.suite }}
           path: target/reset-e2e-artifacts/
           include-hidden-files: true
           if-no-files-found: warn

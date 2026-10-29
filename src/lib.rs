@@ -10,6 +10,7 @@ mod presentation;
 mod registry;
 mod regression;
 mod runtime;
+mod validation;
 mod workctl;
 pub fn run() -> std::process::ExitCode {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
