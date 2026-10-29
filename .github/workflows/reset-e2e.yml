@@ -24,6 +24,16 @@ jobs:
           persist-credentials: false
       - name: Set up Rust
         run: rustup toolchain install stable --profile minimal
+      - name: Identify compiler cache compatibility
+        id: rust
+        run: echo "fingerprint=$(rustc +stable -vV | shasum -a 256 | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+      - name: Restore dependency build cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: target/debug
+          key: dependencies-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.fingerprint }}-${{ hashFiles('Cargo.toml', 'Cargo.lock', '.cargo/**') }}
+      - name: Discard package outputs from any restored cache
+        run: cargo +stable clean --package config-tools
       - name: Install zsh for fresh-shell contracts
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y zsh
@@ -31,7 +41,9 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo chmod go-w /usr/share/zsh /usr/share/zsh/vendor-completions
       - name: Run real Git CLI regressions and protocol E2E
-        run: cargo +stable test --locked --lib --test reset_cli --test reset_e2e --test workctl --test auth_cli -- --nocapture
+        run: cargo +stable run --locked -- test-parallel --locked --lib --test reset_cli --test reset_e2e --test workctl --test auth_cli --test validation
+      - name: Cache only dependency build outputs
+        run: cargo +stable clean --package config-tools
       - name: Preserve runtime evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
