@@ -1265,6 +1265,63 @@ fn orphan_discovery_other_metadata_failures_are_not_silently_skipped() {
 }
 
 #[test]
+fn orphan_discovery_supports_native_gitfile_error_variants() {
+    for gitfile_error in [false, true] {
+        let f = Fixture::new();
+        let path = orphan(&f);
+        let marker = fs::read(path.join(".git")).unwrap();
+        let head = git(&f.repo, &["rev-parse", "HEAD"]);
+        let diagnostic = if gitfile_error {
+            format!(
+                "fatal: gitfile does not point to a valid repository: {}",
+                path.join(".git").display()
+            )
+        } else {
+            "fatal: not a git repository: (null)".to_owned()
+        };
+        let shim = f.shim(
+            r#"if [ "$PWD" = "$PROBE_ORPHAN" ]; then
+printf '%s\n' "$PROBE_DIAGNOSTIC" >&2
+exit 128
+fi"#,
+        );
+        for operation in [
+            vec!["git", "reset", "--list"],
+            vec!["git", "worktree", "clean", "--apply"],
+        ] {
+            let mut command = Command::new(BIN);
+            env(&mut command).args(operation).arg("--json");
+            command
+                .env("PROBE_ORPHAN", &path)
+                .env("PROBE_DIAGNOSTIC", &diagnostic)
+                .env(
+                    "PATH",
+                    format!("{}:{}", shim.display(), std::env::var("PATH").unwrap()),
+                );
+            let result = json_output(command.arg(f.temp.path()), 0);
+            assert_eq!(result["skipped"].as_array().unwrap().len(), 1);
+            assert_eq!(result["skipped"][0]["path"], path.to_str().unwrap());
+            if result["operation"] == "git.reset.inspect" {
+                assert_eq!(
+                    result["checkouts"],
+                    serde_json::json!([f.repo.canonicalize().unwrap()])
+                );
+                f.unchanged();
+            } else {
+                assert_eq!(result["summary"]["removed"], 1);
+                assert!(!f.worktree.exists());
+            }
+            assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), head);
+            assert_eq!(fs::read(path.join(".git")).unwrap(), marker);
+            assert_eq!(
+                fs::read_to_string(path.join("precious")).unwrap(),
+                "uncommitted work\n"
+            );
+        }
+    }
+}
+
+#[test]
 fn orphan_discovery_unrelated_git_failures_are_not_reclassified_as_skips() {
     let f = Fixture::new();
     let path = orphan(&f);

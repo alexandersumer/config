@@ -188,7 +188,8 @@ fn probe_repository(
         if let Some(marker) = marker {
             if let Some(target) = missing_gitdir(marker)? {
                 if code == 128
-                    && String::from_utf8_lossy(&err).contains("not a git repository")
+                    && (err.starts_with(b"fatal: not a git repository")
+                        || err.starts_with(b"fatal: gitfile does not point to a valid repository:"))
                     && !supervisor::cancelled()
                     && marker == path
                 {
