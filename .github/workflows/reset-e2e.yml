@@ -18,7 +18,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     env:
-      WORKCTL_STATE_DIR: ${{ runner.temp }}/workctl-state
       RUSTUP_TOOLCHAIN: stable
       RESET_E2E_ARTIFACT_DIR: ${{ github.workspace }}/target/reset-e2e-artifacts
     steps:
@@ -48,6 +47,8 @@ jobs:
         if: runner.os == 'Linux' && matrix.suite != 'auth'
         run: sudo chmod go-w /usr/share/zsh /usr/share/zsh/vendor-completions
       - name: Run real Git CLI regressions and protocol E2E
+        env:
+          WORKCTL_STATE_DIR: ${{ runner.temp }}/workctl-state
         run: |
           case '${{ matrix.suite }}' in
             reset) cargo +stable run --locked -- test-parallel --worker-budget 8 --locked --lib --test reset_cli --test reset_e2e --test validation ;;
