@@ -232,7 +232,7 @@ fn select(
         }
         protected.insert(primary.clone());
         for registration in registrations.into_iter().skip(1) {
-            if scope.excluded(&registration.path) {
+            if scope.protected_target(&registration.path) {
                 continue;
             }
             if skipped
@@ -1448,10 +1448,11 @@ fn next_step(
     path: &Path,
     status: &str,
     reason: Option<&str>,
-    discard: bool,
-    discard_ignored: bool,
+    approvals: (bool, bool),
+    exclusions: &BTreeSet<PathBuf>,
     json: bool,
 ) -> Option<serde_json::Value> {
+    let (discard, discard_ignored) = approvals;
     let local = reason.is_some_and(|reason| reason.starts_with("local data ("));
     let ignored = local && reason.is_some_and(|reason| reason.contains("--discard-ignored PATH"));
     let unpublished = reason.is_some_and(|reason| {
@@ -1469,11 +1470,17 @@ fn next_step(
         if json {
             command.push("--json".into());
         }
+        for excluded in exclusions {
+            command.extend(["--exclude".into(), excluded.as_os_str().to_owned()]);
+        }
         if args.strict {
             command.push("--strict".into());
         }
         if args.discard_operations {
             command.push("--discard-operations".into());
+        }
+        if let Some(age) = args.older_than {
+            command.extend(["--older-than".into(), format!("{}s", age.as_secs()).into()]);
         }
         if args
             .preserve_commits
@@ -1614,7 +1621,7 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
             return Err("--remove-orphans requires --discard-all-local: commit recovery is unavailable for missing registration metadata".into());
         }
         for path in selected.skipped.keys() {
-            if scope.excluded(path) {
+            if scope.protected_target(path) {
                 continue;
             }
             let metadata =
@@ -1796,7 +1803,7 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
     let mut results = Vec::new();
     let mut result_order = Vec::new();
     let next = AtomicUsize::new(0);
-    std::thread::scope(|scope| -> Result<(), String> {
+    std::thread::scope(|threads| -> Result<(), String> {
         let next = &next;
         let (tx, rx) = std::sync::mpsc::channel();
         for _ in 0..workers {
@@ -1806,7 +1813,7 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
             let discard = &discard;
             let discard_ignored = &discard_ignored;
             let preserve_commits = &preserve_commits;
-            scope.spawn(move || {
+            threads.spawn(move || {
                 loop {
                     let index = next.fetch_add(1, Ordering::Relaxed);
                     let Some(candidate) = selected.candidates.get(index) else { break };
@@ -1927,8 +1934,8 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
                     path,
                     status,
                     reason.as_deref(),
-                    discard.contains(path),
-                    discard_ignored.contains(path),
+                    (discard.contains(path), discard_ignored.contains(path)),
+                    &scope.exclusions,
                     json,
                 );
                 let mut detail = format!(

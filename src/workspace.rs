@@ -41,6 +41,13 @@ impl Resolved {
     pub fn excluded(&self, path: &Path) -> bool {
         self.exclusions.iter().any(|root| path.starts_with(root))
     }
+    pub fn protected_target(&self, path: &Path) -> bool {
+        self.excluded(path)
+            || self
+                .exclusions
+                .iter()
+                .any(|excluded| excluded.starts_with(path))
+    }
     pub fn evidence(&self) -> Value {
         let paths = |paths: Vec<&PathBuf>| {
             paths.into_iter().map(|p| json!({"path":p.to_string_lossy(),"path_bytes":crate::presentation::path_bytes(p)})).collect::<Vec<_>>()

@@ -2198,3 +2198,21 @@ fn reset_regression_shared_directories_protect_case_aliases() {
         );
     }
 }
+
+#[test]
+fn excluding_a_descendant_protects_the_entire_repository_from_reset() {
+    let f = Fixture::new();
+    let out = f
+        .cli(
+            &f.workspace,
+            &[OsStr::new("--exclude"), f.repo.join("file").as_os_str()],
+        )
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.old);
+    assert_eq!(
+        fs::read_to_string(f.repo.join("file")).unwrap(),
+        "initial\n"
+    );
+}

@@ -4322,6 +4322,40 @@ fn bulk_age_selection_excludes_young_and_excluded_dirty_worktrees() {
     );
     assert!(f.worktree.exists());
     assert!(run(true, true)["results"].as_array().unwrap().is_empty());
+    // Replaying the suggested command must keep the age predicate if this
+    // pathname becomes a newly created, otherwise valid worktree directory.
+    let saved = f.temp.path().join("selected-original");
+    fs::rename(&f.worktree, &saved).unwrap();
+    fs::create_dir(&f.worktree).unwrap();
+    fs::copy(saved.join(".git"), f.worktree.join(".git")).unwrap();
+    fs::copy(saved.join("file"), f.worktree.join("file")).unwrap();
+    fs::write(f.worktree.join("precious"), "young replacement").unwrap();
+    let next_bin = f.temp.path().join("next-bin");
+    fs::create_dir(&next_bin).unwrap();
+    symlink(BIN, next_bin.join("workctl")).unwrap();
+    let replay = env(&mut Command::new("bash"))
+        .args([
+            "-c",
+            preview["results"][0]["next_step"]["command"]
+                .as_str()
+                .unwrap(),
+        ])
+        .env(
+            "PATH",
+            format!("{}:{}", next_bin.display(), std::env::var("PATH").unwrap()),
+        )
+        .env("WORKCTL_STATE_DIR", f.temp.path().join("history"))
+        .output()
+        .unwrap();
+    assert_eq!(replay.status.code(), Some(1), "{}", text(&replay));
+    assert_eq!(
+        fs::read_to_string(f.worktree.join("precious")).unwrap(),
+        "young replacement"
+    );
+    let replacement = f.temp.path().join("young-replacement");
+    fs::rename(&f.worktree, &replacement).unwrap();
+    fs::remove_file(replacement.join(".git")).unwrap();
+    fs::rename(saved, &f.worktree).unwrap();
     let applied = run(true, false);
     assert_eq!(applied["results"][0]["status"], "removed");
     assert!(!f.worktree.exists());
@@ -4629,29 +4663,35 @@ fn doctor_managed_and_profile_checks_are_diagnostic_only() {
 
 #[test]
 fn bulk_exclusions_are_applied_before_discard_authority() {
-    let f = Fixture::new();
-    fs::write(f.worktree.join("file"), "excluded tracked work").unwrap();
-    let out = env(&mut Command::new(BIN))
-        .args([
-            "git",
-            "worktree",
-            "clean",
-            "--json",
-            "--apply",
-            "--discard-all-local",
-            "--exclude",
-        ])
-        .arg(&f.worktree)
-        .arg(&f.repo)
-        .output()
-        .unwrap();
-    assert!(out.status.success(), "{}", text(&out));
-    let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(result["results"], serde_json::json!([]));
-    assert_eq!(
-        fs::read_to_string(f.worktree.join("file")).unwrap(),
-        "excluded tracked work"
-    );
+    for descendant in [false, true] {
+        let f = Fixture::new();
+        fs::write(f.worktree.join("file"), "excluded tracked work").unwrap();
+        let out = env(&mut Command::new(BIN))
+            .args([
+                "git",
+                "worktree",
+                "clean",
+                "--json",
+                "--apply",
+                "--discard-all-local",
+                "--exclude",
+            ])
+            .arg(if descendant {
+                f.worktree.join("file")
+            } else {
+                f.worktree.clone()
+            })
+            .arg(&f.repo)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", text(&out));
+        let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(result["results"], serde_json::json!([]));
+        assert_eq!(
+            fs::read_to_string(f.worktree.join("file")).unwrap(),
+            "excluded tracked work"
+        );
+    }
 }
 
 #[test]
@@ -5105,4 +5145,55 @@ fn empty_rebase_commit_metadata_blocks_both_discard_options() {
     assert!(text(&out).contains("empty operation commit metadata"));
     f.unchanged();
     assert!(git(&f.repo, &["for-each-ref", "refs/workctl/cleanup/"]).is_empty());
+}
+
+#[test]
+fn cleanup_next_step_keeps_exclusions_when_the_selected_path_becomes_an_alias() {
+    let f = Fixture::new();
+    let keep = f.temp.path().join("keep");
+    git(
+        &f.repo,
+        &["worktree", "add", "--detach", keep.to_str().unwrap()],
+    );
+    fs::write(keep.join("file"), "excluded work").unwrap();
+    let preview = env(&mut Command::new(BIN))
+        .args([
+            "git",
+            "worktree",
+            "clean",
+            "--json",
+            "--discard-all-local",
+            "--exclude",
+        ])
+        .arg(&keep)
+        .arg(&f.repo)
+        .output()
+        .unwrap();
+    assert!(preview.status.success(), "{}", text(&preview));
+    let preview: serde_json::Value = serde_json::from_slice(&preview.stdout).unwrap();
+    assert_eq!(preview["results"].as_array().unwrap().len(), 1);
+    fs::rename(&f.worktree, f.temp.path().join("saved-selected")).unwrap();
+    symlink(&keep, &f.worktree).unwrap();
+    let bin = f.temp.path().join("next-bin");
+    fs::create_dir(&bin).unwrap();
+    symlink(BIN, bin.join("workctl")).unwrap();
+    let out = env(&mut Command::new("bash"))
+        .args([
+            "-c",
+            preview["results"][0]["next_step"]["command"]
+                .as_str()
+                .unwrap(),
+        ])
+        .env(
+            "PATH",
+            format!("{}:{}", bin.display(), std::env::var("PATH").unwrap()),
+        )
+        .env("WORKCTL_STATE_DIR", f.temp.path().join("history"))
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+    assert_eq!(
+        fs::read_to_string(keep.join("file")).unwrap(),
+        "excluded work"
+    );
 }

@@ -259,7 +259,9 @@ not inactivity. Apply discovers the selection again; preview grants no continuin
 
 `--discard-all-local` authorizes tracked, untracked, and ignored file loss only for
 selected linked worktrees. `--exclude PATH` excludes the path and descendants before
-inspection or mutation. Exclusions must resolve to existing paths. The primary checkout
+inspection or mutation. Excluding a descendant protects its entire worktree or repository
+from removal or reset. Suggested apply commands retain these exclusions and age limits.
+Exclusions must resolve to existing paths. The primary checkout
 remains protected. Existing `--discard-local PATH` retains its exact-path meaning.
 
 For reusable roots, create `~/.config/workctl/workspaces.json` (or select an explicit

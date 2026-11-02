@@ -153,7 +153,9 @@ pub(crate) fn run(mut cli: ResetArgs, json: bool) -> u8 {
     };
     let started = std::time::Instant::now();
     match discover::select(&options.paths, &resolved.exclusions).and_then(|mut selection| {
-        selection.repos.retain(|r| !resolved.excluded(&r.path));
+        selection
+            .repos
+            .retain(|r| !resolved.protected_target(&r.path));
         selection.excluded.retain(|p| !resolved.excluded(p));
         selection.skipped.retain(|p, _| !resolved.excluded(p));
         discover::report_skipped(&selection.skipped)?;
