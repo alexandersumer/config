@@ -820,11 +820,12 @@ fn unavailable_remote_keeps_batch_failure_and_provides_scoped_recovery() {
         assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.old);
         assert!(!f.repo.join(".git/FETCH_HEAD").exists());
         assert_eq!(git(&healthy, &["rev-parse", "HEAD"]), f.new);
-        let checked = env(Command::new("sh").current_dir(f.temp.path()))
+        let checked = env(Command::new("bash").current_dir(f.temp.path()))
             .args(["-c", check])
             .output()
             .unwrap();
         assert!(!checked.status.success());
+        assert!(text(&checked).contains(origin_arg(&missing)));
         assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.old);
         git(
             &f.repo,
@@ -833,7 +834,7 @@ fn unavailable_remote_keeps_batch_failure_and_provides_scoped_recovery() {
         let bin = f.temp.path().join("retry-bin");
         fs::create_dir(&bin).unwrap();
         symlink(BIN, bin.join("workctl")).unwrap();
-        let retried = env(Command::new("sh").current_dir(f.temp.path()))
+        let retried = env(Command::new("bash").current_dir(f.temp.path()))
             .args(["-c", retry])
             .env(
                 "PATH",
