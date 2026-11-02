@@ -76,7 +76,7 @@ fn retryable(text: &str) -> bool {
     static TRANSIENT: OnceLock<Regex> = OnceLock::new();
     let permanent = PERMANENT.get_or_init(|| Regex::new(r"(?i)Permission denied|Access denied|Forbidden|Authentication failed|could not read Username|Host key verification failed|You may not have access to this repository|refusing|would be overwritten|Git operation in progress|cannot lock|Repository is busy").unwrap());
     let transient = TRANSIENT.get_or_init(|| Regex::new(r"(?i)Could not resolve|Connection (?:timed out|reset|refused|closed)|Operation timed out|early EOF|unexpected disconnect|remote end hung up|TLS connection was non-properly terminated|(?:HTTP/[\d.]+\s+|returned error:?\s*)(?:5\d\d|429)\b|Failed to connect|Couldn't connect|kex_exchange_identification").unwrap());
-    !permanent.is_match(text) && transient.is_match(text)
+    !super::git::remote_access_error(text) && !permanent.is_match(text) && transient.is_match(text)
 }
 
 #[derive(Default)]
@@ -409,7 +409,10 @@ fn run_inner(options: &Options, selection: Selection, started: Instant) -> Resul
     };
     let retain = code != 0 || options.keep_logs;
     // Successful-run results never refer to diagnostics that have been deleted.
-    let result:Vec<_>=records.iter().map(|r|serde_json::json!({"path":r.path.to_string_lossy(),"path_bytes":crate::presentation::path_bytes(&r.path),"code":r.code,"status":if r.code==0 {"succeeded"}else if r.code==130 {"cancelled"}else{"failed"},"attempts":r.attempts,"seconds":r.seconds,"log":if retain {Some(r.log.to_string_lossy())}else{None},"detail":r.detail,"target":r.target,"backups":r.backups})).collect();
+    let result:Vec<_>=records.iter().map(|r| {
+        let next_step = if r.code != 0 { output::remote_access_guidance(&r.path,&r.detail,&options.remote,options.branch.as_deref()) } else { None };
+        serde_json::json!({"path":r.path.to_string_lossy(),"path_bytes":crate::presentation::path_bytes(&r.path),"code":r.code,"status":if r.code==0 {"succeeded"}else if r.code==130 {"cancelled"}else{"failed"},"attempts":r.attempts,"seconds":r.seconds,"log":if retain {Some(r.log.to_string_lossy())}else{None},"detail":r.detail,"target":r.target,"backups":r.backups,"failure_kind":if next_step.is_some(){Some("remote_unavailable")}else{None},"next_step":next_step})
+    }).collect();
     fs::write(
         logs.join("results.json"),
         serde_json::to_vec_pretty(&result).map_err(|e| e.to_string())?,
@@ -483,6 +486,16 @@ fn run_inner(options: &Options, selection: Selection, started: Instant) -> Resul
             .map_err(|e| e.to_string())?;
         }
         for record in &records {
+            if record.code != 0 {
+                if let Some(next) = output::remote_access_guidance(
+                    &record.path,
+                    &record.detail,
+                    &options.remote,
+                    options.branch.as_deref(),
+                ) {
+                    writeln!(out, "  Remote unavailable: {}\n    Verify access: {}\n    Retry after fixing access: {}", display(&record.path), next["command"].as_str().unwrap(), next["retry_command"].as_str().unwrap()).map_err(|e| e.to_string())?;
+                }
+            }
             if total == 1 && record.code == 0 {
                 writeln!(
                     out,

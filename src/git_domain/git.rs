@@ -50,6 +50,11 @@ pub(super) fn diagnostic(value: impl AsRef<OsStr>) -> String {
     display(redact(value))
 }
 
+pub(super) fn remote_access_error(error: &str) -> bool {
+    static ACCESS: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    ACCESS.get_or_init(|| regex::Regex::new(r"(?i)You may not have access to this repository|repository[^\r\n]*not found|does not appear to be a git repository|Authentication failed|Permission denied \((?:publickey|keyboard-interactive|password)|could not read Username|(?:returned error:|HTTP/[\d.]+)\s*(?:401|403)\b").unwrap()).is_match(error)
+}
+
 pub(super) fn command(path: &Path) -> Command {
     let mut cmd = Command::new("git");
     cmd.current_dir(path)

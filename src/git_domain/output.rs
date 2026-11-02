@@ -9,6 +9,41 @@ pub(super) fn recovery_command(path: &Path, reference: &str) -> String {
     )
 }
 
+pub(super) fn remote_access_guidance(
+    path: &Path,
+    detail: &str,
+    remote: &str,
+    branch: Option<&str>,
+) -> Option<serde_json::Value> {
+    if !(detail.starts_with("Error [resolve remote target]:")
+        || detail.starts_with("Error [fetch]:"))
+        || !super::git::remote_access_error(detail)
+    {
+        return None;
+    }
+    let quote = crate::presentation::shell_arg;
+    let command = format!(
+        "git -C {} ls-remote --symref {} HEAD",
+        quote(path.as_os_str()),
+        quote(remote.as_ref())
+    );
+    let mut retry = vec![
+        "workctl".into(),
+        "git".into(),
+        "reset".into(),
+        "--remote".into(),
+        std::ffi::OsString::from(remote),
+    ];
+    if let Some(branch) = branch {
+        retry.extend(["--branch".into(), branch.into()]);
+    }
+    retry.push(path.as_os_str().to_owned());
+    Some(
+        serde_json::json!({"action":"verify_remote_access", "destructive":false,
+        "command":command, "retry_command":retry.iter().map(|arg|quote(arg)).collect::<Vec<_>>().join(" ")}),
+    )
+}
+
 pub(super) fn short(path: &Path) -> String {
     if let Some(home) = std::env::var_os("HOME") {
         if let Ok(relative) = path.strip_prefix(home) {

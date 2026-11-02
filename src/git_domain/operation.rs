@@ -184,7 +184,18 @@ impl Operation {
     fn reset(&mut self, remote: &str, explicit: Option<&str>) -> Result<(), String> {
         self.stage("preflight")?;
         self.clean()?;
-        self.git.call(&["remote", "get-url", remote])?;
+        let url = self.git.call(&["remote", "get-url", remote])?;
+        let remote_url = git::redact(OsString::from_vec(
+            url.strip_suffix(b"\n").unwrap_or(&url).to_vec(),
+        ));
+        println!("Remote: {}", super::display(&remote_url));
+        let remote_error = |error: String| {
+            if git::remote_access_error(&error) {
+                format!("{error}\nRemote {remote} ({remote_url}) is missing or inaccessible with current credentials; verify its URL and access before retrying.")
+            } else {
+                error
+            }
+        };
         if let Some(branch) = explicit {
             self.git
                 .call(&["check-ref-format", &format!("refs/heads/{branch}")])?;
@@ -195,7 +206,7 @@ impl Operation {
         if let Some(ref wanted) = wanted {
             args.push(wanted);
         }
-        let advertised = self.git.text(&args)?;
+        let advertised = self.git.text(&args).map_err(&remote_error)?;
         let branch = match explicit {
             Some(branch) => branch.to_owned(),
             None => {
@@ -247,22 +258,25 @@ impl Operation {
             Err(e) => return Err(format!("Cannot clear previous FETCH_HEAD: {e}")),
         }
         let refspec = format!("+{full}:{destination}");
-        let output = self.git.call(&[
-            "-c",
-            "maintenance.auto=false",
-            "-c",
-            "gc.auto=0",
-            "fetch",
-            "--atomic",
-            "--write-fetch-head",
-            "--no-tags",
-            "--no-prune",
-            "--no-prune-tags",
-            "--no-recurse-submodules",
-            "--refmap=",
-            remote,
-            &refspec,
-        ])?;
+        let output = self
+            .git
+            .call(&[
+                "-c",
+                "maintenance.auto=false",
+                "-c",
+                "gc.auto=0",
+                "fetch",
+                "--atomic",
+                "--write-fetch-head",
+                "--no-tags",
+                "--no-prune",
+                "--no-prune-tags",
+                "--no-recurse-submodules",
+                "--refmap=",
+                remote,
+                &refspec,
+            ])
+            .map_err(&remote_error)?;
         print!("{}", git::redact(OsString::from_vec(output)));
         // A stale preexisting tracking ref is not proof that this fetch included it.
         let fetch_head = fs::read(self.git.metadata("FETCH_HEAD"))

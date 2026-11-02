@@ -764,11 +764,125 @@ fn overlapping_invocations_refuse_busy_repository() {
 }
 
 #[test]
+fn unavailable_remote_keeps_batch_failure_and_provides_scoped_recovery() {
+    for json in [false, true] {
+        let f = Fixture::new();
+        let healthy = f.clone("healthy peer");
+        let missing = f.temp.path().join("removed remote.git");
+        git(
+            &f.repo,
+            &["remote", "set-url", "origin", origin_arg(&missing)],
+        );
+        for repo in [&f.repo, &healthy] {
+            git(repo, &["remote", "rename", "origin", "upstream"]);
+        }
+        let mut args = vec![
+            OsStr::new("--attempts=3"),
+            OsStr::new("--remote=upstream"),
+            OsStr::new("--branch=main"),
+        ];
+        if json {
+            args.push(OsStr::new("--json"));
+        }
+        let out = f.cli(&f.workspace, &args).output().unwrap();
+        assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+        let rows = if json {
+            let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+            assert_eq!(result["summary"]["succeeded"], 1);
+            assert_eq!(result["summary"]["failed"], 1);
+            result["results"].clone()
+        } else {
+            serde_json::from_slice::<serde_json::Value>(
+                &fs::read(logs(&out).join("results.json")).unwrap(),
+            )
+            .unwrap()
+        };
+        let bad = rows
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["status"] == "failed")
+            .unwrap();
+        assert_eq!(bad["attempts"], 1);
+        assert_eq!(bad["failure_kind"], "remote_unavailable");
+        assert_eq!(bad["next_step"]["action"], "verify_remote_access");
+        assert_eq!(bad["next_step"]["destructive"], false);
+        assert!(bad["detail"]
+            .as_str()
+            .unwrap()
+            .contains(origin_arg(&missing)));
+        let check = bad["next_step"]["command"].as_str().unwrap();
+        let retry = bad["next_step"]["retry_command"].as_str().unwrap();
+        if !json {
+            assert!(String::from_utf8_lossy(&out.stdout).contains(check));
+            assert!(String::from_utf8_lossy(&out.stdout).contains(retry));
+        }
+        assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.old);
+        assert!(!f.repo.join(".git/FETCH_HEAD").exists());
+        assert_eq!(git(&healthy, &["rev-parse", "HEAD"]), f.new);
+        let checked = env(Command::new("sh").current_dir(f.temp.path()))
+            .args(["-c", check])
+            .output()
+            .unwrap();
+        assert!(!checked.status.success());
+        assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.old);
+        git(
+            &f.repo,
+            &["remote", "set-url", "upstream", origin_arg(&f.origin)],
+        );
+        let bin = f.temp.path().join("retry-bin");
+        fs::create_dir(&bin).unwrap();
+        symlink(BIN, bin.join("workctl")).unwrap();
+        let retried = env(Command::new("sh").current_dir(f.temp.path()))
+            .args(["-c", retry])
+            .env(
+                "PATH",
+                format!("{}:{}", bin.display(), std::env::var("PATH").unwrap()),
+            )
+            .output()
+            .unwrap();
+        success(&retried);
+        assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.new);
+        assert_eq!(git(&healthy, &["rev-parse", "HEAD"]), f.new);
+    }
+}
+
+#[test]
+fn remote_access_diagnostics_redact_credentials_at_resolution_and_fetch() {
+    for stage in ["ls-remote", "fetch"] {
+        let f = Fixture::new();
+        let url = "https://test-user:private-password@bitbucket.org/workspace/repository.git?token=private-token";
+        let count = f.temp.path().join("denials");
+        let script = format!(
+            "for arg in \"$@\"; do\nif [ \"$arg\" = get-url ]; then echo '{url}'; exit 0; fi\nif [ \"$arg\" = {stage} ]; then echo denied >> '{}'; echo 'You may not have access to this repository or it no longer exists in this workspace.' >&2; echo 'fatal: Could not read from remote repository.' >&2; exit 128; fi\ndone",
+            count.display()
+        );
+        let dir = f.shim(&script);
+        let mut cmd = f.cli(&f.repo, &[OsStr::new("--attempts=3"), OsStr::new("--json")]);
+        f.with_shim(&mut cmd, &dir);
+        let out = cmd.output().unwrap();
+        assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+        let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        let row = &result["results"][0];
+        assert_eq!(row["failure_kind"], "remote_unavailable");
+        assert_eq!(row["attempts"], 1);
+        assert_eq!(fs::read_to_string(count).unwrap().lines().count(), 1);
+        let log = fs::read_to_string(row["log"].as_str().unwrap()).unwrap();
+        let diagnostics = format!("{}\n{log}", text(&out));
+        assert!(diagnostics.contains("bitbucket.org/workspace/repository.git"));
+        for secret in ["test-user", "private-password", "private-token"] {
+            assert!(!diagnostics.contains(secret));
+        }
+        assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.old);
+    }
+}
+
+#[test]
 fn transient_failures_retry_but_authentication_failures_do_not() {
     for transient in [true, false] {
         let f = Fixture::new();
         let count = f.temp.path().join("count");
-        let dir = f.shim(&format!("for arg in \"$@\"; do if [ \"$arg\" = fetch ]; then n=$(cat '{}' 2>/dev/null || echo 0); n=$((n+1)); echo $n > '{}'; if [ $n -lt 2 ]; then echo '{}' >&2; exit 1; fi; fi; done", count.display(), count.display(), if transient {"Connection reset"} else {"Permission denied (publickey)"}));
+        let dir = f.shim(&format!("for arg in \"$@\"; do if [ \"$arg\" = fetch ]; then n=$(cat '{}' 2>/dev/null || echo 0); n=$((n+1)); echo $n > '{}'; if [ $n -lt 2 ]; then echo '{}' >&2; echo 'fatal: Could not read from remote repository.' >&2; exit 1; fi; fi; done", count.display(), count.display(), if transient {"Connection reset"} else {"Permission denied (publickey)"}));
         let mut cmd = f.cli(&f.repo, &[OsStr::new("--attempts"), OsStr::new("2")]);
         f.with_shim(&mut cmd, &dir);
         let out = cmd.output().unwrap();

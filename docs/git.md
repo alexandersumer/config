@@ -69,6 +69,14 @@ Reset uses up to 32 workers by default, bounded by checkout count. `--jobs` acce
 per attempt. Transient failures use bounded backoff. Authentication, locks, and
 safety refusals are not retried. Failures show the number of attempts and a bounded,
 readable error summary; retained logs and JSON contain the complete diagnostic.
+Missing or inaccessible remotes remain failures while other checkouts continue.
+Logs record the selected remote URL with credentials redacted. The final report
+provides a read-only access check and a reset command scoped to the failed checkout,
+preserving the selected remote and explicit branch. Run the reset command only
+after fixing access; it performs the normal reset. JSON marks these failures with
+`failure_kind: "remote_unavailable"` and `next_step`; `destructive: false` applies
+to the access-check `command`, while `retry_command` performs the reset. Providers
+may deliberately report missing repositories and denied access identically.
 Persistent connection failures remain failures after the retry limit. Use fewer
 workers with `--jobs N` on constrained networks. There is no transaction or rollback across checkouts:
 fetches, backups, switches, and upstream changes may persist after later failure.
