@@ -258,7 +258,7 @@ fn run_inner(options: &Options, selection: Selection, started: Instant) -> Resul
     if total == 0 {
         if options.json {
             return Ok(crate::presentation::json(
-                &serde_json::json!({"schema_version":1,"operation":"git.reset","status":"completed","scope":crate::presentation::paths(&options.paths),"results":[],"excluded":crate::presentation::paths(&selection.excluded),"skipped":super::discover::skipped_json(&selection.skipped),"summary":{"skipped":selection.skipped.len(),"succeeded":0,"failed":0,"cancelled":0,"elapsed_seconds":started.elapsed().as_secs_f64()}}),
+                &serde_json::json!({"schema_version":1,"operation":"git.reset","status":"completed","scope":crate::presentation::paths(&options.paths),"selection":options.selection,"results":[],"excluded":crate::presentation::paths(&selection.excluded),"skipped":super::discover::skipped_json(&selection.skipped),"summary":{"skipped":selection.skipped.len(),"succeeded":0,"failed":0,"cancelled":0,"elapsed_seconds":started.elapsed().as_secs_f64()}}),
             ));
         }
         writeln!(
@@ -269,6 +269,16 @@ fn run_inner(options: &Options, selection: Selection, started: Instant) -> Resul
         .map_err(|e| e.to_string())?;
         return Ok(0);
     }
+    let mut history = crate::history::Run::begin(
+        "git.reset",
+        options.selection.clone(),
+        serde_json::json!({"remote":crate::history::safe_name(&options.remote),"branch":options.branch.as_deref().and_then(crate::history::safe_name),"retry_options_available":crate::history::safe_name(&options.remote).is_some() && options.branch.as_deref().is_none_or(|b|crate::history::safe_name(b).is_some()),"attempts":options.attempts,"timeout_seconds":options.timeout.as_secs()}),
+        selection
+            .repos
+            .iter()
+            .map(|r| crate::history::target(&r.path, &r.common))
+            .collect(),
+    )?;
     let directory = tempfile::Builder::new()
         .prefix("workctl-reset-")
         .tempdir()
@@ -413,6 +423,26 @@ fn run_inner(options: &Options, selection: Selection, started: Instant) -> Resul
         let next_step = if r.code != 0 { output::remote_access_guidance(&r.path,&r.detail,&options.remote,options.branch.as_deref()) } else { None };
         serde_json::json!({"path":r.path.to_string_lossy(),"path_bytes":crate::presentation::path_bytes(&r.path),"code":r.code,"status":if r.code==0 {"succeeded"}else if r.code==130 {"cancelled"}else{"failed"},"attempts":r.attempts,"seconds":r.seconds,"log":if retain {Some(r.log.to_string_lossy())}else{None},"detail":r.detail,"target":r.target,"backups":r.backups,"failure_kind":if next_step.is_some(){Some("remote_unavailable")}else{None},"next_step":next_step})
     }).collect();
+    for record in &records {
+        history.outcome(
+            &record.path,
+            if record.code == 0 {
+                "succeeded"
+            } else if record.code == 130 {
+                "cancelled"
+            } else {
+                "failed"
+            },
+            record.backups.clone(),
+        )?;
+    }
+    history.finish(if code == 0 {
+        "completed"
+    } else if code == 130 {
+        "interrupted"
+    } else {
+        "failed"
+    })?;
     fs::write(
         logs.join("results.json"),
         serde_json::to_vec_pretty(&result).map_err(|e| e.to_string())?,
@@ -449,7 +479,7 @@ fn run_inner(options: &Options, selection: Selection, started: Instant) -> Resul
     };
     if options.json {
         if crate::presentation::json(
-            &serde_json::json!({"schema_version":1,"operation":"git.reset","status":if code==0 {"completed"}else if code==130 {"interrupted"}else{"failed"},"scope":crate::presentation::paths(&options.paths),"excluded":crate::presentation::paths(&selection.excluded),"skipped":super::discover::skipped_json(&selection.skipped),"results":result,"diagnostics":if retain {Some(logs.to_string_lossy())}else{None},"summary":{"skipped":selection.skipped.len(),"succeeded":ok,"failed":total-ok-stopped,"cancelled":stopped,"elapsed_seconds":started.elapsed().as_secs_f64()}}),
+            &serde_json::json!({"schema_version":1,"operation":"git.reset","run_id":history.id,"status":if code==0 {"completed"}else if code==130 {"interrupted"}else{"failed"},"scope":crate::presentation::paths(&options.paths),"selection":options.selection,"excluded":crate::presentation::paths(&selection.excluded),"skipped":super::discover::skipped_json(&selection.skipped),"results":result,"diagnostics":if retain {Some(logs.to_string_lossy())}else{None},"summary":{"skipped":selection.skipped.len(),"succeeded":ok,"failed":total-ok-stopped,"cancelled":stopped,"elapsed_seconds":started.elapsed().as_secs_f64()}}),
         ) != 0
         {
             return Ok(1);

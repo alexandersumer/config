@@ -57,7 +57,7 @@ pub(super) fn report_skipped(skipped: &Skipped) -> Result<(), String> {
 
 // Read gitfiles as bytes, without following a replaced marker or blocking on a FIFO.
 // Other marker types and malformed files remain Git's responsibility.
-fn gitfile_target(path: &Path) -> Result<Option<PathBuf>, String> {
+pub(super) fn gitfile_target(path: &Path) -> Result<Option<PathBuf>, String> {
     let marker = path.join(".git");
     if !fs::symlink_metadata(&marker)
         .map_err(|e| format!("{}: {e}", display(&marker)))?
@@ -107,7 +107,7 @@ fn missing_gitdir(path: &Path) -> Result<Option<PathBuf>, String> {
 
 // Only a missing registration in a verifiable common repository is skippable.
 // A missing primary repository, bad config, or uncertain metadata stays fatal.
-fn orphan_reason(target: &Path) -> Result<Option<String>, String> {
+pub(super) fn orphan_reason(target: &Path) -> Result<Option<String>, String> {
     if target.file_name().is_none() {
         return Ok(None);
     }
@@ -137,7 +137,7 @@ fn orphan_reason(target: &Path) -> Result<Option<String>, String> {
     )?;
     if code != 0
         || git::path_output(&out).canonicalize().ok().as_ref() != Some(&common)
-        || git::exists(&target)?
+        || git::exists(target)?
     {
         return Ok(None);
     }
@@ -234,7 +234,10 @@ fn probe_repository(
     Ok(Some((Repo { path: top, common }, linked)))
 }
 
-pub(super) fn select(paths: &[PathBuf]) -> Result<Selection, String> {
+pub(super) fn select(
+    paths: &[PathBuf],
+    exclusions: &BTreeSet<PathBuf>,
+) -> Result<Selection, String> {
     let mut progress = crate::presentation::Discovery::new("checkouts")?;
     let mut result = Selection {
         repos: vec![],
@@ -253,6 +256,9 @@ pub(super) fn select(paths: &[PathBuf]) -> Result<Selection, String> {
             .map_err(|e| format!("{}: {e}", display(path)))?;
         if !root.is_dir() {
             return Err(format!("{}: expected a directory", display(path)));
+        }
+        if exclusions.iter().any(|p| root.starts_with(p)) {
+            continue;
         }
         explicit.push(root.clone());
         if let Some((repo, linked)) = repository(&root)? {
@@ -276,7 +282,7 @@ pub(super) fn select(paths: &[PathBuf]) -> Result<Selection, String> {
             if supervisor::cancelled() {
                 return Err("Discovery interrupted".into());
             }
-            if !walked.insert(path.clone()) {
+            if exclusions.iter().any(|p| path.starts_with(p)) || !walked.insert(path.clone()) {
                 continue;
             }
             if git::exists(&path.join(".git"))? {

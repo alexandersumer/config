@@ -34,7 +34,14 @@ enum Operation {
     },
     /// Inspect runtime prerequisites and supported capabilities without repairs
     #[command(after_help = "Examples:\n  workctl doctor\n  workctl doctor --json")]
-    Doctor,
+    Doctor(DoctorArgs),
+    /// List private operation runs, or inspect a specific run
+    History {
+        run_id: Option<String>,
+        /// Show only unsuccessful targets (including pending or uncertain work)
+        #[arg(long)]
+        unsuccessful: bool,
+    },
     /// Generate shell completion from the command hierarchy
     #[command(after_help = "Example:\n  workctl completions zsh > _workctl")]
     Completions {
@@ -49,6 +56,8 @@ enum Auth {
         after_long_help = "Profiles: work = code + logs + services; code = Bitbucket + TWG OAuth + TWG Bitbucket; logs = Splunk.\nservices = risk + checks + config + metrics.\nrisk = Risk Mitigation (MFA); checks = Pollinator (MFA); config = MLP Config; metrics = Phobos.\nruntime = Kerberos TGT; bitbucket, twg, and twg-bitbucket select one credential.\nUse --include-profile runtime to add Kerberos to another profile.\nAll built-in SLAuth targets use prod; custom descriptors use --config.\nDefault: renew supported targets; manually managed TWG Bitbucket tokens are checked, never rotated.\n--reuse-valid opts into cached reuse.\nProvider CLIs own all credentials. --check makes no explicit refresh/login.\n--non-interactive allows silent OAuth refresh but never browser/MFA issuance.\nExpiry is reported when available; no command can guarantee future access.\nExamples:\n  workctl auth preflight\n  workctl auth preflight --profile code --json\n  workctl auth preflight --profile risk --check\n  workctl auth preflight --config auth.json --profile staging"
     )]
     Preflight(crate::auth::Options),
+    /// Resolve required credential descriptors without invoking any provider
+    Inspect(crate::auth::Options),
     /// Preflight automatically, then execute argv directly with the child's exit status
     #[command(
         after_long_help = "Preflight failure prevents command execution. No shell interpolation occurs.\nChild stdin, stdout, TTY, environment, signals and exit status are preserved.\nPreflight reports go to stderr. --json is unsupported here.\nExamples:\n  workctl auth exec --profile code -- bb pr list\n  workctl auth exec --profile work -- codex exec 'continue acceptance'"
@@ -80,9 +89,11 @@ enum Worktree {
     /// Preview removal; --apply executes the plan without another question
     #[command(
         args_override_self = true,
-        after_long_help = "Main checkouts are protected. Container scopes select linked worktrees beneath\nthem; a checkout selects its registered linked worktrees. Explicit linked paths\nselect only that worktree. Preview never removes files or writes recovery refs.\n--apply removes idle worktrees and ignored files after saving committed HEAD\nin a durable local recovery ref. No remote connection or push is required.\nTracked changes, untracked files, and masked paths stay protected; these expected\nskips are successful. --strict instead requires fresh remote publication and\nexplicit ignored-file approval; --preserve-commits PATH enables local recovery\nat an exact worktree in strict mode. Recovery preserves commits, not ignored files.\nLocks, missing paths, populated submodules, private module object stores, nested\nrepositories, and uncertain ownership block removal even with a discard decision.\nEmpty uninitialized gitlink paths are supported. Run while repositories are otherwise idle.\nExit codes: 0 success (including protected local work), 1 failed or blocked, 2 invalid usage, 130 interrupted.\n\nExamples:\n  workctl git worktree clean /path/to/work /path/to/oss\n  workctl git worktree clean --apply /path/to/work\n  workctl git worktree clean --strict /path/to/work\n  workctl git worktree clean --apply --discard-local /path/to/work/feature /path/to/work"
+        after_long_help = "Main checkouts are protected. Container scopes select linked worktrees beneath\nthem; a checkout selects its registered linked worktrees. Explicit linked paths\nselect only that worktree. Preview never removes files or writes recovery refs.\n--apply removes idle worktrees and ignored files after saving committed HEAD\nin a durable local recovery ref. No remote connection or push is required.\nTracked changes, untracked files, and masked paths stay protected; these expected\nskips are successful. --strict instead requires fresh remote publication and\nexplicit ignored-file approval; --preserve-commits PATH enables local recovery\nat an exact worktree in strict mode. Recovery preserves commits, not ignored files.\nLocks, missing paths, populated submodules, private module object stores, nested\nrepositories, and uncertain ownership block removal even with a discard decision.\nEmpty uninitialized gitlink paths are supported. Run while repositories are otherwise idle.\nExit codes: 0 success (including protected local work), 1 failed or blocked, 2 invalid usage, 130 interrupted.\n\nExamples:\n  workctl git worktree clean /path/to/work /path/to/oss\n  workctl git worktree clean --apply /path/to/work\n  workctl git worktree clean --older-than 7d --discard-all-local /path/to/work\n  workctl git worktree clean --older-than 7d --discard-all-local --apply /path/to/work\n  workctl git worktree clean --scope work --exclude /path/to/work/keep\n  workctl git worktree clean --strict /path/to/work\n  workctl git worktree clean --apply --discard-local /path/to/work/feature /path/to/work"
     )]
     Clean(crate::git_domain::cleanup::Args),
+    /// Inspect shared worktree selection without mutation
+    Inventory(crate::git_domain::cleanup::InventoryArgs),
 }
 
 pub(crate) fn completions(shell: clap_complete::Shell) -> Vec<u8> {
@@ -109,6 +120,9 @@ pub(crate) fn run(args: Vec<OsString>) -> u8 {
     };
     match cli.command {
         Operation::Auth {
+            command: Auth::Inspect(options),
+        } => crate::auth::inspect(options, cli.json),
+        Operation::Auth {
             command: Auth::Preflight(options),
         } => crate::auth::run(options, cli.json, None),
         Operation::Auth {
@@ -122,7 +136,17 @@ pub(crate) fn run(args: Vec<OsString>) -> u8 {
                 command: Worktree::Clean(args),
             },
         } => crate::git_domain::cleanup::run(args, cli.json),
-        Operation::Doctor => doctor(cli.json),
+        Operation::Git {
+            command:
+                Git::Worktree {
+                    command: Worktree::Inventory(args),
+                },
+        } => crate::git_domain::cleanup::inventory_run(args, cli.json),
+        Operation::History {
+            run_id,
+            unsuccessful,
+        } => crate::history::command(run_id, unsuccessful, cli.json),
+        Operation::Doctor(args) => doctor(args, cli.json),
         Operation::Completions { shell } => {
             let bytes = completions(shell);
             if cli.json {
@@ -135,7 +159,21 @@ pub(crate) fn run(args: Vec<OsString>) -> u8 {
         }
     }
 }
-fn doctor(json: bool) -> u8 {
+#[derive(Debug, clap::Args)]
+struct DoctorArgs {
+    /// Inspect executable prerequisites for this auth profile without invoking providers
+    #[arg(long)]
+    profile: Option<String>,
+    #[arg(long)]
+    config: Option<std::path::PathBuf>,
+    /// Check managed binaries and completions against this executable
+    #[arg(long)]
+    managed: bool,
+    /// Installation home (implies --managed)
+    #[arg(long)]
+    home: Option<std::path::PathBuf>,
+}
+fn doctor(args: DoctorArgs, json: bool) -> u8 {
     let _signals = match crate::runtime::Signals::install() {
         Ok(s) => s,
         Err(e) => {
@@ -194,8 +232,72 @@ fn doctor(json: bool) -> u8 {
     probe.args(["-c", "exit 0"]);
     let groups = crate::runtime::capture(probe, std::time::Duration::from_secs(5), true)
         .is_ok_and(|(code, _, _)| code == 0);
-    let ok = supported && temp.is_ok() && executable.is_some() && locking && groups;
-    let checks = serde_json::json!({"executable":executable.as_ref().map(|p|p.to_string_lossy()),"git":version.as_ref().ok().map(|(_,o,_)|String::from_utf8_lossy(o).trim().to_owned()),"git_supported":supported,"temporary_directory":temp.is_ok(),"process_groups":groups,"repository_locks":locking});
+    let requirements = (|| -> Result<serde_json::Value, String> {
+        let Some(profile) = &args.profile else {
+            if args.config.is_some() {
+                return Err("--config requires --profile".into());
+            }
+            return Ok(serde_json::Value::Null);
+        };
+        let options = crate::auth::Options {
+            profile: profile.clone(),
+            include_profiles: vec![],
+            config: args.config.clone(),
+            check: true,
+            reuse_valid: false,
+            non_interactive: true,
+            min_valid_for: 300,
+            timeout: 30,
+            coordination_timeout: None,
+            login_timeout: 180,
+        };
+        let mut requirements = crate::auth::requirements(&options)?;
+        let clients=requirements["required_executables"].as_array().ok_or("invalid prerequisites")?.iter().filter_map(|v|v.as_str()).map(|name| {
+            use std::os::unix::fs::PermissionsExt;
+            let resolved=std::env::var_os("PATH").and_then(|path|std::env::split_paths(&path).map(|p|p.join(name)).find(|p|std::fs::metadata(p).is_ok_and(|m|m.is_file()&&m.permissions().mode()&0o111!=0)));
+            serde_json::json!({"client":name,"available":resolved.is_some(),"executable":resolved.map(|p|p.to_string_lossy().into_owned()),"credentials_checked":false})
+        }).collect::<Vec<_>>();
+        requirements["clients"] = serde_json::json!(clients);
+        Ok(requirements)
+    })();
+    let installation = if args.managed || args.home.is_some() {
+        args.home
+            .clone()
+            .or_else(|| std::env::var_os("HOME").map(std::path::PathBuf::from))
+            .ok_or_else(|| "HOME unavailable; use --home".to_owned())
+            .and_then(|home| crate::install::workctl_diagnostics(&home))
+    } else {
+        Ok(vec![])
+    };
+    let prerequisites_ok = requirements.as_ref().is_ok_and(|v| {
+        v.is_null()
+            || v["clients"]
+                .as_array()
+                .is_some_and(|clients| clients.iter().all(|c| c["available"] == true))
+    });
+    let install_ok = installation.as_ref().is_ok_and(Vec::is_empty);
+    let ok = supported
+        && temp.is_ok()
+        && executable.is_some()
+        && locking
+        && groups
+        && prerequisites_ok
+        && install_ok;
+    let mut checks = serde_json::json!({"executable":executable.as_ref().map(|p|p.to_string_lossy()),"git":version.as_ref().ok().map(|(_,o,_)|String::from_utf8_lossy(o).trim().to_owned()),"git_supported":supported,"temporary_directory":temp.is_ok(),"process_groups":groups,"repository_locks":locking});
+    checks["build"] = serde_json::json!({"package_version":env!("CARGO_PKG_VERSION"),"base_commit":env!("WORKCTL_BUILD_REVISION"),"note":"Build base commit only; source edits and later checkout changes are not verified by this value.","executable_modified_unix_seconds":executable.as_ref().and_then(|p|std::fs::metadata(p).ok()).and_then(|m|m.modified().ok()).and_then(|t|t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d|d.as_secs()),"source_commit_verified":false});
+    checks["auth_requirements"] = match requirements {
+        Ok(v) => v,
+        Err(e) => serde_json::json!({"error":e}),
+    };
+    checks["managed_installation"] = match installation {
+        Ok(errors) => {
+            serde_json::json!({"checked":args.managed||args.home.is_some(),"errors":errors})
+        }
+        Err(e) => serde_json::json!({"checked":true,"error":e}),
+    };
+    if !json {
+        let _=writeln!(std::io::stdout(),"Readiness details: {}",crate::presentation::safe_text(&serde_json::json!({"build":checks["build"],"auth_requirements":checks["auth_requirements"],"managed_installation":checks["managed_installation"]}).to_string()));
+    }
     let code = if crate::runtime::cancelled() {
         130
     } else {

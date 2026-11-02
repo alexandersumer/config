@@ -25,14 +25,20 @@ pub(super) struct Options {
     pub verbose: bool,
     pub keep_logs: bool,
     pub json: bool,
+    pub selection: serde_json::Value,
 }
 
 /// Clap owns syntax, help, version, suggestions, and typed value validation.
 #[derive(Debug, clap::Args)]
 pub(crate) struct ResetArgs {
     /// Repository or container directories (default: current directory)
-    #[arg(value_name = "PATH", default_value = ".", value_hint = clap::ValueHint::DirPath)]
+    #[arg(value_name = "PATH", value_hint = clap::ValueHint::DirPath)]
     pub paths: Vec<PathBuf>,
+    #[command(flatten)]
+    pub scope: crate::workspace::ScopeArgs,
+    /// Retry only unsuccessful targets from this run after fresh discovery and identity checks
+    #[arg(long, conflicts_with_all=["paths","scope","list","remote","branch"])]
+    pub retry: Option<String>,
     /// Remote to fetch
     #[arg(long, default_value = "origin", value_name = "NAME", value_parser = git_name)]
     pub remote: String,
@@ -70,8 +76,63 @@ fn git_name(value: &str) -> Result<String, String> {
 pub(crate) fn worker(args: &[OsString]) -> u8 {
     operation::worker(args)
 }
-pub(crate) fn run(cli: ResetArgs, json: bool) -> u8 {
+pub(crate) fn run(mut cli: ResetArgs, json: bool) -> u8 {
+    let resolve = (|| -> Result<_, String> {
+        if let Some(id) = &cli.retry {
+            let prior = crate::history::read(id)?;
+            if prior["operation"] != "git.reset" {
+                return Err("--retry requires a reset run".into());
+            }
+            let mut paths = Vec::new();
+            for target in prior["targets"]
+                .as_array()
+                .ok_or("invalid history targets")?
+                .iter()
+                .filter(|t| crate::history::unsuccessful(t))
+            {
+                let path = crate::history::verify_identity(target)?;
+                let expected = crate::history::path(target, "common_bytes")?;
+                let (repo, linked) =
+                    discover::repository(&path)?.ok_or("retry target is no longer a repository")?;
+                if linked || repo.path != path || repo.common != expected {
+                    return Err("retry target repository ownership changed".into());
+                }
+                paths.push(path);
+            }
+            if paths.is_empty() {
+                return Err("run has no unsuccessful reset targets".into());
+            }
+            if prior["options"]["retry_options_available"] != true {
+                return Err("run options could not be recorded for safe retry; select explicit paths and options".into());
+            }
+            cli.paths = paths;
+            cli.remote = prior["options"]["remote"]
+                .as_str()
+                .ok_or("run has no reusable remote name")?
+                .to_owned();
+            cli.branch = prior["options"]["branch"].as_str().map(str::to_owned);
+        }
+        cli.scope.resolve(&cli.paths)
+    })();
+    let resolved = match resolve {
+        Ok(scope) => scope,
+        Err(e) => {
+            report(&e);
+            if json {
+                let _ = crate::presentation::json(
+                    &serde_json::json!({"schema_version":1,"operation":"git.reset","status":"failed","error":e}),
+                );
+            }
+            return 1;
+        }
+    };
+    if cli.scope.scope.is_some() {
+        cli.paths = resolved.roots.clone();
+    } else if cli.paths.is_empty() {
+        cli.paths.push(PathBuf::from("."));
+    }
     let options = Options {
+        selection: resolved.evidence(),
         paths: cli.paths,
         remote: cli.remote,
         branch: cli.branch,
@@ -91,7 +152,10 @@ pub(crate) fn run(cli: ResetArgs, json: bool) -> u8 {
         }
     };
     let started = std::time::Instant::now();
-    match discover::select(&options.paths).and_then(|selection| {
+    match discover::select(&options.paths, &resolved.exclusions).and_then(|mut selection| {
+        selection.repos.retain(|r| !resolved.excluded(&r.path));
+        selection.excluded.retain(|p| !resolved.excluded(p));
+        selection.skipped.retain(|p, _| !resolved.excluded(p));
         discover::report_skipped(&selection.skipped)?;
         Ok(selection)
     }) {

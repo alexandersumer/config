@@ -1507,6 +1507,33 @@ fn parse_home_arg(args: &[String]) -> Result<PathBuf> {
     })
 }
 
+/// Read-only workctl installation diagnostics reuse the installer's ownership rules.
+pub(crate) fn workctl_diagnostics(home: &Path) -> Result<Vec<String>> {
+    let mut errors = managed_binary_errors(home)?;
+    let completion = home.join(".local/share/zsh/site-functions/_workctl");
+    let expected = crate::workctl::completions(clap_complete::Shell::Zsh);
+    let expected = expected
+        .strip_prefix(b"#compdef workctl\n")
+        .ok_or("invalid generated completion")?;
+    let mut managed = b"#compdef workctl\n# workctl managed completion\n".to_vec();
+    managed.extend_from_slice(expected);
+    match fs::symlink_metadata(&completion) {
+        Ok(m) if m.is_file() => {
+            if fs::read(&completion).map_err(|e| e.to_string())? != managed {
+                errors.push("managed workctl completion differs from this executable".into());
+            }
+        }
+        Ok(_) => errors.push("managed workctl completion is not a regular file".into()),
+        Err(e) => errors.push(format!("managed workctl completion unavailable: {e}")),
+    }
+    match owned_legacy(home, &env::current_exe().map_err(|e| e.to_string())?) {
+        Ok(Some(_)) => errors.push("retired managed reset_to_origin entry remains".into()),
+        Ok(None) => {}
+        Err(e) => errors.push(e),
+    }
+    Ok(errors)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

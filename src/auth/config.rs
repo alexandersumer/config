@@ -37,7 +37,7 @@ pub(crate) struct Options {
     #[arg(long, default_value = "180", value_parser = clap::value_parser!(u64).range(1..=900))]
     pub login_timeout: u64,
 }
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
 #[serde(tag = "provider", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum Target {
     Bitbucket {

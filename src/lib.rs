@@ -4,14 +4,17 @@ mod commands;
 mod config_root;
 mod error;
 mod git_domain;
+mod history;
 mod install;
 mod links;
 mod presentation;
 mod registry;
 mod regression;
 mod runtime;
+mod storage;
 mod validation;
 mod workctl;
+mod workspace;
 pub fn run() -> std::process::ExitCode {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     // This is the private reset worker protocol, never a public alias.

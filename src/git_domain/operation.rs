@@ -206,7 +206,7 @@ impl Operation {
         if let Some(ref wanted) = wanted {
             args.push(wanted);
         }
-        let advertised = self.git.text(&args).map_err(&remote_error)?;
+        let advertised = self.git.text(&args).map_err(remote_error)?;
         let branch = match explicit {
             Some(branch) => branch.to_owned(),
             None => {
@@ -276,7 +276,7 @@ impl Operation {
                 remote,
                 &refspec,
             ])
-            .map_err(&remote_error)?;
+            .map_err(remote_error)?;
         print!("{}", git::redact(OsString::from_vec(output)));
         // A stale preexisting tracking ref is not proof that this fetch included it.
         let fetch_head = fs::read(self.git.metadata("FETCH_HEAD"))

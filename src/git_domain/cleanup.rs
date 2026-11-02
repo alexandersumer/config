@@ -19,8 +19,30 @@ use std::time::{Duration, Instant};
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
     /// Checkout, linked worktree, or container directories (default: current directory)
-    #[arg(default_value = ".", value_name="PATH", value_hint=clap::ValueHint::DirPath)]
+    #[arg(value_name="PATH", value_hint=clap::ValueHint::DirPath)]
     paths: Vec<PathBuf>,
+    #[command(flatten)]
+    scope: crate::workspace::ScopeArgs,
+    /// Select creation timestamps strictly before one invocation cutoff (for example 7d)
+    #[arg(long, value_parser=crate::workspace::duration)]
+    older_than: Option<Duration>,
+    /// Authorize tracked, untracked and ignored file loss only within the resolved selection
+    #[arg(long)]
+    discard_all_local: bool,
+    /// Discard abandoned merge/rebase state after preserving operation commits; never bypass locks
+    #[arg(long)]
+    discard_operations: bool,
+    /// Explicitly remove verified directories whose worktree registration is missing
+    #[arg(long)]
+    remove_orphans: bool,
+    /// Reconcile unsuccessful targets from a cleanup run; preview unless --apply is explicitly repeated
+    #[arg(long, conflicts_with_all=["paths","scope"])]
+    reconcile: Option<String>,
+    /// Measure allocated storage; estimates do not guarantee APFS reclamation
+    #[arg(long)]
+    storage: bool,
+    #[arg(skip)]
+    inventory: bool,
     /// Remove idle worktrees and ignored files; save HEAD locally and protect tracked/untracked changes
     #[arg(long)]
     apply: bool,
@@ -106,6 +128,9 @@ fn list(repo: &Path) -> Result<Vec<Registration>, String> {
     )?)
 }
 struct Candidate {
+    age: crate::workspace::Age,
+    identity: Option<(u64, u64)>,
+    storage: Option<serde_json::Value>,
     primary: PathBuf,
     common: PathBuf,
     registration: Registration,
@@ -115,7 +140,11 @@ struct Selection {
     protected: BTreeSet<PathBuf>,
     skipped: discover::Skipped,
 }
-fn select(paths: &[PathBuf]) -> Result<Selection, String> {
+fn select(
+    paths: &[PathBuf],
+    scope: &crate::workspace::Resolved,
+    allow_orphans: bool,
+) -> Result<Selection, String> {
     let mut progress = presentation::Discovery::new("worktrees")?;
     let mut containers = Vec::new();
     let mut explicit = BTreeSet::new();
@@ -127,14 +156,28 @@ fn select(paths: &[PathBuf]) -> Result<Selection, String> {
     // Validate the entire scope before publication probes or mutation.
     for path in paths {
         progress.update()?;
+        if allow_orphans && fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) {
+            return Err("symlink roots cannot authorize orphan removal".into());
+        }
         let p = path
             .canonicalize()
             .map_err(|e| format!("{}: {e}", display(path)))?;
         if !p.is_dir() {
             return Err(format!("{}: expected directory", display(path)));
         }
+        if scope.excluded(&p) {
+            continue;
+        }
         explicit_paths.push(p.clone());
-        if let Some((repo, linked)) = discover::repository(&p)? {
+        let found = if allow_orphans && git::exists(&p.join(".git"))? {
+            discover::discovered_repository(&p, &mut skipped)?
+        } else {
+            discover::repository(&p)?
+        };
+        if skipped.contains_key(&p) {
+            continue;
+        }
+        if let Some((repo, linked)) = found {
             if linked {
                 explicit_linked.insert(repo.path.clone());
             } else {
@@ -151,7 +194,7 @@ fn select(paths: &[PathBuf]) -> Result<Selection, String> {
         if runtime::cancelled() {
             return Err("Discovery interrupted".into());
         }
-        if !walked.insert(p.clone()) {
+        if scope.excluded(&p) || !walked.insert(p.clone()) {
             continue;
         }
         if git::exists(&p.join(".git"))? {
@@ -167,7 +210,14 @@ fn select(paths: &[PathBuf]) -> Result<Selection, String> {
             }
         }
     }
-    discover::validate_explicit(&explicit_paths, &skipped)?;
+    discover::validate_explicit(
+        &explicit_paths
+            .iter()
+            .filter(|p| !allow_orphans || !skipped.contains_key(*p))
+            .cloned()
+            .collect::<Vec<_>>(),
+        &skipped,
+    )?;
     let mut candidates = Vec::new();
     let mut protected = BTreeSet::new();
     for (common, probe) in repos {
@@ -182,6 +232,9 @@ fn select(paths: &[PathBuf]) -> Result<Selection, String> {
         }
         protected.insert(primary.clone());
         for registration in registrations.into_iter().skip(1) {
+            if scope.excluded(&registration.path) {
+                continue;
+            }
             if skipped
                 .keys()
                 .any(|path| registration.path.starts_with(path))
@@ -192,7 +245,11 @@ fn select(paths: &[PathBuf]) -> Result<Selection, String> {
                 || explicit_linked.contains(&registration.path)
                 || containers.iter().any(|p| registration.path.starts_with(p))
             {
+                let stamp = crate::workspace::CreationStamp::read(&registration.path);
                 candidates.push(Candidate {
+                    storage: None,
+                    age: stamp.age,
+                    identity: stamp.identity,
                     primary: primary.clone(),
                     common: common.clone(),
                     registration,
@@ -829,6 +886,9 @@ impl Session<'_> {
         }
         let metadata =
             fs::symlink_metadata(path).map_err(|e| format!("unverifiable ownership: {e}"))?;
+        if c.identity != Some((metadata.dev(), metadata.ino())) {
+            return Err("worktree directory identity changed since selection".into());
+        }
         if !metadata.is_dir() || path.canonicalize().map_err(|e| e.to_string())? != *path {
             return Err("symlink or non-directory worktree; ownership is unverifiable".into());
         }
@@ -874,13 +934,6 @@ impl Session<'_> {
                     "packed-refs.lock",
                     "shallow.lock",
                     "config.lock",
-                    "MERGE_HEAD",
-                    "CHERRY_PICK_HEAD",
-                    "REVERT_HEAD",
-                    "rebase-merge",
-                    "rebase-apply",
-                    "BISECT_LOG",
-                    "sequencer",
                 ] {
                     if git::exists(&directory.join(marker))? {
                         return Err(format!("Git lock or operation in progress: {marker}"));
@@ -890,6 +943,18 @@ impl Session<'_> {
             Ok(())
         };
         check_operations()?;
+        let operations = operation_state(&own, &common, self.args.discard_operations)?;
+        let operation_commits = operation_commit_ids(&operations)?;
+        for oid in &operation_commits {
+            let verified = self.text(
+                path,
+                &["rev-parse", "--verify", &format!("{oid}^{{commit}}")],
+            )?;
+            if verified != *oid {
+                return Err("operation commit does not verify; refusing discard".into());
+            }
+        }
+
         let status = self.probe(
             path,
             &[
@@ -935,7 +1000,9 @@ impl Session<'_> {
                 flags,
                 device: metadata.dev(),
                 inode: metadata.ino(),
-                force: discard,
+                force: discard || !operations.is_empty(),
+                operations,
+                operation_commits,
                 recovery_ref: None,
                 recovery_saved: false,
             },
@@ -1070,6 +1137,8 @@ struct Snapshot {
     device: u64,
     inode: u64,
     force: bool,
+    operations: Vec<(PathBuf, Vec<u8>)>,
+    operation_commits: Vec<String>,
     recovery_ref: Option<String>,
     recovery_saved: bool,
 }
@@ -1186,6 +1255,9 @@ fn execute(
         timings,
         repository,
     };
+    if args.discard_operations && !preserve_commits {
+        return Err("operation discard requires local committed-history recovery; use --preserve-commits PATH in strict mode".into());
+    }
     let mut first = session.inspect(candidate, discard, discard_ignored)?;
     if !preserve_commits {
         session.publication(candidate, &first.head)?;
@@ -1250,6 +1322,43 @@ fn execute(
                     != first.head
                 {
                     return Err("recovery ref did not verify; refusing removal".into());
+                }
+                for oid in &first.operation_commits {
+                    let oid = oid.as_str();
+                    let verified = session.text(
+                        &candidate.primary,
+                        &["rev-parse", "--verify", &format!("{oid}^{{commit}}")],
+                    )?;
+                    if verified != oid {
+                        return Err("operation commit does not verify".into());
+                    }
+                    let pin = format!("refs/workctl/cleanup/{oid}");
+                    match session.text(&candidate.primary, &["rev-parse", "--verify", &pin]) {
+                        Ok(existing)
+                            if existing == oid
+                                && session
+                                    .text(
+                                        &candidate.primary,
+                                        &["for-each-ref", "--format=%(symref)", &pin],
+                                    )?
+                                    .is_empty() => {}
+                        Ok(_) => return Err("operation recovery ref conflict".into()),
+                        Err(_) => {
+                            session.probe(
+                                &candidate.primary,
+                                &[
+                                    "update-ref",
+                                    "--no-deref",
+                                    &pin,
+                                    oid,
+                                    &"0".repeat(oid.len()),
+                                ],
+                            )?;
+                        }
+                    }
+                    if session.text(&candidate.primary, &["rev-parse", "--verify", &pin])? != oid {
+                        return Err("operation recovery ref did not verify".into());
+                    }
                 }
                 first.recovery_ref = Some(recovery);
                 first.recovery_saved = true;
@@ -1363,6 +1472,9 @@ fn next_step(
         if args.strict {
             command.push("--strict".into());
         }
+        if args.discard_operations {
+            command.push("--discard-operations".into());
+        }
         if args
             .preserve_commits
             .iter()
@@ -1422,7 +1534,7 @@ fn next_step(
     )
 }
 
-pub(crate) fn run(args: Args, json: bool) -> u8 {
+pub(crate) fn run(mut args: Args, json: bool) -> u8 {
     let _signals = match runtime::Signals::install() {
         Ok(s) => s,
         Err(e) => {
@@ -1430,7 +1542,14 @@ pub(crate) fn run(args: Args, json: bool) -> u8 {
             return 1;
         }
     };
-    match run_inner(&args, json) {
+    let reconciled = if let Some(id) = &args.reconcile {
+        reconcile_paths(id, args.remove_orphans).map(|paths| {
+            args.paths = paths;
+        })
+    } else {
+        Ok(())
+    };
+    match reconciled.and_then(|_| run_inner(&args, json)) {
         Ok(code) => code,
         Err(e) => {
             super::report(&e);
@@ -1447,7 +1566,74 @@ pub(crate) fn run(args: Args, json: bool) -> u8 {
 fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
     use std::io::Write;
     let started = Instant::now();
-    let selected = select(&args.paths)?;
+    if args.reconcile.is_some() && args.paths.is_empty() {
+        let value = serde_json::json!({"schema_version":2,"operation":"git.worktree.clean","status":"planned","apply":args.apply,"results":[],"note":"All unsuccessful targets are verified absent with no registration; no remaining deletion."});
+        return Ok(if json {
+            presentation::json(&value)
+        } else {
+            u8::from(
+                writeln!(
+                    std::io::stdout(),
+                    "No remaining deletion: filesystem and registrations reconciled."
+                )
+                .is_err(),
+            )
+        });
+    }
+    let scope = args.scope.resolve(&args.paths)?;
+    if args.remove_orphans && scope.has_symlink_roots {
+        return Err("symlink roots cannot authorize orphan removal".into());
+    }
+    let cutoff = args
+        .older_than
+        .map(|age| {
+            std::time::SystemTime::now()
+                .checked_sub(age)
+                .ok_or("age cutoff precedes supported clock range")
+        })
+        .transpose()?;
+    let mut selected = select(&scope.roots, &scope, args.remove_orphans)?;
+    let mut unselected = Vec::new();
+    selected.candidates.retain(|c| {
+        let keep = cutoff.is_none_or(|cutoff| c.age.older(cutoff));
+        if !keep { unselected.push(serde_json::json!({"path":c.registration.path.to_string_lossy(),"path_bytes":presentation::path_bytes(&c.registration.path),"age":c.age.evidence(),"reason":if c.age.created.is_none(){"unknown creation time; not age-selected"}else{"creation timestamp is not strictly older than cutoff"}})); }
+        keep
+    });
+    for candidate in &unselected {
+        writeln!(
+            std::io::stderr(),
+            "Not selected: {} ({})",
+            super::display(candidate["path"].as_str().unwrap_or("unknown")),
+            candidate["reason"].as_str().unwrap_or("unknown")
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    let mut orphan_plans = Vec::new();
+    if args.remove_orphans {
+        if !args.discard_all_local {
+            return Err("--remove-orphans requires --discard-all-local: commit recovery is unavailable for missing registration metadata".into());
+        }
+        for path in selected.skipped.keys() {
+            if scope.excluded(path) {
+                continue;
+            }
+            let metadata =
+                fs::symlink_metadata(path).map_err(|e| format!("orphan metadata: {e}"))?;
+            let stamp = crate::workspace::CreationStamp::from_metadata(Ok(metadata.clone()));
+            if cutoff.is_some_and(|cutoff| !stamp.age.older(cutoff)) {
+                continue;
+            }
+            orphan_plans.push(Orphan::from_metadata(path, metadata)?);
+        }
+    }
+    if args.inventory {
+        return inventory(args, &selected, &scope, &unselected, json);
+    }
+    if args.storage {
+        for c in &mut selected.candidates {
+            c.storage = Some(crate::storage::measure(&c.registration.path));
+        }
+    }
     let mut discard = BTreeSet::new();
     let mut discard_ignored = BTreeSet::new();
     let mut preserve_commits = BTreeSet::new();
@@ -1477,6 +1663,14 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
             approved.insert(p);
         }
     }
+    if args.discard_all_local {
+        discard.extend(
+            selected
+                .candidates
+                .iter()
+                .map(|c| c.registration.path.clone()),
+        );
+    }
     discover::report_skipped(&selected.skipped)?;
     if !json || !selected.candidates.is_empty() {
         let mut overview: Box<dyn Write> = if json {
@@ -1484,7 +1678,30 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
         } else {
             Box::new(std::io::stdout())
         };
-        writeln!(overview,"Git worktree cleanup{}\n\nScope          {}\nWorktrees      {}\nProtected      {} main checkouts\nWorkers        {}\n",if args.apply {""}else{" preview"},args.paths.iter().map(|p| super::output::short(p)).collect::<Vec<_>>().join(" "),selected.candidates.len(),selected.protected.len(),(args.jobs as usize).min(selected.candidates.len())).map_err(|e|e.to_string())?;
+        writeln!(overview,"Git worktree cleanup{}\n\nScope          {}\nWorktrees      {}\nProtected      {} main checkouts\nWorkers        {}\n",if args.apply {""}else{" preview"},if args.paths.is_empty(){".".to_owned()}else{args.paths.iter().map(|p| super::output::short(p)).collect::<Vec<_>>().join(" ")},selected.candidates.len(),selected.protected.len(),(args.jobs as usize).min(selected.candidates.len())).map_err(|e|e.to_string())?;
+        if args.scope.scope.is_some()
+            || !args.scope.exclude.is_empty()
+            || !scope.exclusions.is_empty()
+            || args.older_than.is_some()
+        {
+            writeln!(
+                overview,
+                "Effective roots {}\nExclusions      {}\n",
+                scope
+                    .roots
+                    .iter()
+                    .map(|p| super::output::short(p))
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                scope
+                    .exclusions
+                    .iter()
+                    .map(|p| super::output::short(p))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            )
+            .map_err(|e| e.to_string())?;
+        }
         overview.flush().map_err(|e| e.to_string())?;
         drop(overview);
     }
@@ -1515,6 +1732,66 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
                 })
             });
     }
+    let mut history = if args.apply && (!selected.candidates.is_empty() || !orphan_plans.is_empty())
+    {
+        Some(crate::history::Run::begin(
+            "git.worktree.clean",
+            scope.evidence(),
+            serde_json::json!({"discard_all_local":args.discard_all_local,"discard_operations":args.discard_operations,"strict":args.strict,"older_than_seconds":args.older_than.map(|d|d.as_secs()),"remove_orphans":args.remove_orphans,"storage":args.storage,"cutoff_unix_seconds":cutoff.and_then(|t|t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d|d.as_secs_f64()),"remote":crate::history::safe_name(&args.remote),"timeout_seconds":args.timeout,"jobs":args.jobs}),
+            selected
+                .candidates
+                .iter()
+                .map(|c| {
+                    let mut target = crate::history::target_with_identity(
+                        &c.registration.path,
+                        &c.common,
+                        c.identity,
+                    );
+                    target["head"] = serde_json::json!(c.registration.head);
+                    target["age"] = c.age.evidence();
+                    target["discard_local"] =
+                        serde_json::json!(discard.contains(&c.registration.path));
+                    target["discard_ignored"] = serde_json::json!(
+                        !args.strict || discard_ignored.contains(&c.registration.path)
+                    );
+                    target["preserve_commits"] = serde_json::json!(
+                        !args.strict || preserve_commits.contains(&c.registration.path)
+                    );
+                    target
+                })
+                .chain(orphan_plans.iter().map(|o| {
+                    let mut target =
+                        crate::history::target_with_identity(&o.path, &o.common, Some(o.identity));
+                    target["orphan"] = serde_json::json!(true);
+                    target["age"] = o.age.evidence();
+                    target["commit_recovery"] =
+                        serde_json::json!("unavailable_missing_registration");
+                    target
+                }))
+                .collect(),
+        )?)
+    } else {
+        None
+    };
+    let mut orphan_results = Vec::new();
+    for orphan in orphan_plans {
+        let result = orphan.execute(args.apply, args.storage, &mut history);
+        if let Some(run) = &mut history {
+            run.outcome(
+                &orphan.path,
+                result["status"].as_str().unwrap_or("unverified"),
+                vec![],
+            )?;
+        }
+        writeln!(
+            std::io::stderr(),
+            "Orphan {}: {}; commit recovery unavailable",
+            display(&orphan.path),
+            result["status"]
+        )
+        .map_err(|e| e.to_string())?;
+        orphan_results.push(result);
+    }
     let mut progress = presentation::Progress::new(selected.candidates.len());
     let mut results = Vec::new();
     let mut result_order = Vec::new();
@@ -1536,6 +1813,7 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
                     let path = &candidate.registration.path;
                     let started = Instant::now();
                     let timings = Timings::default();
+                    let free_before=args.storage.then(||crate::storage::available(&candidate.primary)).flatten();
                     let action = match &repositories[&candidate.common] {
                         Ok(repository) => execute(args, candidate, discard.contains(path),
                             !args.strict || discard_ignored.contains(path),
@@ -1546,14 +1824,20 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
                         "inspection_seconds":timings.inspection.get(), "inspection_count":timings.inspections.get(),
                         "registration_revalidations":timings.registration_revalidations.get(),
                         "recovery_seconds":timings.recovery.get(), "removal_seconds":timings.removal.get()});
-                    if tx.send((index, action, timing)).is_err() { break }
+                    let mut storage=candidate.storage.clone();
+                    if let Some(storage)=&mut storage {
+                        let after=crate::storage::available(&candidate.primary);
+                        storage["measured_free_space_change_bytes"]=serde_json::json!(free_before.zip(after).map(|(before,after)|after as i128-before as i128));
+                        storage["measurement_note"]=serde_json::json!("Observed filesystem free-space change during this target; concurrent filesystem activity and APFS sharing prevent attributing exact reclamation.");
+                    }
+                    if tx.send((index, action, timing, storage)).is_err() { break }
                 }
             });
         }
         drop(tx);
         let outcome = (|| -> Result<(), String> {
             for _ in 0..selected.candidates.len() {
-                let (index, action, timing) = loop {
+                let (index, action, timing, storage) = loop {
                     progress.update(
                         results.len(),
                         workers.min(selected.candidates.len() - results.len()),
@@ -1580,6 +1864,8 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
                 "publication":if snapshot.recovery_ref.is_some(){"not_checked_local_recovery"}else{"verified"},
                 "recovery_ref":snapshot.recovery_ref,
                 "recovery_saved":snapshot.recovery_saved,
+                "operation_metadata":snapshot.operations.iter().map(|(p,_)|p.to_string_lossy()).collect::<Vec<_>>(),
+                "operation_recovery_refs":snapshot.operation_commits.iter().map(|oid|format!("refs/workctl/cleanup/{oid}")).collect::<Vec<_>>(),
                 "restore_command":restore
             })
         });
@@ -1616,6 +1902,26 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
                         )
                     }
                 };
+                if let Some(run) = &mut history {
+                    let refs = metadata
+                        .as_ref()
+                        .map(|m| {
+                            m["recovery_ref"]
+                                .as_str()
+                                .map(str::to_owned)
+                                .into_iter()
+                                .chain(
+                                    m["operation_recovery_refs"]
+                                        .as_array()
+                                        .into_iter()
+                                        .flatten()
+                                        .filter_map(|r| r.as_str().map(str::to_owned)),
+                                )
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    run.outcome(path, status, refs)?;
+                }
                 let next = next_step(
                     args,
                     path,
@@ -1637,6 +1943,24 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
                             .collect::<String>())
                         .unwrap_or_default()
                 );
+                detail.push_str(&format!(
+                    "\n    Creation time: {} ({})",
+                    candidate.age.evidence()["created_unix_seconds"],
+                    candidate.age.evidence()["source"]
+                        .as_str()
+                        .unwrap_or("unknown")
+                ));
+                if let Some(storage) = &storage {
+                    detail.push_str(&format!("\n    Allocated: {} bytes; estimated reclaimable: {} bytes; measured free-space change: {} bytes; scan {}",storage["allocated_bytes"],storage["estimated_reclaimable_bytes"],storage["measured_free_space_change_bytes"],if storage["complete"]==true {"complete"}else{"incomplete"}));
+                    if let Some(errors) = storage["errors"].as_array() {
+                        for error in errors {
+                            detail.push_str(&format!(
+                                "\n    Storage error: {}",
+                                display(error.as_str().unwrap_or("unknown"))
+                            ));
+                        }
+                    }
+                }
                 if let Some(evidence) = &metadata {
                     if let Some(recovery) = evidence["recovery_ref"].as_str() {
                         detail.push_str(&format!(
@@ -1693,7 +2017,7 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
                 if !json {
                     progress.result(&detail)?;
                 }
-                results.push(serde_json::json!({"path":path.to_string_lossy(),"path_bytes":presentation::path_bytes(path),"status":status,"reason":reason,"discard_local":discard.contains(path),"discard_ignored":!args.strict || discard_ignored.contains(path),"preserve_commits":!args.strict || preserve_commits.contains(path),"evidence":metadata,"next_step":next,"timing":timing}));
+                results.push(serde_json::json!({"path":path.to_string_lossy(),"path_bytes":presentation::path_bytes(path),"age":candidate.age.evidence(),"storage":storage,"status":status,"reason":reason,"discard_local":discard.contains(path),"discard_ignored":!args.strict || discard_ignored.contains(path),"preserve_commits":!args.strict || preserve_commits.contains(path),"evidence":metadata,"next_step":next,"timing":timing}));
                 result_order.push(index);
             }
             Ok(())
@@ -1705,10 +2029,11 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
     })?;
     let mut ordered = result_order.into_iter().zip(results).collect::<Vec<_>>();
     ordered.sort_by_key(|(index, _)| *index);
-    let results = ordered
+    let mut results = ordered
         .into_iter()
         .map(|(_, result)| result)
         .collect::<Vec<_>>();
+    results.extend(orphan_results);
     progress.finish();
     let removed = results.iter().filter(|r| r["status"] == "removed").count();
     let would_remove = results
@@ -1752,9 +2077,12 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
     } else {
         "planned"
     };
+    if let Some(run) = &mut history {
+        run.finish(status)?;
+    }
     if json {
         if presentation::json(
-            &serde_json::json!({"schema_version":2,"operation":"git.worktree.clean","status":status,"apply":args.apply,"policy":if args.strict {"strict"}else{"pragmatic"},"scope":presentation::paths(&args.paths),"protected":presentation::paths(&selected.protected),"skipped":discover::skipped_json(&selected.skipped),"results":results,"summary":{"skipped":selected.skipped.len(),"removed":removed,"would_remove":would_remove,"protected_worktrees":protected_worktrees,"workers":workers,"blocked":blocked,"failed":failed,"unverified":unverified,"errors":errors,"interrupted":interrupted,"elapsed_seconds":started.elapsed().as_secs_f64()}}),
+            &serde_json::json!({"schema_version":2,"operation":"git.worktree.clean","run_id":history.as_ref().map(|r|&r.id),"status":status,"apply":args.apply,"policy":if args.strict {"strict"}else{"pragmatic"},"scope":if args.scope.scope.is_some(){presentation::paths(&scope.roots)}else if args.paths.is_empty(){vec![".".to_owned()]}else{presentation::paths(&args.paths)},"selection":scope.evidence(),"cutoff_unix_seconds":cutoff.and_then(|t|t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d|d.as_secs_f64()),"not_selected":unselected,"protected":presentation::paths(&selected.protected),"skipped":discover::skipped_json(&selected.skipped),"results":results,"summary":{"skipped":selected.skipped.len(),"removed":removed,"would_remove":would_remove,"protected_worktrees":protected_worktrees,"workers":workers,"blocked":blocked,"failed":failed,"unverified":unverified,"errors":errors,"interrupted":interrupted,"elapsed_seconds":started.elapsed().as_secs_f64()}}),
         ) != 0
         {
             return Ok(1);
@@ -1826,4 +2154,500 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
         }
     }
     Ok(code)
+}
+
+fn operation_commit_ids(operations: &[(PathBuf, Vec<u8>)]) -> Result<Vec<String>, String> {
+    let mut commits = BTreeSet::new();
+    for (path, bytes) in operations {
+        let name = path.file_name().and_then(|s| s.to_str());
+        let list = matches!(name, Some("rewritten-list" | "rewritten-pending"));
+        if !list
+            && !matches!(
+                name,
+                Some(
+                    "MERGE_HEAD"
+                        | "ORIG_HEAD"
+                        | "REBASE_HEAD"
+                        | "MERGE_AUTOSTASH"
+                        | "orig-head"
+                        | "onto"
+                        | "stopped-sha"
+                        | "amend"
+                        | "original-commit"
+                        | "autostash"
+                        | "abort-safety"
+                        | "squash-onto"
+                )
+            )
+        {
+            continue;
+        }
+        let text =
+            std::str::from_utf8(bytes).map_err(|_| "unsupported operation commit metadata")?;
+        if !list && text.trim().is_empty() {
+            return Err("empty operation commit metadata; refusing discard".into());
+        }
+        for oid in text.split_whitespace() {
+            if !matches!(oid.len(), 40 | 64) || !oid.bytes().all(|b| b.is_ascii_hexdigit()) {
+                return Err("malformed operation commit; refusing discard".into());
+            }
+            commits.insert(oid.to_owned());
+        }
+    }
+    Ok(commits.into_iter().collect())
+}
+
+// Operation metadata can be abandoned, but process locks never become stale by age.
+fn operation_state(
+    own: &Path,
+    common: &Path,
+    discard: bool,
+) -> Result<Vec<(PathBuf, Vec<u8>)>, String> {
+    let mut result = Vec::new();
+    for directory in [own, common] {
+        for marker in [
+            "index.lock",
+            "HEAD.lock",
+            "packed-refs.lock",
+            "shallow.lock",
+            "config.lock",
+        ] {
+            if git::exists(&directory.join(marker))? {
+                return Err(format!("Git lock or operation in progress: {marker}"));
+            }
+        }
+        for unsupported in ["CHERRY_PICK_HEAD", "REVERT_HEAD", "BISECT_LOG", "sequencer"] {
+            if git::exists(&directory.join(unsupported))? {
+                return Err(format!(
+                    "unsupported Git operation in progress: {unsupported}"
+                ));
+            }
+        }
+        for name in ["MERGE_HEAD", "rebase-merge", "rebase-apply"] {
+            let root = directory.join(name);
+            if !git::exists(&root)? {
+                continue;
+            }
+            if directory != own || !discard {
+                return Err(format!("Git operation in progress: {name}; selected worktree operations require --discard-operations independently of local-data discard"));
+            }
+            if name.starts_with("rebase-") {
+                for required in ["orig-head", "onto"] {
+                    if !root.join(required).is_file() {
+                        return Err("incomplete rebase metadata; refusing operation discard".into());
+                    }
+                }
+            }
+            for entry in walkdir::WalkDir::new(&root).follow_links(false) {
+                let entry = entry.map_err(|e| e.to_string())?;
+                let m = fs::symlink_metadata(entry.path()).map_err(|e| e.to_string())?;
+                if entry.file_name().as_encoded_bytes().ends_with(b".lock") {
+                    return Err("Git operation contains a process lock; refusing removal".into());
+                }
+                if m.is_dir() {
+                    continue;
+                }
+                if !m.is_file() || m.len() > 1_048_576 {
+                    return Err("unsupported operation metadata type or size".into());
+                }
+                result.push((
+                    entry
+                        .path()
+                        .strip_prefix(own)
+                        .map_err(|e| e.to_string())?
+                        .to_owned(),
+                    fs::read(entry.path()).map_err(|e| e.to_string())?,
+                ));
+            }
+        }
+    }
+    if !result.is_empty() {
+        for name in ["ORIG_HEAD", "REBASE_HEAD", "MERGE_AUTOSTASH"] {
+            let p = own.join(name);
+            if git::exists(&p)? {
+                let m = fs::symlink_metadata(&p).map_err(|e| e.to_string())?;
+                if !m.is_file() || m.len() > 1024 {
+                    return Err("unsupported operation recovery metadata".into());
+                }
+                result.push((PathBuf::from(name), fs::read(p).map_err(|e| e.to_string())?));
+            }
+        }
+    }
+    result.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(result)
+}
+
+#[derive(Debug, clap::Args)]
+pub(crate) struct InventoryArgs {
+    /// Checkout, linked worktree, or container directories (default: current directory)
+    #[arg(value_name="PATH", value_hint=clap::ValueHint::DirPath)]
+    paths: Vec<PathBuf>,
+    #[command(flatten)]
+    scope: crate::workspace::ScopeArgs,
+    /// Select directory creation timestamps strictly older than this duration
+    #[arg(long,value_parser=crate::workspace::duration)]
+    older_than: Option<Duration>,
+    /// Measure allocation estimates without following symlinks (30-second scan bound per target)
+    #[arg(long)]
+    storage: bool,
+}
+pub(crate) fn inventory_run(args: InventoryArgs, json: bool) -> u8 {
+    run(
+        Args {
+            paths: args.paths,
+            scope: args.scope,
+            older_than: args.older_than,
+            storage: args.storage,
+            inventory: true,
+            apply: false,
+            discard_local: vec![],
+            discard_ignored: vec![],
+            discard_all_local: false,
+            discard_operations: false,
+            remove_orphans: false,
+            reconcile: None,
+            strict: false,
+            preserve_commits: vec![],
+            remote: "origin".into(),
+            timeout: 300,
+            jobs: 4,
+            verbose: false,
+        },
+        json,
+    )
+}
+
+fn inventory(
+    args: &Args,
+    selected: &Selection,
+    scope: &crate::workspace::Resolved,
+    unselected: &[serde_json::Value],
+    json: bool,
+) -> Result<u8, String> {
+    let mut results = Vec::new();
+    for c in &selected.candidates {
+        let path = &c.registration.path;
+        let probe = || -> Result<serde_json::Value, String> {
+            let head = String::from_utf8(git::probe(path, &["rev-parse", "--verify", "HEAD"])?)
+                .map_err(|_| "non-UTF-8 HEAD")?
+                .trim()
+                .to_owned();
+            let branch =
+                String::from_utf8(git::probe(path, &["rev-parse", "--abbrev-ref", "HEAD"])?)
+                    .map_err(|_| "non-UTF-8 branch")?
+                    .trim()
+                    .to_owned();
+            let status = git::probe(
+                path,
+                &[
+                    "--no-optional-locks",
+                    "status",
+                    "--porcelain=v1",
+                    "-z",
+                    "--untracked-files=all",
+                    "--ignored=matching",
+                ],
+            )?;
+            let flags = git::probe(path, &["ls-files", "-v", "-z"])?;
+            let own = git::path_output(&git::probe(path, &["rev-parse", "--absolute-git-dir"])?);
+            let state = operation_state(&own, &c.common, false).err();
+            Ok(
+                serde_json::json!({"head":head,"branch":branch,"local_data":local_data(&status,&flags),"operation_state":state,"local_changes":status.split(|b|*b==0).any(|e|!e.is_empty()&&!e.starts_with(b"!! ")),"locked":c.registration.locked,"complete":true}),
+            )
+        };
+        let (state, reason) = match probe() {
+            Ok(state) => (state, None),
+            Err(e) => (serde_json::json!({"complete":false}), Some(e)),
+        };
+        let protection = if let Some(reason) = &reason {
+            Some(reason.clone())
+        } else if c.registration.locked {
+            Some("worktree locked".into())
+        } else if state["local_changes"] == true {
+            Some("local work protected unless explicitly discarded".into())
+        } else {
+            state["operation_state"].as_str().map(str::to_owned)
+        };
+        results.push(serde_json::json!({"path":path.to_string_lossy(),"path_bytes":presentation::path_bytes(path),"primary":c.primary.to_string_lossy(),"primary_bytes":presentation::path_bytes(&c.primary),"common":c.common.to_string_lossy(),"common_bytes":presentation::path_bytes(&c.common),"age":c.age.evidence(),"state":state,"protection_reason":protection,"error":reason,"orphan":false,"storage":if args.storage {Some(crate::storage::measure(path))}else{None}}));
+    }
+    let incomplete = results
+        .iter()
+        .any(|r| r["state"]["complete"] != true || r["storage"]["complete"] == false);
+    let primary_inventory = selected.protected.iter().map(|p| {
+        let inspect = (|| -> Result<serde_json::Value,String> {
+            let status=git::probe(p,&["--no-optional-locks","status","--porcelain=v1","-z","--untracked-files=all","--ignored=matching"])?;
+            let flags=git::probe(p,&["ls-files","-v","-z"])?;
+            let text=|args:&[&str]| -> Result<String,String> {String::from_utf8(git::probe(p,args)?).map(|s|s.trim_end_matches('\n').to_owned()).map_err(|_|"non-UTF-8 reference".into())};
+            let head=text(&["rev-parse","--verify","HEAD"])?;
+            let branch=text(&["rev-parse","--abbrev-ref","HEAD"])?;
+            let common=git::path_output(&git::probe(p,&["rev-parse","--path-format=absolute","--git-common-dir"])?);
+            Ok(serde_json::json!({"head":head,"branch":branch,"common":common.to_string_lossy(),"common_bytes":presentation::path_bytes(&common),"local_data":local_data(&status,&flags),"operation_state":operation_state(&common,&common,false).err(),"complete":true}))
+        })();
+        let state=inspect.unwrap_or_else(|e|serde_json::json!({"complete":false,"error":e}));
+        serde_json::json!({"path":p.to_string_lossy(),"path_bytes":presentation::path_bytes(p),"age":crate::workspace::Age::read(p).evidence(),"protection_reason":"primary checkout is never cleanup eligible","state":state,"orphan":false,"storage":if args.storage {Some(crate::storage::measure(p))}else{None}})
+    }).collect::<Vec<_>>();
+    let incomplete = incomplete
+        || primary_inventory
+            .iter()
+            .any(|r| r["state"]["complete"] != true || r["storage"]["complete"] == false);
+    let orphans=selected.skipped.iter().map(|(path,reason)|serde_json::json!({"path":path.to_string_lossy(),"path_bytes":presentation::path_bytes(path),"age":crate::workspace::Age::read(path).evidence(),"orphan":true,"protection_reason":reason,"local_changes":"unknown_missing_registration","commit_recovery":"unavailable_missing_registration","storage":if args.storage {Some(crate::storage::measure(path))}else{None}})).collect::<Vec<_>>();
+    let result = serde_json::json!({"schema_version":1,"operation":"git.worktree.inventory","status":if incomplete {"incomplete"}else{"completed"},"selection":scope.evidence(),"results":results,"primary_checkouts":presentation::paths(&selected.protected),"primary_inventory":primary_inventory,"orphans":orphans,"not_selected":unselected});
+    if json {
+        if presentation::json(&result) != 0 {
+            return Ok(1);
+        }
+    } else {
+        writeln!(
+            std::io::stdout(),
+            "{}",
+            presentation::safe_text(
+                &serde_json::to_string_pretty(&result).map_err(|e| e.to_string())?
+            )
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(if runtime::interrupted() {
+        130
+    } else {
+        u8::from(incomplete)
+    })
+}
+
+fn reconcile_paths(id: &str, allow_orphans: bool) -> Result<Vec<PathBuf>, String> {
+    let prior = crate::history::read(id)?;
+    if prior["operation"] != "git.worktree.clean" {
+        return Err("--reconcile requires a cleanup run".into());
+    }
+    let mut paths = Vec::new();
+    for target in prior["targets"]
+        .as_array()
+        .ok_or("invalid history targets")?
+        .iter()
+        .filter(|t| crate::history::unsuccessful(t))
+    {
+        if !target["evidence"]["quarantine_bytes"].is_null() {
+            let quarantine = crate::history::path(&target["evidence"], "quarantine_bytes")?;
+            if git::exists(&quarantine)? {
+                return Err(format!("orphan quarantine remains at {}; inspect and recover explicitly before any further cleanup",display(quarantine)));
+            }
+        }
+        let path = crate::history::path(target, "path_bytes")?;
+        let common = crate::history::path(target, "common_bytes")?;
+        match fs::symlink_metadata(&path) {
+            Ok(_) => {
+                crate::history::verify_identity(target)?;
+                if allow_orphans && target["orphan"] == true {
+                    let current = Orphan::inspect(&path)?;
+                    if current.common != common {
+                        return Err("orphan reconciliation repository changed".into());
+                    }
+                    paths.push(path);
+                    continue;
+                }
+                let (repo, linked) = discover::repository(&path)?
+                    .ok_or("reconciliation target is no longer a repository")?;
+                if !linked || repo.path != path || repo.common != common {
+                    return Err("cleanup reconciliation ownership changed".into());
+                }
+                paths.push(path);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                let registrations = list(&common)?;
+                if registrations.iter().any(|r| r.path == path) {
+                    return Err("cleanup reconciliation found absent files with remaining registration; inspect metadata explicitly".into());
+                }
+                writeln!(
+                    std::io::stderr(),
+                    "Reconciled absent target: {}",
+                    display(path)
+                )
+                .map_err(|e| e.to_string())?;
+            }
+            Err(e) => return Err(format!("cannot reconcile target: {e}")),
+        }
+    }
+    Ok(paths)
+}
+
+struct Orphan {
+    age: crate::workspace::Age,
+    path: PathBuf,
+    common: PathBuf,
+    registration: PathBuf,
+    identity: (u64, u64),
+    marker: Vec<u8>,
+}
+impl Orphan {
+    fn inspect(path: &Path) -> Result<Self, String> {
+        Self::from_metadata(path, fs::symlink_metadata(path).map_err(|e| e.to_string())?)
+    }
+    fn from_metadata(path: &Path, metadata: fs::Metadata) -> Result<Self, String> {
+        if !metadata.is_dir() || path.canonicalize().map_err(|e| e.to_string())? != path {
+            return Err("orphan is a symlink or noncanonical directory".into());
+        }
+        let registration = discover::gitfile_target(path)?
+            .ok_or("orphan marker is malformed or not a regular gitfile")?;
+        if registration.components().any(|c| {
+            matches!(
+                c,
+                std::path::Component::ParentDir | std::path::Component::CurDir
+            )
+        }) {
+            return Err("orphan marker must name normalized absolute metadata; relative or ambiguous ownership remains blocked".into());
+        }
+        if discover::orphan_reason(&registration)?.is_none() {
+            return Err(
+                "orphan common repository or missing registration cannot be verified".into(),
+            );
+        }
+        let common = registration
+            .parent()
+            .and_then(|p| p.parent())
+            .ok_or("orphan common repository missing")?
+            .canonicalize()
+            .map_err(|e| e.to_string())?;
+        let registrations = list(&common)?;
+        if registrations
+            .iter()
+            .any(|r| r.path == path || r.path.starts_with(path))
+            || common.starts_with(path)
+        {
+            return Err("orphan overlaps a registered worktree or Git metadata".into());
+        }
+        let marker = fs::read(path.join(".git")).map_err(|e| e.to_string())?;
+        orphan_topology(path)?;
+        let identity = (metadata.dev(), metadata.ino());
+        let age = crate::workspace::CreationStamp::from_metadata(Ok(metadata)).age;
+        Ok(Self {
+            age,
+            path: path.to_owned(),
+            common,
+            registration,
+            identity,
+            marker,
+        })
+    }
+    fn execute(
+        &self,
+        apply: bool,
+        storage: bool,
+        history: &mut Option<crate::history::Run>,
+    ) -> serde_json::Value {
+        let mut measured = storage.then(|| crate::storage::measure(&self.path));
+        let free_before = storage
+            .then(|| crate::storage::available(&self.common))
+            .flatten();
+        let age = self.age.evidence();
+        let mut removal_attempted = false;
+        let outcome = (|| -> Result<(), String> {
+            let _lock = lock::acquire(&self.common)?;
+            operation_state(&self.common, &self.common, false)?;
+            let fresh = Self::inspect(&self.path)?;
+            if fresh.common != self.common
+                || fresh.registration != self.registration
+                || fresh.identity != self.identity
+                || fresh.marker != self.marker
+            {
+                return Err(
+                    "orphan identity, marker, or ownership changed; no deletion authorized".into(),
+                );
+            }
+            if !apply {
+                return Ok(());
+            }
+            if runtime::cancelled() {
+                return Err("interrupted before orphan removal".into());
+            }
+            // Rename into a private sibling first, so a replacement at the old path
+            // cannot be traversed by recursive removal. Reverify after the rename.
+            let quarantine = tempfile::Builder::new()
+                .prefix(".workctl-orphan-")
+                .tempdir_in(self.path.parent().ok_or("orphan has no parent")?)
+                .map_err(|e| e.to_string())?;
+            let moved = quarantine.path().join("target");
+            if let Some(run) = history {
+                run.evidence(&self.path,serde_json::json!({"quarantine_bytes":presentation::path_bytes(quarantine.path())}))?;
+            }
+            removal_attempted = true;
+            fs::rename(&self.path, &moved).map_err(|e| e.to_string())?;
+            // Keep uncertain data on disk even when verification or interruption fails.
+            let quarantine = quarantine.keep();
+            let verify = (|| -> Result<(), String> {
+                let m = fs::symlink_metadata(&moved).map_err(|e| e.to_string())?;
+                if !m.is_dir()
+                    || (m.dev(), m.ino()) != self.identity
+                    || fs::read(moved.join(".git")).map_err(|e| e.to_string())? != self.marker
+                    || git::exists(&self.registration)?
+                {
+                    return Err("orphan changed while quarantining; refusing deletion".into());
+                }
+                orphan_topology(&moved)?;
+                operation_state(&self.common, &self.common, false)?;
+                if runtime::cancelled() {
+                    return Err("interrupted before quarantined removal".into());
+                }
+                fs::remove_dir_all(&moved).map_err(|e| e.to_string())?;
+                if git::exists(&self.path)?
+                    || git::exists(&moved)?
+                    || git::exists(&self.registration)?
+                    || list(&self.common)?.iter().any(|r| r.path == self.path)
+                {
+                    return Err(
+                        "orphan removal did not verify; directory or registration remains".into(),
+                    );
+                }
+                fs::remove_dir(&quarantine).map_err(|e| e.to_string())?;
+                Ok(())
+            })();
+            verify.map_err(|e| {
+                format!(
+                    "{e}; inspect quarantine {} before any further removal",
+                    display(quarantine)
+                )
+            })
+        })();
+        if let Some(measured) = &mut measured {
+            measured["measured_free_space_change_bytes"] = serde_json::json!(free_before
+                .zip(crate::storage::available(&self.common))
+                .map(|(before, after)| after as i128 - before as i128));
+        }
+        let (status, error) = match outcome {
+            Ok(()) => (if apply { "removed" } else { "would remove" }, None),
+            Err(e) => (
+                if removal_attempted {
+                    "unverified"
+                } else if runtime::cancelled() {
+                    "interrupted"
+                } else {
+                    "blocked"
+                },
+                Some(e),
+            ),
+        };
+        serde_json::json!({"path":self.path.to_string_lossy(),"path_bytes":presentation::path_bytes(&self.path),"status":status,"reason":error,"orphan":true,"commit_recovery":"unavailable_missing_registration","age":age,"storage":measured})
+    }
+}
+fn orphan_topology(path: &Path) -> Result<(), String> {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    for entry in walkdir::WalkDir::new(path).follow_links(false) {
+        if runtime::cancelled() || Instant::now() >= deadline {
+            return Err("orphan topology scan interrupted or timed out".into());
+        }
+        let entry = entry.map_err(|e| e.to_string())?;
+        if entry.file_name() == ".git" && entry.depth() != 1 {
+            return Err("orphan contains a nested repository; refusing removal".into());
+        }
+        if entry.file_name() == ".gitmodules" {
+            return Err(
+                "orphan has unsupported submodule state; commit recovery unavailable".into(),
+            );
+        }
+        if entry.file_type().is_dir()
+            && entry.path().join("HEAD").is_file()
+            && entry.path().join("objects").is_dir()
+        {
+            return Err("orphan contains a nested bare repository".into());
+        }
+    }
+    Ok(())
 }

@@ -20,9 +20,10 @@ zsh configuration already does this. Open a fresh shell after installation.
 
 Git operations require Git 2.36 or later. Authentication uses the installed `bb`,
 `twg`, and `atlas` provider CLIs; each provider keeps its own credentials.
-`workctl doctor` checks runtime prerequisites without repairs. It does not verify
-service credentials or managed installation; use `auth preflight --check` and
-`config-tools check-install` for those checks.
+`workctl doctor` checks runtime prerequisites without repairs. Use `--profile code` to inspect required client executables without provider calls,
+and `--managed` (or `--home PATH`) to compare managed binaries and completions
+with the running executable. Service credentials still require `auth preflight --check`;
+`config-tools check-install` checks the broader configuration installation.
 
 <details>
 <summary>Managed files and installation behavior</summary>
@@ -52,9 +53,12 @@ and functions and refreshes command hashes when loaded.
 | Command | Purpose |
 | --- | --- |
 | `workctl auth preflight` | Renew credentials and verify access |
+| `workctl auth inspect --profile code` | Resolve credential requirements without provider calls |
 | `workctl auth exec -- COMMAND` | Run preflight, then launch a command |
 | `workctl git reset [PATH ...]` | Reset primary checkouts to a verified remote branch |
 | `workctl git worktree clean [PATH ...]` | Preview linked-worktree removal; `--apply` removes eligible worktrees |
+| `workctl git worktree inventory [PATH ...]` | Inspect worktrees, age evidence, local work, operations, and orphans |
+| `workctl history [RUN_ID] --unsuccessful` | List runs or inspect unsuccessful targets |
 | `workctl doctor` | Check Git, executable, temporary storage, process groups, and locks |
 | `workctl completions SHELL` | Generate shell completions |
 
@@ -237,3 +241,100 @@ for another launch error.
 - [Configuration and installation](configuration.md)
 - [Development and verification](development.md)
 - [Repository README](../README.md)
+
+## Workspace maintenance
+
+Preview seven-day cleanup before explicitly applying it:
+
+```sh
+workctl git worktree clean --older-than 7d --discard-all-local /path/to/work --json
+workctl git worktree clean --older-than 7d --discard-all-local --apply /path/to/work --json
+```
+
+Age means filesystem **directory creation time**, with a single cutoff per invocation.
+Only timestamps strictly before the cutoff qualify. Unknown creation times are reported
+and excluded from age selection; commit dates and modification times are never used.
+Durations accept positive integer `s`, `m`, `h`, `d`, or `w` units. This is creation age,
+not inactivity. Apply discovers the selection again; preview grants no continuing authority.
+
+`--discard-all-local` authorizes tracked, untracked, and ignored file loss only for
+selected linked worktrees. `--exclude PATH` excludes the path and descendants before
+inspection or mutation. Exclusions must resolve to existing paths. The primary checkout
+remains protected. Existing `--discard-local PATH` retains its exact-path meaning.
+
+For reusable roots, create `~/.config/workctl/workspaces.json` (or select an explicit
+file with `--workspace-config`):
+
+```json
+{"schema_version":1,"scopes":{"work":{"roots":["/path/to/work"],"exclusions":["/path/to/work/keep"]}}}
+```
+
+Configured paths are absolute; the file contains paths and policy only. Use
+`--scope work` instead of positional paths on cleanup, inventory, or reset.
+Additional command-line exclusions are additive, and overlapping roots never duplicate
+operations. JSON `selection` reports effective roots and exclusions with path bytes.
+
+`git worktree inventory` reports registered worktrees and protected primary checkouts,
+creation evidence, HEAD/branch, local data, operation blockers, and orphan directories.
+Use `--storage` for a bounded allocation scan. Allocated bytes, estimated reclaimable
+bytes, and observed filesystem free-space changes are separate fields. Scans do not
+follow symlinks, deduplicate hardlinks, and report errors as incomplete evidence.
+APFS clones, snapshots, and concurrent filesystem activity prevent exact reclamation
+promises. Inventory and previews never write committed-history recovery refs.
+
+### Abandoned operations and orphan directories
+
+`--discard-operations` independently authorizes abandoned merge/rebase state in selected
+worktrees. It does not authorize local-file loss or bypass process locks. Workctl pins
+HEAD and verified merge/rebase commits, including autostash and rewritten commits,
+before native Git removal and rechecks
+state after recovery. Other operation types and incomplete rebase metadata remain blocked.
+In strict mode, operation discard requires exact `--preserve-commits PATH` approval.
+Recovery refs preserve commits, including recorded autostashes; they do not capture
+additional uncommitted files.
+
+`--remove-orphans --discard-all-local` separately allows directories whose gitfile points
+to a missing registration in a verified common repository. Preview first. Uncertain,
+symlinked, relative/ambiguous, malformed, nested-repository, and submodule layouts stay
+blocked. Orphan removal explicitly reports that commit recovery is unavailable. It
+quarantines and revalidates the directory before removal. An uncertain quarantine is
+retained for explicit inspection and recorded in history; reconciliation refuses to
+silently delete it. Successful removal verifies filesystem and registration absence.
+
+### Operation history and focused recovery
+
+Applied cleanup and nonempty reset runs save intent before mutation, then atomically
+publish per-target outcomes in private schema-versioned records under
+`~/.local/state/workctl`. `WORKCTL_STATE_DIR` isolates tests or an alternate private
+state directory. A state directory must be owned and private (`0700`); records use
+`0600`. An intent-publication failure prevents mutation. A later write failure can
+leave an incomplete record after mutation; it does not imply rollback. No automatic
+history or recovery-ref pruning occurs. Records omit provider output, credentials,
+wrapped-command arguments, and Git transcripts.
+
+```sh
+workctl history --json
+workctl history RUN_ID --unsuccessful --json
+workctl git reset --retry RUN_ID --json
+workctl git worktree clean --reconcile RUN_ID --json
+workctl git worktree clean --reconcile RUN_ID --apply --json
+```
+
+Reset retry selects only unsuccessful targets, verifies directory/repository identity,
+and performs fresh discovery and normal safety checks. It preserves the original remote
+and branch; unsupported option encodings require explicit selection rather than guessing.
+Cleanup reconciliation verifies filesystem and registration state first, refuses reused
+paths or retained quarantines, and previews remaining work. Deleting remaining work
+requires a **new** `--apply` and fresh discard options. Pending, interrupted, malformed,
+and incompletely published runs remain distinguishable from success.
+
+### Offline readiness
+
+`auth inspect --profile code --json` resolves required descriptors without calling providers
+or reading provider credential stores. Preflight reports client readiness separately while
+retaining strict profile success: healthy native `bb` remains visible when TWG's manual
+Bitbucket token fails. `auth exec` still requires every declared credential and never
+substitutes clients. Doctor checks executable/build provenance, optional profile client
+prerequisites, and optional managed installation drift; it never installs, logs in, collects
+tokens, or repairs files. Executable presence does not prove version compatibility or
+resource authorization; credential checks remain explicit.

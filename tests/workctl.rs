@@ -4021,7 +4021,8 @@ esac
         }
         fs::write(&release, "release").unwrap();
         let out = child.wait_with_output().unwrap();
-        let result: serde_json::Value = serde_json::from_slice(&out.stdout).expect(&text(&out));
+        let result: serde_json::Value =
+            serde_json::from_slice(&out.stdout).unwrap_or_else(|_| panic!("{}", text(&out)));
         let entry = result["results"]
             .as_array()
             .unwrap()
@@ -4274,4 +4275,834 @@ esac
         "precious"
     );
     f.unchanged();
+}
+
+#[test]
+fn bulk_age_selection_excludes_young_and_excluded_dirty_worktrees() {
+    let f = Fixture::new();
+    fs::write(f.worktree.join("file"), "old tracked edit").unwrap();
+    fs::write(f.worktree.join("loose"), "old untracked").unwrap();
+    git(&f.worktree, &["config", "core.excludesFile", "/dev/null"]);
+    fs::write(f.worktree.join(".gitignore"), "ignored\n").unwrap();
+    fs::write(f.worktree.join("ignored"), "old ignored").unwrap();
+    std::thread::sleep(Duration::from_secs(31));
+    let young = f.temp.path().join("young");
+    git(
+        &f.repo,
+        &["worktree", "add", "--detach", young.to_str().unwrap()],
+    );
+    fs::write(young.join("file"), "young edit").unwrap();
+    let run = |apply: bool, exclude: bool| {
+        let mut c = Command::new(BIN);
+        env(&mut c).args([
+            "git",
+            "worktree",
+            "clean",
+            "--json",
+            "--older-than",
+            "30s",
+            "--discard-all-local",
+        ]);
+        if apply {
+            c.arg("--apply");
+        }
+        if exclude {
+            c.arg("--exclude").arg(&f.worktree);
+        }
+        let out = c.arg(f.temp.path()).arg(&f.repo).output().unwrap();
+        assert!(out.status.success(), "{}", text(&out));
+        serde_json::from_slice::<serde_json::Value>(&out.stdout).unwrap()
+    };
+    let preview = run(false, false);
+    assert_eq!(preview["results"].as_array().unwrap().len(), 1);
+    assert_eq!(preview["results"][0]["status"], "would remove");
+    assert_eq!(
+        preview["results"][0]["age"]["source"],
+        "filesystem_creation_time"
+    );
+    assert!(f.worktree.exists());
+    assert!(run(true, true)["results"].as_array().unwrap().is_empty());
+    let applied = run(true, false);
+    assert_eq!(applied["results"][0]["status"], "removed");
+    assert!(!f.worktree.exists());
+    assert_eq!(
+        fs::read_to_string(young.join("file")).unwrap(),
+        "young edit"
+    );
+    assert!(f.repo.join("file").exists());
+    let recovery = applied["results"][0]["evidence"]["recovery_ref"]
+        .as_str()
+        .unwrap();
+    assert_eq!(
+        git(&f.repo, &["show", &format!("{recovery}:file")]),
+        "published"
+    );
+    let history = env(&mut Command::new(BIN))
+        .args(["history", applied["run_id"].as_str().unwrap(), "--json"])
+        .output()
+        .unwrap();
+    assert!(history.status.success(), "{}", text(&history));
+    let history: serde_json::Value = serde_json::from_slice(&history.stdout).unwrap();
+    assert_eq!(history["targets"][0]["age"], applied["results"][0]["age"]);
+    assert_eq!(
+        history["options"]["cutoff_unix_seconds"],
+        applied["cutoff_unix_seconds"]
+    );
+}
+
+#[test]
+fn workspace_scope_inventory_uses_same_selection_and_reports_storage() {
+    let f = Fixture::new();
+    let config = f.temp.path().join("workspace.json");
+    fs::write(&config, serde_json::to_vec(&serde_json::json!({"schema_version":1,"scopes":{"test":{"roots":[f.repo,f.temp.path()],"exclusions":[]}}})).unwrap()).unwrap();
+    let out = env(&mut Command::new(BIN))
+        .args([
+            "git",
+            "worktree",
+            "inventory",
+            "--json",
+            "--workspace-config",
+        ])
+        .arg(&config)
+        .args(["--scope", "test", "--storage"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+    let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(result["results"].as_array().unwrap().len(), 1);
+    assert!(result["results"][0]["storage"]["allocated_bytes"].is_u64());
+    assert_eq!(result["results"][0]["storage"]["complete"], true);
+    assert_eq!(result["primary_inventory"][0]["state"]["branch"], "main");
+    assert!(result["primary_inventory"][0]["state"]["common_bytes"].is_array());
+    let invalid = env(&mut Command::new(BIN))
+        .args([
+            "git",
+            "worktree",
+            "clean",
+            "--scope",
+            "test",
+            "--workspace-config",
+        ])
+        .arg(&config)
+        .arg(&f.repo)
+        .output()
+        .unwrap();
+    assert_eq!(invalid.status.code(), Some(2));
+}
+
+#[test]
+fn abandoned_merge_requires_separate_authorization_and_preserves_merge_heads() {
+    let f = Fixture::new();
+    git(&f.worktree, &["checkout", "-b", "other"]);
+    fs::write(f.worktree.join("file"), "other\n").unwrap();
+    git(&f.worktree, &["commit", "-am", "other"]);
+    let other = git(&f.worktree, &["rev-parse", "HEAD"]);
+    git(&f.worktree, &["checkout", "feature"]);
+    fs::write(f.worktree.join("file"), "feature\n").unwrap();
+    git(&f.worktree, &["commit", "-am", "feature"]);
+    assert!(!env(Command::new("git").current_dir(&f.worktree))
+        .args(["merge", "other"])
+        .output()
+        .unwrap()
+        .status
+        .success());
+    let run = |discard_operations: bool| {
+        let mut c = Command::new(BIN);
+        env(&mut c).args([
+            "git",
+            "worktree",
+            "clean",
+            "--json",
+            "--apply",
+            "--discard-all-local",
+        ]);
+        if discard_operations {
+            c.arg("--discard-operations");
+        }
+        c.arg(&f.worktree).output().unwrap()
+    };
+    let refused = run(false);
+    assert_eq!(refused.status.code(), Some(1), "{}", text(&refused));
+    assert!(f.worktree.exists());
+    let preview = env(&mut Command::new(BIN))
+        .args([
+            "git",
+            "worktree",
+            "clean",
+            "--json",
+            "--discard-all-local",
+            "--discard-operations",
+        ])
+        .arg(&f.worktree)
+        .output()
+        .unwrap();
+    assert!(preview.status.success(), "{}", text(&preview));
+    let preview: serde_json::Value = serde_json::from_slice(&preview.stdout).unwrap();
+    let command = preview["results"][0]["next_step"]["command"]
+        .as_str()
+        .unwrap();
+    let bin = f.temp.path().join("next-bin");
+    fs::create_dir(&bin).unwrap();
+    symlink(BIN, bin.join("workctl")).unwrap();
+    let removed = env(&mut Command::new("bash"))
+        .args(["-c", command])
+        .env(
+            "PATH",
+            format!("{}:{}", bin.display(), std::env::var("PATH").unwrap()),
+        )
+        .env("WORKCTL_STATE_DIR", f.temp.path().join("history"))
+        .output()
+        .unwrap();
+    assert!(removed.status.success(), "{}", text(&removed));
+    assert!(!f.worktree.exists());
+    let refs = git(
+        &f.repo,
+        &[
+            "for-each-ref",
+            "--format=%(objectname)",
+            "refs/workctl/cleanup/",
+        ],
+    );
+    assert!(refs.lines().any(|oid| oid == other));
+}
+
+#[test]
+fn verified_orphan_removal_is_explicit_and_blocks_nested_repository_data() {
+    for nested in [false, true] {
+        let f = Fixture::new();
+        fs::write(
+            f.worktree.join("Cargo.lock"),
+            "ordinary dependency lockfile",
+        )
+        .unwrap();
+        fs::create_dir(f.worktree.join("modules")).unwrap();
+        fs::write(f.worktree.join("modules/data"), "ordinary project data").unwrap();
+        let metadata = PathBuf::from(git(&f.worktree, &["rev-parse", "--absolute-git-dir"]));
+        fs::remove_dir_all(metadata).unwrap();
+        if nested {
+            fs::create_dir(f.worktree.join("nested")).unwrap();
+            git(&f.worktree.join("nested"), &["init"]);
+        }
+        let mut cmd = Command::new(BIN);
+        env(&mut cmd)
+            .args([
+                "git",
+                "worktree",
+                "clean",
+                "--json",
+                "--apply",
+                "--remove-orphans",
+                "--discard-all-local",
+            ])
+            .arg(&f.worktree)
+            .env("WORKCTL_STATE_DIR", f.temp.path().join("history"));
+        let out = cmd.output().unwrap();
+        if nested {
+            assert!(!out.status.success(), "{}", text(&out));
+            assert!(f.worktree.join("nested/.git").is_dir());
+        } else {
+            assert!(out.status.success(), "{}", text(&out));
+            assert!(!f.worktree.exists());
+            let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+            assert_eq!(
+                value["results"][0]["commit_recovery"],
+                "unavailable_missing_registration"
+            );
+        }
+    }
+}
+
+#[test]
+fn bulk_discard_never_bypasses_process_locks_or_nested_repositories() {
+    for marker in ["index.lock", "nested/.git"] {
+        let f = Fixture::new();
+        if marker == "index.lock" {
+            let own = PathBuf::from(git(&f.worktree, &["rev-parse", "--absolute-git-dir"]));
+            fs::write(own.join(marker), "lock").unwrap();
+        } else {
+            fs::create_dir_all(f.worktree.join(marker)).unwrap();
+        }
+        let out = env(&mut Command::new(BIN))
+            .args([
+                "git",
+                "worktree",
+                "clean",
+                "--apply",
+                "--discard-all-local",
+                "--discard-operations",
+                "--json",
+            ])
+            .arg(&f.worktree)
+            .env("WORKCTL_STATE_DIR", f.temp.path().join("history"))
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+        f.unchanged();
+    }
+}
+
+#[test]
+fn cleanup_history_reconciliation_requires_new_apply_and_rejects_reused_paths() {
+    let f = Fixture::new();
+    let state = f.temp.path().join("history");
+    let own = PathBuf::from(git(&f.worktree, &["rev-parse", "--absolute-git-dir"]));
+    fs::write(own.join("index.lock"), "busy").unwrap();
+    let out = env(&mut Command::new(BIN))
+        .args(["git", "worktree", "clean", "--apply", "--json"])
+        .arg(&f.worktree)
+        .env("WORKCTL_STATE_DIR", &state)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+    let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let id = result["run_id"].as_str().unwrap();
+    let inspect = env(&mut Command::new(BIN))
+        .args(["history", id, "--unsuccessful", "--json"])
+        .env("WORKCTL_STATE_DIR", &state)
+        .output()
+        .unwrap();
+    assert!(inspect.status.success(), "{}", text(&inspect));
+    let history: serde_json::Value = serde_json::from_slice(&inspect.stdout).unwrap();
+    assert_eq!(history["targets"].as_array().unwrap().len(), 1);
+    fs::remove_file(own.join("index.lock")).unwrap();
+    let preview = env(&mut Command::new(BIN))
+        .args(["git", "worktree", "clean", "--reconcile", id, "--json"])
+        .env("WORKCTL_STATE_DIR", &state)
+        .output()
+        .unwrap();
+    assert!(preview.status.success(), "{}", text(&preview));
+    f.unchanged();
+    let original = f.temp.path().join("saved-original");
+    fs::rename(&f.worktree, &original).unwrap();
+    fs::create_dir(&f.worktree).unwrap();
+    // A valid replacement marker and explicit discard defeat the ordinary
+    // discovery/local-data guards: only the saved directory identity protects it.
+    fs::copy(original.join(".git"), f.worktree.join(".git")).unwrap();
+    fs::copy(original.join("file"), f.worktree.join("file")).unwrap();
+    fs::write(f.worktree.join("precious"), "replacement").unwrap();
+    let refused = env(&mut Command::new(BIN))
+        .args([
+            "git",
+            "worktree",
+            "clean",
+            "--reconcile",
+            id,
+            "--apply",
+            "--discard-all-local",
+            "--json",
+        ])
+        .env("WORKCTL_STATE_DIR", &state)
+        .output()
+        .unwrap();
+    assert_eq!(refused.status.code(), Some(1), "{}", text(&refused));
+    assert_eq!(
+        fs::read_to_string(f.worktree.join("precious")).unwrap(),
+        "replacement"
+    );
+}
+
+#[test]
+fn doctor_managed_and_profile_checks_are_diagnostic_only() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("home");
+    fs::create_dir(&home).unwrap();
+    fs::create_dir_all(home.join(".local/bin")).unwrap();
+    fs::write(home.join(".local/bin/workctl"), "foreign").unwrap();
+    let out = env(&mut Command::new(BIN))
+        .args(["doctor", "--json", "--profile", "code", "--home"])
+        .arg(&home)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+    let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(
+        value["checks"]["auth_requirements"]["providers_invoked"],
+        false
+    );
+    assert_eq!(value["checks"]["managed_installation"]["checked"], true);
+    assert_eq!(
+        fs::read_to_string(home.join(".local/bin/workctl")).unwrap(),
+        "foreign"
+    );
+    assert!(!home.join(".local/bin/config-tools").exists());
+}
+
+#[test]
+fn bulk_exclusions_are_applied_before_discard_authority() {
+    let f = Fixture::new();
+    fs::write(f.worktree.join("file"), "excluded tracked work").unwrap();
+    let out = env(&mut Command::new(BIN))
+        .args([
+            "git",
+            "worktree",
+            "clean",
+            "--json",
+            "--apply",
+            "--discard-all-local",
+            "--exclude",
+        ])
+        .arg(&f.worktree)
+        .arg(&f.repo)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+    let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(result["results"], serde_json::json!([]));
+    assert_eq!(
+        fs::read_to_string(f.worktree.join("file")).unwrap(),
+        "excluded tracked work"
+    );
+}
+
+#[test]
+fn unsafe_history_storage_blocks_mutation_and_malformed_runs_remain_visible() {
+    let f = Fixture::new();
+    let state = f.temp.path().join("private-history");
+    fs::create_dir(&state).unwrap();
+    fs::set_permissions(&state, fs::Permissions::from_mode(0o700)).unwrap();
+    let alias = f.temp.path().join("history-symlink");
+    symlink(&state, &alias).unwrap();
+    let out = env(&mut Command::new(BIN))
+        .args(["git", "worktree", "clean", "--apply", "--json"])
+        .arg(&f.worktree)
+        .env("WORKCTL_STATE_DIR", &alias)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+    f.unchanged();
+    let bad = state.join("run-truncated");
+    fs::create_dir(&bad).unwrap();
+    fs::set_permissions(&bad, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::write(bad.join("summary.json"), b"{\"schema_version\":").unwrap();
+    fs::set_permissions(bad.join("summary.json"), fs::Permissions::from_mode(0o600)).unwrap();
+    let out = env(&mut Command::new(BIN))
+        .args(["history", "--json"])
+        .env("WORKCTL_STATE_DIR", &state)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+    let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(value["runs"][0]["status"], "incomplete_record");
+    let pending = state.join("run-pending");
+    fs::create_dir(&pending).unwrap();
+    fs::set_permissions(&pending, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::write(pending.join("summary.json"),serde_json::to_vec(&serde_json::json!({"schema_version":1,"run_id":"run-pending","operation":"git.worktree.clean","status":"in_progress","targets":[{"status":"removed"}]})).unwrap()).unwrap();
+    fs::set_permissions(
+        pending.join("summary.json"),
+        fs::Permissions::from_mode(0o600),
+    )
+    .unwrap();
+    let unfinished = env(&mut Command::new(BIN))
+        .args(["history", "--unsuccessful", "--json"])
+        .env("WORKCTL_STATE_DIR", &state)
+        .output()
+        .unwrap();
+    assert!(unfinished.status.success());
+    let unfinished: serde_json::Value = serde_json::from_slice(&unfinished.stdout).unwrap();
+    assert!(unfinished["runs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|r| r["run_id"] == "run-pending" && r["status"] == "in_progress"));
+
+    let out = env(&mut Command::new(BIN))
+        .args(["history", "run-truncated", "--json"])
+        .env("WORKCTL_STATE_DIR", &state)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+}
+
+#[test]
+fn concurrent_cleanup_runs_publish_private_distinct_complete_records() {
+    let a = Fixture::new();
+    let b = Fixture::new();
+    let state = a.temp.path().join("shared-history");
+    let spawn = |f: &Fixture| {
+        env(&mut Command::new(BIN))
+            .args(["git", "worktree", "clean", "--apply", "--json"])
+            .arg(&f.worktree)
+            .env("WORKCTL_STATE_DIR", &state)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap()
+    };
+    let first = spawn(&a);
+    let second = spawn(&b);
+    let first = first.wait_with_output().unwrap();
+    let second = second.wait_with_output().unwrap();
+    for out in [&first, &second] {
+        assert!(out.status.success(), "{}", text(out));
+    }
+    let av: serde_json::Value = serde_json::from_slice(&first.stdout).unwrap();
+    let bv: serde_json::Value = serde_json::from_slice(&second.stdout).unwrap();
+    assert_ne!(av["run_id"], bv["run_id"]);
+    for id in [
+        av["run_id"].as_str().unwrap(),
+        bv["run_id"].as_str().unwrap(),
+    ] {
+        let dir = state.join(id);
+        assert_eq!(
+            fs::metadata(&dir).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        let record = dir.join("summary.json");
+        assert_eq!(
+            fs::metadata(&record).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        let record: serde_json::Value = serde_json::from_slice(&fs::read(record).unwrap()).unwrap();
+        assert_eq!(record["status"], "completed");
+        assert_eq!(record["targets"][0]["status"], "removed");
+    }
+}
+
+#[test]
+fn orphan_symlink_selection_never_authorizes_removing_the_destination() {
+    let f = Fixture::new();
+    let own = PathBuf::from(git(&f.worktree, &["rev-parse", "--absolute-git-dir"]));
+    fs::remove_dir_all(own).unwrap();
+    let alias = f.temp.path().join("orphan-alias");
+    symlink(&f.worktree, &alias).unwrap();
+    let out = env(&mut Command::new(BIN))
+        .args([
+            "git",
+            "worktree",
+            "clean",
+            "--apply",
+            "--json",
+            "--remove-orphans",
+            "--discard-all-local",
+        ])
+        .arg(&alias)
+        .env("WORKCTL_STATE_DIR", f.temp.path().join("history"))
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+    assert!(f.worktree.join("file").is_file());
+}
+
+#[test]
+fn abandoned_rebase_preserves_original_history_before_discarding_metadata() {
+    let f = Fixture::new();
+    git(&f.worktree, &["checkout", "-b", "other"]);
+    fs::write(f.worktree.join("file"), "other\n").unwrap();
+    git(&f.worktree, &["commit", "-am", "other"]);
+    let onto = git(&f.worktree, &["rev-parse", "HEAD"]);
+    git(&f.worktree, &["checkout", "feature"]);
+    fs::write(f.worktree.join("file"), "feature\n").unwrap();
+    git(&f.worktree, &["commit", "-am", "feature"]);
+    let original = git(&f.worktree, &["rev-parse", "HEAD"]);
+    let rebase = env(Command::new("git").current_dir(&f.worktree))
+        .args(["rebase", "other"])
+        .output()
+        .unwrap();
+    assert!(!rebase.status.success());
+    let out = env(&mut Command::new(BIN))
+        .args([
+            "git",
+            "worktree",
+            "clean",
+            "--json",
+            "--apply",
+            "--discard-all-local",
+            "--discard-operations",
+        ])
+        .arg(&f.worktree)
+        .env("WORKCTL_STATE_DIR", f.temp.path().join("history"))
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(!f.worktree.exists());
+    for oid in [original, onto] {
+        assert_eq!(
+            git(
+                &f.repo,
+                &["rev-parse", &format!("refs/workctl/cleanup/{oid}")]
+            ),
+            oid
+        );
+    }
+}
+
+#[test]
+fn orphan_removal_refuses_actual_common_repository_process_locks() {
+    let f = Fixture::new();
+    let own = PathBuf::from(git(&f.worktree, &["rev-parse", "--absolute-git-dir"]));
+    fs::remove_dir_all(own).unwrap();
+    fs::write(f.repo.join(".git/index.lock"), "actual Git process lock").unwrap();
+    let out = env(&mut Command::new(BIN))
+        .args([
+            "git",
+            "worktree",
+            "clean",
+            "--apply",
+            "--json",
+            "--remove-orphans",
+            "--discard-all-local",
+        ])
+        .arg(&f.worktree)
+        .env("WORKCTL_STATE_DIR", f.temp.path().join("history"))
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+    assert!(f.worktree.join("file").is_file());
+    assert!(f.repo.join(".git/index.lock").exists());
+    assert!(text(&out).contains("index.lock"));
+}
+
+#[test]
+fn history_publication_failure_after_removal_is_incomplete_and_reconciles_without_redeletion() {
+    let f = Fixture::new();
+    let state = f.temp.path().join("history");
+    let hook = f.repo.join(".git/hooks/reference-transaction");
+    fs::write(&hook,"#!/bin/sh\nfor directory in \"$WORKCTL_STATE_DIR\"/run-*; do chmod 500 \"$directory\"; done\n").unwrap();
+    fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+    let head = git(&f.worktree, &["rev-parse", "HEAD"]);
+    let out = env(&mut Command::new(BIN))
+        .args(["git", "worktree", "clean", "--apply", "--json"])
+        .arg(&f.worktree)
+        .env("WORKCTL_STATE_DIR", &state)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+    assert!(!f.worktree.exists());
+    assert!(text(&out).contains("history write failed"));
+    assert_eq!(
+        git(
+            &f.repo,
+            &["rev-parse", &format!("refs/workctl/cleanup/{head}")]
+        ),
+        head
+    );
+    let run = fs::read_dir(&state)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let record: serde_json::Value =
+        serde_json::from_slice(&fs::read(run.join("summary.json")).unwrap()).unwrap();
+    assert_eq!(record["status"], "in_progress");
+    assert_eq!(record["targets"][0]["status"], "pending");
+    fs::set_permissions(&run, fs::Permissions::from_mode(0o700)).unwrap();
+    let out = env(&mut Command::new(BIN))
+        .args([
+            "git",
+            "worktree",
+            "clean",
+            "--reconcile",
+            record["run_id"].as_str().unwrap(),
+            "--json",
+        ])
+        .env("WORKCTL_STATE_DIR", &state)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+    let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(result["results"], serde_json::json!([]));
+    assert!(f.repo.join("file").is_file());
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn age_selection_never_applies_an_old_timestamp_to_a_young_replacement() {
+    for orphan in [false, true] {
+        let f = Fixture::new();
+        if orphan {
+            let own = PathBuf::from(git(&f.worktree, &["rev-parse", "--absolute-git-dir"]));
+            fs::remove_dir_all(own).unwrap();
+        }
+        let library = f.temp.path().join("selection-race.dylib");
+        let compiled = Command::new("cc")
+            .args(["-dynamiclib", "-o"])
+            .arg(&library)
+            .arg(
+                Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests/fixtures/worktree_selection_race.c"),
+            )
+            .output()
+            .unwrap();
+        assert!(compiled.status.success(), "{}", text(&compiled));
+        let real = Command::new("sh")
+            .args(["-c", "command -v git"])
+            .output()
+            .unwrap();
+        assert!(real.status.success());
+        let real = String::from_utf8(real.stdout).unwrap();
+        let shim = f.shim(
+            r#"
+case " $* " in *' worktree list --porcelain -z '*)
+  "$WORKCTL_RACE_REAL_GIT" "$@"
+  result=$?
+  : > "$WORKCTL_RACE_ARMED"
+  exit "$result";;
+esac
+"#,
+        );
+        std::thread::sleep(Duration::from_millis(1200));
+        let armed = f.temp.path().join("armed");
+        let done = f.temp.path().join("done");
+        let saved = f.temp.path().join("saved");
+        let mut cmd = Command::new(BIN);
+        env(&mut cmd)
+            .args([
+                "git",
+                "worktree",
+                "clean",
+                "--json",
+                "--older-than",
+                "1s",
+                "--discard-all-local",
+                "--apply",
+            ])
+            .arg(if orphan { f.temp.path() } else { &f.repo })
+            .env("DYLD_INSERT_LIBRARIES", &library)
+            .env("WORKCTL_RACE_REAL_GIT", real.trim())
+            .env("WORKCTL_RACE_TARGET", f.worktree.canonicalize().unwrap())
+            .env("WORKCTL_RACE_ARMED", &armed)
+            .env("WORKCTL_RACE_DONE", &done)
+            .env("WORKCTL_RACE_SAVED", &saved)
+            .env("WORKCTL_STATE_DIR", f.temp.path().join("history"));
+        if orphan {
+            cmd.arg("--remove-orphans");
+        }
+        with_shim(&mut cmd, &shim);
+        let out = cmd.output().unwrap();
+        assert!(
+            done.exists(),
+            "filesystem race did not execute: {}",
+            text(&out)
+        );
+        assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+        assert_eq!(
+            fs::read_to_string(f.worktree.join("precious")).unwrap(),
+            "young replacement\n"
+        );
+        assert!(saved.join("file").exists());
+        let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(result["results"][0]["status"], "blocked");
+        assert!(result["results"][0]["reason"]
+            .as_str()
+            .unwrap()
+            .contains(if orphan {
+                "ownership changed"
+            } else {
+                "identity changed"
+            }));
+        let created = fs::metadata(&f.worktree)
+            .unwrap()
+            .created()
+            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
+        assert!(created > result["cutoff_unix_seconds"].as_f64().unwrap());
+        assert!(git(&f.repo, &["for-each-ref", "refs/workctl/cleanup/"]).is_empty());
+    }
+}
+
+#[test]
+fn abandoned_rebase_preserves_autostash_and_rewritten_commits_in_recovery_history() {
+    let f = Fixture::new();
+    git(&f.worktree, &["checkout", "-b", "other"]);
+    fs::write(f.worktree.join("file"), "other\n").unwrap();
+    git(&f.worktree, &["commit", "-am", "other"]);
+    git(&f.worktree, &["checkout", "feature"]);
+    fs::write(f.worktree.join("file"), "feature\n").unwrap();
+    git(&f.worktree, &["commit", "-am", "feature"]);
+    let feature = git(&f.worktree, &["rev-parse", "HEAD"]);
+    git(
+        &f.worktree,
+        &["commit", "--allow-empty", "-m", "intermediate rebase edit"],
+    );
+    let rewritten = git(&f.worktree, &["rev-parse", "HEAD"]);
+    git(&f.worktree, &["reset", "--hard", &feature]);
+    fs::write(f.worktree.join("file"), "stashed local work\n").unwrap();
+    let rebase = env(Command::new("git").current_dir(&f.worktree))
+        .args(["rebase", "--autostash", "other"])
+        .output()
+        .unwrap();
+    assert!(!rebase.status.success());
+    let own = PathBuf::from(git(&f.worktree, &["rev-parse", "--absolute-git-dir"]));
+    fs::write(
+        own.join("rebase-merge/rewritten-list"),
+        format!("{feature} {rewritten}\n"),
+    )
+    .unwrap();
+    let stash = fs::read_to_string(own.join("rebase-merge/autostash"))
+        .unwrap()
+        .trim()
+        .to_owned();
+    let out = env(&mut Command::new(BIN))
+        .args([
+            "git",
+            "worktree",
+            "clean",
+            "--json",
+            "--apply",
+            "--discard-all-local",
+            "--discard-operations",
+        ])
+        .arg(&f.worktree)
+        .env("WORKCTL_STATE_DIR", f.temp.path().join("history"))
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(!f.worktree.exists());
+    let reference = format!("refs/workctl/cleanup/{stash}");
+    assert_eq!(git(&f.repo, &["rev-parse", "--verify", &reference]), stash);
+    assert_eq!(
+        git(&f.repo, &["show", &format!("{reference}:file")]),
+        "stashed local work"
+    );
+    assert_eq!(
+        git(
+            &f.repo,
+            &[
+                "rev-parse",
+                "--verify",
+                &format!("refs/workctl/cleanup/{rewritten}")
+            ]
+        ),
+        rewritten
+    );
+}
+
+#[test]
+fn empty_rebase_commit_metadata_blocks_both_discard_options() {
+    let f = Fixture::new();
+    git(&f.worktree, &["checkout", "-b", "other"]);
+    fs::write(f.worktree.join("file"), "other\n").unwrap();
+    git(&f.worktree, &["commit", "-am", "other"]);
+    git(&f.worktree, &["checkout", "feature"]);
+    fs::write(f.worktree.join("file"), "feature\n").unwrap();
+    git(&f.worktree, &["commit", "-am", "feature"]);
+    assert!(!env(Command::new("git").current_dir(&f.worktree))
+        .args(["rebase", "other"])
+        .output()
+        .unwrap()
+        .status
+        .success());
+    let own = PathBuf::from(git(&f.worktree, &["rev-parse", "--absolute-git-dir"]));
+    fs::write(own.join("rebase-merge/orig-head"), "").unwrap();
+    let out = env(&mut Command::new(BIN))
+        .args([
+            "git",
+            "worktree",
+            "clean",
+            "--apply",
+            "--json",
+            "--discard-all-local",
+            "--discard-operations",
+        ])
+        .arg(&f.worktree)
+        .env("WORKCTL_STATE_DIR", f.temp.path().join("history"))
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+    assert!(text(&out).contains("empty operation commit metadata"));
+    f.unchanged();
+    assert!(git(&f.repo, &["for-each-ref", "refs/workctl/cleanup/"]).is_empty());
 }

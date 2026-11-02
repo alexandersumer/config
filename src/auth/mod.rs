@@ -149,11 +149,12 @@ fn result(options: &Options, human: bool) -> Value {
                 }
             }
         }
+        let clients=results.iter().map(|target| json!({"client":target["target"],"status":target["status"],"usable":matches!(target["status"].as_str(),Some("valid"|"refreshed"))})).collect::<Vec<_>>();
         let ready = results
             .iter()
             .all(|v| matches!(v["status"].as_str(), Some("valid" | "refreshed")));
         Ok(
-            json!({"schema_version":1,"operation":"auth.preflight","profile":options.profile,"included_profiles":options.include_profiles,"status":if crate::runtime::cancelled() {"interrupted"} else if ready {"completed"} else {"blocked"}, "check_only":options.check,"min_valid_for_seconds":options.min_valid_for,"targets":results,
+            json!({"schema_version":1,"operation":"auth.preflight","profile":options.profile,"included_profiles":options.include_profiles,"status":if crate::runtime::cancelled() {"interrupted"} else if ready {"completed"} else {"blocked"}, "check_only":options.check,"min_valid_for_seconds":options.min_valid_for,"targets":results,"clients":clients,
             "duration_guaranteed":false,"note":"Readiness is checked now. OAuth revocation, provider policy, unknown expiry, and future MFA can shorten access. Only workctl refreshes share this coordination lock."}),
         )
     };
@@ -326,4 +327,51 @@ pub(crate) fn run(options: Options, json_output: bool, child: Option<Vec<OsStrin
         };
     }
     0
+}
+
+/// Offline requirements, with no locks, provider processes, login, or credential reads.
+pub(crate) fn requirements(options: &Options) -> Result<Value, String> {
+    let targets = config::targets(options)?;
+    let prerequisites = targets
+        .iter()
+        .map(|t| match t {
+            config::Target::Bitbucket { .. } => "bb",
+            config::Target::Twg {} | config::Target::TwgBitbucket {} => "twg",
+            config::Target::Slauth { .. } => "atlas",
+            config::Target::Kerberos { .. } => "klist",
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    Ok(
+        json!({"schema_version":1,"operation":"auth.inspect","status":"completed","profile":options.profile,"included_profiles":options.include_profiles,"targets":targets,"required_executables":prerequisites,"providers_invoked":false,"credentials_checked":false}),
+    )
+}
+pub(crate) fn inspect(options: Options, json_output: bool) -> u8 {
+    match requirements(&options) {
+        Ok(value) => {
+            if json_output {
+                crate::presentation::json(&value)
+            } else {
+                u8::from(
+                    writeln!(
+                        std::io::stdout(),
+                        "{}",
+                        crate::presentation::safe_text(
+                            &serde_json::to_string_pretty(&value).unwrap_or_default()
+                        )
+                    )
+                    .is_err(),
+                )
+            }
+        }
+        Err(e) => {
+            let value =
+                json!({"schema_version":1,"operation":"auth.inspect","status":"failed","error":e});
+            if json_output {
+                let _ = crate::presentation::json(&value);
+            } else {
+                let _ = writeln!(std::io::stderr(), "workctl: {e}");
+            }
+            1
+        }
+    }
 }

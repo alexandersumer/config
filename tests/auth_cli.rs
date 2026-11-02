@@ -1837,3 +1837,36 @@ fn fixture_groups_reject_nested_acquisition_without_leaking_slots() {
     // Rejection must neither poison the pool nor retain a slot.
     let _next = FixtureSlot::acquire();
 }
+
+#[test]
+fn auth_inspect_resolves_profiles_without_launching_providers() {
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_workctl"))
+        .args(["auth", "inspect", "--profile", "code", "--json"])
+        .env("PATH", "/nonexistent")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(value["status"], "completed");
+    assert_eq!(value["targets"].as_array().unwrap().len(), 3);
+    assert_eq!(value["providers_invoked"], false);
+    assert_eq!(value["targets"][0]["provider"], "bitbucket");
+}
+
+#[test]
+fn client_readiness_preserves_healthy_bb_when_manual_twg_token_fails() {
+    let f = Fixture::new(json!({"twg_bb_valid":false}));
+    let value = f.run(&["--profile", "code", "--check"], 1);
+    assert_eq!(value["status"], "blocked");
+    let clients = value["clients"].as_array().unwrap();
+    assert!(clients
+        .iter()
+        .any(|c| c["client"] == "bitbucket:active" && c["usable"] == true));
+    assert!(clients
+        .iter()
+        .any(|c| c["client"] == "twg-bitbucket" && c["usable"] == false));
+}

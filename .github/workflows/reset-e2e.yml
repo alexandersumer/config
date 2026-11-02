@@ -18,6 +18,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     env:
+      WORKCTL_STATE_DIR: ${{ runner.temp }}/workctl-state
       RUSTUP_TOOLCHAIN: stable
       RESET_E2E_ARTIFACT_DIR: ${{ github.workspace }}/target/reset-e2e-artifacts
     steps:

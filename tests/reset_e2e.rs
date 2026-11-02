@@ -44,6 +44,7 @@ impl Runtime {
             .env("GIT_TERMINAL_PROMPT", "0")
             .env("NO_COLOR", "1")
             .env("TMPDIR", &self.artifacts)
+            .env("WORKCTL_STATE_DIR", self.root().join("history"))
             .stdin(Stdio::null());
         for name in [
             "GIT_DIR",
@@ -836,8 +837,28 @@ fn standalone_cli_resets_over_git_protocol_and_preserves_dirty_batch_member() {
         "dirty refusal must precede network fetch"
     );
     assert_eq!(fs::read(dirty.join(".git/config")).unwrap(), config);
+    let batch_text = String::from_utf8_lossy(&batch.stderr);
+    let run_id = batch_text
+        .lines()
+        .find_map(|line| line.strip_prefix("Run: "))
+        .expect("durable reset run ID");
     fs::write(dirty.join("file"), "initial\n").unwrap();
-    rt.reset(rt.root(), &["first", "second"], 0);
+    fs::write(
+        alpha.join("file"),
+        "successful target must not be retried\n",
+    )
+    .unwrap();
+    let retried = rt.reset(rt.root(), &["--retry", run_id, "--json"], 0);
+    let retried: serde_json::Value = serde_json::from_slice(&retried.stdout).unwrap();
+    assert_eq!(retried["results"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        retried["results"][0]["path"],
+        dirty.canonicalize().unwrap().to_string_lossy().as_ref()
+    );
+    assert_eq!(
+        fs::read_to_string(alpha.join("file")).unwrap(),
+        "successful target must not be retried\n"
+    );
     assert_eq!(rt.git(&dirty, &["rev-parse", "HEAD"]), new);
     assert!(rt.git(&dirty, &["status", "--porcelain"]).is_empty());
     assert!(rt
