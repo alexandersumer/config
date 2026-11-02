@@ -15,8 +15,8 @@ pub(crate) struct ScopeArgs {
     /// JSON workspace policy (default: ~/.config/workctl/workspaces.json)
     #[arg(long, requires = "scope")]
     pub workspace_config: Option<PathBuf>,
-    /// Exclude this path and its descendants; repeatable, added to scope exclusions
-    #[arg(long, value_name = "PATH")]
+    /// Protect this path, descendants, and any containing worktree/repository; repeatable
+    #[arg(long, value_name = "PATH", value_hint = clap::ValueHint::AnyPath)]
     pub exclude: Vec<PathBuf>,
 }
 #[derive(Deserialize)]

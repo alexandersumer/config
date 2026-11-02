@@ -1,6 +1,6 @@
 ---
 name: workctl
-description: Use workctl for credential checks and renewal, checkout resets, and linked-worktree cleanup.
+description: Use workctl for credential inspection and renewal, workspace inventory, Git maintenance, and operation recovery.
 ---
 
 Run the installed `workctl` directly for these tasks. It handles discovery,
@@ -59,11 +59,12 @@ Read the exit status and JSON outcome. Cleanup's `protected` results are expecte
 skips, not failures. Report the result and actionable blockers briefly. Workctl
 already bounds retries; address a reported failure before repeating the command.
 
-Read the [guide](../../../docs/workctl.md) only for details such as custom profiles,
+Read the [guide](../../docs/workctl.md) only for details such as custom profiles,
 recovery commands, or strict cleanup policy.
 
 Age selection uses directory creation time; unknown ages are never selected. Use
-`--exclude PATH` to protect a path and descendants, or `--scope NAME` instead of
+`--exclude PATH` to protect a path, descendants, and its containing worktree or
+repository, or `--scope NAME` instead of
 positional paths for configured roots. Bulk discard requires explicit file-loss
 authorization. Abandoned merge/rebase discard additionally requires
 `--discard-operations`; process locks remain blockers. Verified orphan removal

@@ -201,6 +201,27 @@ with unknown expiry. Color follows the Git commands: terminal-only, with
 terminal escape sequences. JSON omits human progress; provider authentication
 prompts still go to stderr when interaction is necessary.
 
+## Offline requirements and client readiness
+
+```sh
+workctl auth inspect --profile code --include-profile runtime --json
+workctl doctor --profile code --managed --json
+```
+
+`auth inspect` resolves built-in or custom profiles and required executables without
+invoking providers or reading their credential stores. Schema 1 returns descriptors in
+`targets`, `required_executables`, and explicit `providers_invoked: false` and
+`credentials_checked: false`. Renewal/check flags do not trigger provider work here.
+Doctor optionally checks these executables and managed binary/completion drift; presence
+does not prove version compatibility, credential readiness, or resource authorization.
+Doctor remains diagnostic and never installs, repairs, or logs in. Build provenance
+identifies the base commit and does not verify source edits or later checkout changes.
+
+Preflight schema 1 additionally reports `clients` with each target's `status` and
+`usable` flag. Healthy native `bb` remains visible when TWG's separate Bitbucket token
+fails. The overall profile still fails if any required credential fails, and `auth exec`
+does not substitute another client or launch the child on partial success.
+
 ## JSON and command execution
 
 `auth preflight --json` reports `included_profiles` and emits one schema-versioned result with per-target status,
@@ -233,7 +254,7 @@ Custom profiles contain only credential descriptors, never tokens or commands:
 ```
 
 Use `workctl auth preflight --config /path/to/auth.json --profile staging` or pass
-the same options to `auth exec`. Config is explicit; workctl does not search home
+the same options to `auth exec` or offline `auth inspect`. Config is explicit; workctl does not search home
 credential stores. Files must be regular and at most 64 KiB. Schema versions,
 unknown fields, empty profiles, duplicate credential descriptors, invalid audiences,
 groups and environments are rejected before calling any provider.

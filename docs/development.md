@@ -42,7 +42,11 @@ The hook runs formatting, compilation, unit and integration tests, skill validat
 capture, deadlines, cancellation, and group lifetime. `src/auth/` owns validated
 credential profiles, provider adapters, bounded secret captures, and auth coordination. `src/presentation.rs` owns shared
 rendering and JSON conventions. `src/git_domain/` owns topology, common-directory locks,
-publication, and separate reset/cleanup policies. No plugin registry or command DSL
+publication, and separate reset/cleanup policies. `src/workspace.rs` shares root,
+exclusion, and creation-age selection; `src/history.rs` publishes private durable
+intent/outcome records and supports focused recovery. `src/storage.rs` owns bounded
+allocation estimates. Completion scripts are generated from the same Clap hierarchy
+at installation, rather than checked-in copies. No plugin registry or command DSL
 is involved.
 
 ```sh
@@ -69,6 +73,10 @@ edits. It verifies fetched commits, reset backups, cleanup recovery refs, repeat
 cleanup, strict publication checks, and explicit orphan/nested-scope refusal
 before any mutation. These cases run in the existing `reset_e2e` target and its
 Linux/macOS CI matrix; no separate opt-in is required.
+Maintenance fixtures additionally cover named scopes, creation age and replacement
+races, bulk discard, operation refs, verified orphans, private/concurrent history,
+publication failures, storage accounting, offline inspection, and doctor drift.
+Five explicit live-auth tests remain separate from simulator-backed CI proof.
 The CI workflow runs the public CLI
 contracts on Linux and macOS; configured CI is distinct from a completed hosted run.
 

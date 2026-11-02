@@ -3,7 +3,7 @@
 `workctl` is a Rust CLI for work credentials, Git checkouts, and linked worktrees.
 
 [Install](#install) · [Commands](#commands) · [Authentication](#authentication) ·
-[Git operations](#git-operations) · [Output](#output) · [Exit status](#exit-status)
+[Git operations](#git-operations) · [Workspace maintenance](#workspace-maintenance) · [Output](#output) · [Exit status](#exit-status)
 
 ## Install
 
@@ -150,7 +150,8 @@ Workspace discovery reports and skips orphaned linked worktrees with missing
 registrations when their common repository can still be verified. Their files
 remain untouched, and other targets continue. Explicit orphan targets and other
 invalid metadata still stop discovery before any mutations. Cleanup uses the
-same discovery policy; neither operation repairs or deletes orphaned directories.
+same default discovery policy. Reset never deletes orphans; cleanup requires the
+separate [orphan-removal options](#abandoned-operations-and-orphan-directories).
 Recovery commands select the affected checkout explicitly and quote paths and
 references for bash and zsh, so they can be run from any directory.
 
@@ -177,7 +178,8 @@ include local configuration and secrets. Preview shows the affected paths and
 counts. Recovery refs preserve commits, not removed ignored files.
 
 Use `--strict` to require fresh remote-publication proof and protect ignored files.
-Explicit discard options apply only to the named worktrees. Locks, nested
+Exact-path discard options apply only to named worktrees; bulk discard applies only
+to the resolved selection. Locks, nested
 repositories, populated submodules, missing paths, and uncertain ownership still
 block removal. Primary checkouts are always protected.
 Each eligible preview row identifies local recovery or verified remote publication,
@@ -197,50 +199,6 @@ locks coordinate its own invocations, not editors or unrelated Git commands.
 
 [Git reference](git.md): exact selection rules, recovery commands, discard
 options, revalidation, concurrency, deadlines, and JSON fields.
-
-## Output
-
-Results go to stdout. Progress and diagnostics go to stderr. Git operations show
-interactive progress or periodic plain updates when redirected. Auth reports each
-provider's status, account or scope, remaining lifetime, and any recovery action.
-Status words remain readable without color. `NO_COLOR`, `CLICOLOR=0`, and
-`TERM=dumb` disable color; redirected streams contain no terminal decoration.
-
-`--json` works before or after a subcommand and emits one JSON document on stdout.
-Results include `schema_version`, `operation`, and `status`. Field details belong
-to the relevant command's reference.
-
-| Command | JSON schema |
-| --- | --- |
-| `auth preflight` | 1 |
-| `git reset` | 1 |
-| `git worktree clean` | 2 |
-| `doctor` | 1 |
-| `completions` | 1; generated script is in `script` |
-| `auth exec` | Unsupported; child stdout is preserved |
-
-Help, version, and usage errors follow normal CLI conventions even with `--json`.
-
-## Exit status
-
-| Code | Meaning |
-| --- | --- |
-| `0` | Success, including cleanup that protects active local work |
-| `1` | Failed operation, blocked authentication, or cleanup safety blocker |
-| `2` | Invalid usage |
-| `130` | Interrupted |
-
-After successful preflight, `auth exec` preserves the child's exit status or
-termination signal. Launch failures return `127` for a missing command or `126`
-for another launch error.
-
-## Reference
-
-- [Authentication](authentication.md)
-- [Git operations](git.md)
-- [Configuration and installation](configuration.md)
-- [Development and verification](development.md)
-- [Repository README](../README.md)
 
 ## Workspace maintenance
 
@@ -340,3 +298,51 @@ substitutes clients. Doctor checks executable/build provenance, optional profile
 prerequisites, and optional managed installation drift; it never installs, logs in, collects
 tokens, or repairs files. Executable presence does not prove version compatibility or
 resource authorization; credential checks remain explicit.
+
+## Output
+
+Results go to stdout. Progress and diagnostics go to stderr. Git operations show
+interactive progress or periodic plain updates when redirected. Auth reports each
+provider's status, account or scope, remaining lifetime, and any recovery action.
+Status words remain readable without color. `NO_COLOR`, `CLICOLOR=0`, and
+`TERM=dumb` disable color; redirected streams contain no terminal decoration.
+
+`--json` works before or after a subcommand and emits one JSON document on stdout.
+Results include `schema_version` and `operation`; execution results also include
+`status`. History listing returns `runs`, while run inspection returns the persisted
+operation record. Field details belong
+to the relevant command's reference.
+
+| Command | JSON schema |
+| --- | --- |
+| `auth preflight`, `auth inspect` | 1 |
+| `git reset` | 1 |
+| `git worktree clean` | 2 |
+| `git worktree inventory` | 1 |
+| `history` (listing or stored run) | 1 |
+| `doctor` | 1 |
+| `completions` | 1; generated script is in `script` |
+| `auth exec` | Unsupported; child stdout is preserved |
+
+Help, version, and usage errors follow normal CLI conventions even with `--json`.
+
+## Exit status
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Success, including cleanup that protects active local work |
+| `1` | Failed operation, blocked authentication, or cleanup safety blocker |
+| `2` | Invalid usage |
+| `130` | Interrupted |
+
+After successful preflight, `auth exec` preserves the child's exit status or
+termination signal. Launch failures return `127` for a missing command or `126`
+for another launch error.
+
+## Reference
+
+- [Authentication](authentication.md)
+- [Git operations](git.md)
+- [Configuration and installation](configuration.md)
+- [Development and verification](development.md)
+- [Repository README](../README.md)

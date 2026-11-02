@@ -753,6 +753,9 @@ fn generated_help_completions_and_doctor_share_the_public_contract() {
         vec!["git", "reset", "--help"],
         vec!["git", "worktree", "--help"],
         vec!["git", "worktree", "clean", "--help"],
+        vec!["git", "worktree", "inventory", "--help"],
+        vec!["auth", "inspect", "--help"],
+        vec!["history", "--help"],
         vec!["doctor", "--help"],
         vec!["completions", "--help"],
     ] {
@@ -766,13 +769,42 @@ fn generated_help_completions_and_doctor_share_the_public_contract() {
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
-    let out = Command::new(BIN)
-        .args(["completions", "zsh"])
-        .output()
-        .unwrap();
-    assert!(out.status.success());
-    assert!(text(&out).contains("worktree"));
-    assert!(text(&out).contains("discard-local"));
+    for shell in ["bash", "elvish", "fish", "powershell", "zsh"] {
+        let out = Command::new(BIN)
+            .args(["completions", shell])
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{shell}: {}", text(&out));
+        if shell == "fish" {
+            for leaf in ["clean", "inventory"] {
+                let condition = format!("__fish_workctl_using_subcommand git; and __fish_seen_subcommand_from worktree; and __fish_seen_subcommand_from {leaf}");
+                assert!(
+                    text(&out)
+                        .lines()
+                        .any(|line| line.contains(&condition) && line.contains(" -l older-than ")),
+                    "missing age completion for {leaf}"
+                );
+            }
+        }
+        for option in [
+            "inventory",
+            "inspect",
+            "history",
+            "older-than",
+            "discard-all-local",
+            "discard-operations",
+            "remove-orphans",
+            "reconcile",
+            "retry",
+            "workspace-config",
+            "exclude",
+            "storage",
+            "managed",
+            "unsuccessful",
+        ] {
+            assert!(text(&out).contains(option), "{shell} is missing {option}");
+        }
+    }
     let out = env(&mut Command::new(BIN))
         .args(["doctor", "--json"])
         .output()
@@ -813,10 +845,25 @@ fn atomic_install_migrates_owned_files_preserves_foreign_files_and_works_in_fres
         assert_eq!(fs::read(bin.join(name)).unwrap(), expected);
     }
     assert!(!bin.join("reset_to_origin").exists());
-    assert!(home
-        .path()
-        .join(".local/share/zsh/site-functions/_workctl")
-        .exists());
+    let completion = home.path().join(".local/share/zsh/site-functions/_workctl");
+    let generated = Command::new(BIN)
+        .args(["completions", "zsh"])
+        .output()
+        .unwrap();
+    assert!(generated.status.success());
+    let body = generated
+        .stdout
+        .strip_prefix(b"#compdef workctl\n")
+        .unwrap();
+    let mut expected_completion = b"#compdef workctl\n# workctl managed completion\n".to_vec();
+    expected_completion.extend_from_slice(body);
+    assert_eq!(fs::read(&completion).unwrap(), expected_completion);
+    let syntax = Command::new("zsh")
+        .arg("-n")
+        .arg(&completion)
+        .output()
+        .unwrap();
+    assert!(syntax.status.success(), "{}", text(&syntax));
     for name in [
         ".local/share",
         ".local/share/zsh",

@@ -40,7 +40,9 @@ orphan exclusion from an overlapping container scope. Malformed or unreadable
 metadata, symlink gitfiles,
 existing but invalid registrations, missing common repositories, and unrelated
 Git failures remain errors rather than skips. No command repairs or prunes the
-orphan automatically. Preserve and inspect its files before deciding whether to
+orphan automatically. Cleanup can explicitly remove verified orphan directories with
+`--remove-orphans --discard-all-local`; see [abandoned cleanup](#abandoned-cleanup).
+Preserve and inspect its files before deciding whether to
 reconstruct its worktree or remove the leftover directory; a missing registration
 can prevent `git worktree repair` from recovering it.
 
@@ -83,7 +85,8 @@ fetches, backups, switches, and upstream changes may persist after later failure
 
 ## Clean up linked worktrees
 
-The default is an exact removal plan. `--apply` executes eligible removals without
+The default previews current removal eligibility. Apply rediscovers the selection
+and revalidates safety; a preview is not continuing deletion authority. `--apply` executes eligible removals without
 an interactive question. A container scope selects registered linked worktrees
 beneath it. A primary checkout selects all its registered linked worktrees, including
 paths outside the checkout directory; those full paths are shown. An explicit linked
@@ -124,22 +127,42 @@ In strict mode, repeat `--discard-ignored PATH` to authorize ignored-file loss a
 `--preserve-commits PATH` to use local recovery instead of remote publication at an
 exact selected worktree.
 
-For a worktree whose **all local files** may be lost, explicit per-path approval is
-still required:
+For a single worktree whose **all local files** may be lost, approve its exact path:
 
 ```sh
 workctl git worktree clean --apply \
   --discard-local /path/to/work/feature /path/to/work
 ```
 
+Alternatively, `--discard-all-local` authorizes that file loss only within the
+resolved selection. Combine it with `--older-than 7d`, exclusions, or a named scope;
+[workspace maintenance](workctl.md#workspace-maintenance) defines creation age,
+configuration, and inventory. Excluding a descendant protects its entire containing
+worktree or repository, including from reset.
+
+### Abandoned cleanup
+
+`--discard-operations` separately permits abandoned merge/rebase state after preserving
+verified operation commits, autostashes, and rewritten commits. It never bypasses locks
+or authorizes additional uncommitted-file loss. In strict mode, approve local committed
+recovery with `--preserve-commits PATH`. Unsupported or incomplete metadata blocks removal.
+
+`--remove-orphans --discard-all-local` permits only verified leftover directories with
+a missing registration and known common repository. Relative or ambiguous ownership,
+symlinks, nested repositories, and unsupported submodule layouts remain blocked. Commit
+recovery is unavailable for orphans. Quarantine is recorded before deletion; uncertain
+quarantines stay in place for inspection. Neither flag removes native Git process locks.
+
 ### Removal safeguards and outcomes
 
-No option authorizes removing main checkouts, locks, missing paths, nested
+No option authorizes removing main checkouts, locks, missing directories, nested
 repositories, populated submodule paths, private submodule object stores, or
-unverifiable registrations/ownership.
+unverifiable ownership. Missing registration is allowed only through the separate
+verified-orphan path above.
 Empty or absent uninitialized gitlink paths are supported, including gitlinks with
 no `.gitmodules` mapping. Normal cleanup and ignored-only approval use native
-`git worktree remove`; `--force` is used only with `--discard-local`. Cleanup never
+`git worktree remove`; `--force` requires exact `--discard-local` or scoped
+`--discard-all-local` approval. Cleanup never
 retries removal.
 `--timeout` bounds each candidate's inspection, remote verification, removal, and
 final verification together. Discovery Git probes have independent 15-second bounds.
@@ -221,3 +244,35 @@ Consumers of cleanup version 1 must handle these statuses and summary fields bef
 accepting version 2. No failed deletion is retried.
 Per-target `path` is a display string; `path_bytes` is the exact Unix path as an array
 of byte values, preserving non-UTF-8 filenames.
+
+## Inventory, storage, and durable history
+
+Inventory schema 1 reports `selection`, linked `results`, protected `primary_inventory`,
+`orphans`, and age-filtered `not_selected` entries. Per-target `age` includes the
+creation timestamp, source, and any error. Failed probes and scans remain incomplete
+and cause exit 1; missing creation time alone never authorizes age selection.
+Storage is opt-in: allocation estimates are separate from cleanup's observed free-space
+change, which can include concurrent filesystem activity and is not exact APFS reclamation.
+
+Cleanup schema 2 adds `selection`, `cutoff_unix_seconds`, `not_selected`, per-target
+age/storage, and an applied run's `run_id`. Suggested apply commands retain effective
+exclusions and age limits while still revalidating current state. Reset also reports
+`selection` and saves nonempty runs. Applied cleanup and reset publish private intent
+before mutation; final publication failures can leave an `in_progress` record after
+changes have occurred. Retained reset diagnostic logs are separate from durable history.
+
+```sh
+workctl history --unsuccessful --json
+workctl history RUN_ID --unsuccessful --json
+workctl git reset --retry RUN_ID --json
+workctl git worktree clean --reconcile RUN_ID --json
+```
+
+History listing schema 1 returns `operation: "history.list"` and `runs`. Run inspection
+returns the persisted schema 1 record with its original `operation`, `selection`,
+`options`, and `targets`, including recovery refs and pending or uncertain outcomes.
+`--unsuccessful` filters runs in a listing or targets in a record. Reset retry selects
+unsuccessful targets, keeps the original remote/branch, and rediscovers safely. Cleanup
+reconciliation verifies filesystem and registration absence first; reused paths and
+retained quarantines block it. Remaining removal requires a new `--apply` and fresh
+discard approvals. See [history storage and recovery](workctl.md#operation-history-and-focused-recovery).

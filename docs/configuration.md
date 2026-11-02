@@ -19,6 +19,7 @@ cargo run -- repair-codex-config
 cargo run -- validate
 cargo run -- test-validate
 cargo run -- install
+cargo run --locked --release -- install-workctl
 ```
 
 Command roles:
@@ -26,11 +27,12 @@ Command roles:
 - `check`: non-mutating verification for formatting, build, unit tests, skill validation, and regression tests.
 - `check-codex-skills`: non-mutating verification that `~/.agents/skills` resolves to `skills`, legacy managed Codex links are absent, Codex config has no deprecated/disabled skill-discovery flags, and Codex prompt input sees each managed skill exactly once from both this checkout and the home directory.
 - `check-claude-skills`: non-mutating verification that `~/.claude/skills` mirrors custom skills from `skills`, with every managed link resolving to its registry-validated source and no stale managed links left behind.
-- `check-install`: non-mutating verification that all managed home config links, Codex skills/config, Claude Code skills, and the managed config-tools binary match this checkout.
+- `check-install`: non-mutating verification that all managed home config links, Codex skills/config, Claude Code skills, and binary ownership, and that `workctl` matches the checking executable. Use `workctl doctor --managed` to check generated completion drift too.
 - `repair-codex-config`: removes deprecated/disabled Codex feature flags from `~/.codex/config.toml`.
 - `prepare`: runs the same verification as `check`.
 - `pre-commit`: validates an isolated snapshot of the Git index, so unstaged and untracked work cannot affect the commit checks. Outside Git, runs `prepare` on the supplied checkout. No home installation is required.
 - `install`: intentional home-directory mutation for the `~/.agents/skills` symlink and custom `~/.claude/skills` symlinks, migration of old managed links, Codex config flag repair, `~/.local/bin/config-tools` and `~/.local/bin/workctl`. Codex itself is installed and updated through its official distribution; this installer does not create a Codex launcher.
+- `install-workctl`: updates only managed `workctl`, `config-tools`, and generated zsh completion; accepts `--home PATH` for an isolated installation. It does not rewrite shell startup or agent configuration.
 - `install-git-hooks`: intentional local Git config mutation for `core.hooksPath`.
 
 ## Custom skills

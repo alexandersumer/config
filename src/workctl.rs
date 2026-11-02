@@ -21,7 +21,7 @@ struct Cli {
 }
 #[derive(Subcommand, Debug)]
 enum Operation {
-    /// Verify and refresh declared service credentials, or wrap a command
+    /// Inspect credential requirements, verify access, or wrap a command
     Auth {
         #[command(subcommand)]
         command: Auth,
@@ -33,9 +33,14 @@ enum Operation {
         command: Git,
     },
     /// Inspect runtime prerequisites and supported capabilities without repairs
-    #[command(after_help = "Examples:\n  workctl doctor\n  workctl doctor --json")]
+    #[command(
+        after_help = "Examples:\n  workctl doctor\n  workctl doctor --profile code --managed --json"
+    )]
     Doctor(DoctorArgs),
     /// List private operation runs, or inspect a specific run
+    #[command(
+        after_long_help = "Lists durable reset and cleanup runs; RUN_ID inspects a single record.\n--unsuccessful filters runs when listing and targets when inspecting.\nPending and uncertain targets remain visible. Reading history never retries work.\nExamples:\n  workctl history --json\n  workctl history RUN_ID --unsuccessful --json"
+    )]
     History {
         run_id: Option<String>,
         /// Show only unsuccessful targets (including pending or uncertain work)
@@ -57,6 +62,9 @@ enum Auth {
     )]
     Preflight(crate::auth::Options),
     /// Resolve required credential descriptors without invoking any provider
+    #[command(
+        after_long_help = "Resolves profiles and required executables without provider calls or credential checks.\nUse auth preflight --check for current credential readiness.\nExamples:\n  workctl auth inspect --profile code --json\n  workctl auth inspect --profile code --include-profile runtime --json"
+    )]
     Inspect(crate::auth::Options),
     /// Preflight automatically, then execute argv directly with the child's exit status
     #[command(
@@ -89,16 +97,51 @@ enum Worktree {
     /// Preview removal; --apply executes the plan without another question
     #[command(
         args_override_self = true,
-        after_long_help = "Main checkouts are protected. Container scopes select linked worktrees beneath\nthem; a checkout selects its registered linked worktrees. Explicit linked paths\nselect only that worktree. Preview never removes files or writes recovery refs.\n--apply removes idle worktrees and ignored files after saving committed HEAD\nin a durable local recovery ref. No remote connection or push is required.\nTracked changes, untracked files, and masked paths stay protected; these expected\nskips are successful. --strict instead requires fresh remote publication and\nexplicit ignored-file approval; --preserve-commits PATH enables local recovery\nat an exact worktree in strict mode. Recovery preserves commits, not ignored files.\nLocks, missing paths, populated submodules, private module object stores, nested\nrepositories, and uncertain ownership block removal even with a discard decision.\nEmpty uninitialized gitlink paths are supported. Run while repositories are otherwise idle.\nExit codes: 0 success (including protected local work), 1 failed or blocked, 2 invalid usage, 130 interrupted.\n\nExamples:\n  workctl git worktree clean /path/to/work /path/to/oss\n  workctl git worktree clean --apply /path/to/work\n  workctl git worktree clean --older-than 7d --discard-all-local /path/to/work\n  workctl git worktree clean --older-than 7d --discard-all-local --apply /path/to/work\n  workctl git worktree clean --scope work --exclude /path/to/work/keep\n  workctl git worktree clean --strict /path/to/work\n  workctl git worktree clean --apply --discard-local /path/to/work/feature /path/to/work"
+        after_long_help = "Main checkouts are protected. Container scopes select linked worktrees beneath\nthem; a checkout selects its registered linked worktrees. Explicit linked paths\nselect only that worktree. Preview never removes files or writes recovery refs.\n--apply removes idle worktrees and ignored files after saving committed HEAD\nin a durable local recovery ref. No remote connection or push is required.\nTracked changes, untracked files, and masked paths stay protected; these expected\nskips are successful. --strict instead requires fresh remote publication and\nexplicit ignored-file approval; --preserve-commits PATH enables local recovery\nat an exact worktree in strict mode. Recovery preserves commits, not discarded uncommitted files.\n--older-than uses directory creation time, never modification or commit time;\nunknown ages are excluded. --discard-all-local authorizes all local-file loss only\nwithin the resolved selection. Exclusions also protect containing worktrees.\n--discard-operations separately authorizes abandoned merge/rebase state.\n--remove-orphans requires --discard-all-local and verified missing registration;\norphan committed-history recovery is unavailable. Missing directories, locks, populated\nsubmodules, private module object stores, nested repositories, and uncertain ownership\nremain blockers. --reconcile RUN_ID rechecks unsuccessful targets; removing remaining\nwork requires a fresh --apply and discard decisions.\nEmpty uninitialized gitlink paths are supported. Run while repositories are otherwise idle.\nExit codes: 0 success (including protected local work), 1 failed or blocked, 2 invalid usage, 130 interrupted.\n\nExamples:\n  workctl git worktree clean /path/to/work /path/to/oss\n  workctl git worktree clean --apply /path/to/work\n  workctl git worktree clean --older-than 7d --discard-all-local /path/to/work\n  workctl git worktree clean --older-than 7d --discard-all-local --apply /path/to/work\n  workctl git worktree clean --scope work --exclude /path/to/work/keep\n  workctl git worktree clean --strict /path/to/work\n  workctl git worktree clean --apply --discard-local /path/to/work/feature /path/to/work"
     )]
     Clean(crate::git_domain::cleanup::Args),
     /// Inspect shared worktree selection without mutation
+    #[command(
+        after_long_help = "Uses the same roots, exclusions, and creation-age selection as cleanup.\nPrimary checkouts remain protected. Missing paths and incomplete scans are reported;\n--storage opts into bounded allocation estimates, never exact APFS reclamation.\nExamples:\n  workctl git worktree inventory /path/to/work --json\n  workctl git worktree inventory --scope work --storage --json"
+    )]
     Inventory(crate::git_domain::cleanup::InventoryArgs),
 }
 
 pub(crate) fn completions(shell: clap_complete::Shell) -> Vec<u8> {
     let mut bytes = Vec::new();
-    clap_complete::generate(shell, &mut Cli::command(), "workctl", &mut bytes);
+    let mut command = Cli::command();
+    clap_complete::generate(shell, &mut command, "workctl", &mut bytes);
+    if shell == clap_complete::Shell::Fish {
+        // The upstream fish generator omits options below two subcommand levels.
+        // Generate those leaves separately, retaining their full command condition.
+        fn deep_leaves(command: &clap::Command, path: &mut Vec<String>, bytes: &mut Vec<u8>) {
+            if path.len() > 2 && !command.has_subcommands() {
+                let mut leaf = command.clone();
+                let mut generated = Vec::new();
+                clap_complete::generate(
+                    clap_complete::Shell::Fish,
+                    &mut leaf,
+                    "workctl",
+                    &mut generated,
+                );
+                let mut condition = format!("__fish_workctl_using_subcommand {}", path[0]);
+                for part in &path[1..] {
+                    condition.push_str(&format!("; and __fish_seen_subcommand_from {part}"));
+                }
+                for line in String::from_utf8_lossy(&generated).lines() {
+                    if let Some(options) = line.strip_prefix("complete -c workctl") {
+                        writeln!(bytes, "complete -c workctl -n \"{condition}\"{options}").unwrap();
+                    }
+                }
+            }
+            for child in command.get_subcommands() {
+                path.push(child.get_name().to_owned());
+                deep_leaves(child, path, bytes);
+                path.pop();
+            }
+        }
+        deep_leaves(&command, &mut Vec::new(), &mut bytes);
+    }
     bytes
 }
 pub(crate) fn run(args: Vec<OsString>) -> u8 {

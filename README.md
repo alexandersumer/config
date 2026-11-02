@@ -34,8 +34,12 @@ after any command to see its options.
 | --- | --- |
 | Inspect reset targets without fetching | `workctl git reset --list ~/src` |
 | Reset primary checkouts to their remote default branch | `workctl git reset ~/src` |
+| Inventory worktrees and local state | `workctl git worktree inventory ~/src --json` |
+| Preview seven-day bulk discard | `workctl git worktree clean --older-than 7d --discard-all-local ~/src` |
 | Preview linked-worktree cleanup | `workctl git worktree clean ~/src` |
 | Apply linked-worktree cleanup | `workctl git worktree clean --apply ~/src` |
+| Inspect unsuccessful operation runs | `workctl history --unsuccessful --json` |
+| Inspect credential requirements offline | `workctl auth inspect --profile code --json` |
 | Renew and verify work credentials | `workctl auth preflight` |
 | Check code credentials, then run a command | `workctl auth exec --profile code -- bb pr list` |
 | Check CLI prerequisites | `workctl doctor` |
@@ -46,7 +50,10 @@ commands use the current directory.
 Reset refuses tracked changes and other unsafe states. Cleanup previews by
 default. With `--apply`, it protects active local work, saves committed history
 in recovery refs, and removes eligible worktrees **including their ignored
-files**. Review the preview before applying cleanup across a workspace.
+files**. Bulk discard additionally authorizes tracked and untracked file loss within
+the selected worktrees. Age uses directory creation time; unknown ages stay excluded.
+Use exclusions or named scopes to narrow selection, and operation history to inspect
+partial failures before retrying. Review the preview before applying cleanup across a workspace.
 See the [workctl guide](docs/workctl.md) for authentication, Git policies, and recovery commands.
 
 ## Use custom skills
