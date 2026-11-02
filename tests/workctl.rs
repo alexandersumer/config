@@ -913,6 +913,519 @@ fn reset_json_is_one_document_and_success_leaves_no_diagnostics() {
     assert_eq!(fs::read_dir(runtime).unwrap().count(), 0);
 }
 
+fn orphan(f: &Fixture) -> PathBuf {
+    let path = f
+        .temp
+        .path()
+        .canonicalize()
+        .unwrap()
+        .join("orphan with spaces");
+    git(
+        &f.repo,
+        &["worktree", "add", "--detach", path.to_str().unwrap()],
+    );
+    let registration = PathBuf::from(git(&path, &["rev-parse", "--absolute-git-dir"]));
+    fs::remove_dir_all(registration).unwrap();
+    fs::write(path.join("precious"), "uncommitted work\n").unwrap();
+    path
+}
+
+fn json_output(command: &mut Command, code: i32) -> serde_json::Value {
+    let out = command.output().unwrap();
+    assert_eq!(out.status.code(), Some(code), "{}", text(&out));
+    assert!(!out.stdout.contains(&0x1b));
+    assert!(!out.stderr.contains(&0x1b));
+    serde_json::from_slice(&out.stdout).expect("stdout is one JSON document")
+}
+
+#[test]
+fn orphan_discovery_reset_continues_without_entering_or_modifying_orphans() {
+    let f = Fixture::new();
+    let path = orphan(&f);
+    let marker = fs::read(path.join(".git")).unwrap();
+    // A repository below the orphan must never become an independent reset target.
+    let nested = path.join("nested");
+    fs::create_dir(&nested).unwrap();
+    git(&nested, &["init", "-b", "main"]);
+    for list in [true, false] {
+        let mut command = Command::new(BIN);
+        env(&mut command).args(["git", "reset", "--json", "--attempts", "1"]);
+        if list {
+            command.arg("--list");
+        }
+        let r = json_output(command.arg(f.temp.path()).arg(f.temp.path()), 0);
+        assert_eq!(r["skipped"].as_array().unwrap().len(), 1);
+        assert_eq!(r["skipped"][0]["path"], path.to_str().unwrap());
+        assert_eq!(
+            r["skipped"][0]["path_bytes"],
+            serde_json::json!(path.as_os_str().as_encoded_bytes())
+        );
+        assert!(r["skipped"][0]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("missing worktree registration"));
+        assert_eq!(
+            r["excluded"],
+            serde_json::json!([f.worktree.canonicalize().unwrap().to_str().unwrap()])
+        );
+        if list {
+            assert_eq!(
+                r["checkouts"],
+                serde_json::json!([f.repo.canonicalize().unwrap().to_str().unwrap()])
+            );
+            assert!(!f.repo.join(".git/FETCH_HEAD").exists());
+        } else {
+            assert_eq!(r["summary"]["succeeded"], 1);
+            assert_eq!(r["results"].as_array().unwrap().len(), 1);
+        }
+        assert_eq!(fs::read(path.join(".git")).unwrap(), marker);
+        assert_eq!(
+            fs::read_to_string(path.join("precious")).unwrap(),
+            "uncommitted work\n"
+        );
+        assert!(nested.join(".git").is_dir());
+        f.unchanged();
+    }
+}
+
+#[test]
+fn orphan_discovery_cleanup_continues_and_preserves_orphan_data() {
+    let f = Fixture::new();
+    let path = orphan(&f);
+    let marker = fs::read(path.join(".git")).unwrap();
+    let nested = path.join("nested");
+    fs::create_dir(&nested).unwrap();
+    git(&nested, &["init", "-b", "main"]);
+    let head = git(&f.worktree, &["rev-parse", "HEAD"]);
+    for apply in [false, true] {
+        let mut command = Command::new(BIN);
+        env(&mut command).args(["git", "worktree", "clean", "--json"]);
+        if apply {
+            command.arg("--apply");
+        }
+        let r = json_output(command.arg(f.temp.path()).arg(f.temp.path()), 0);
+        assert_eq!(r["skipped"].as_array().unwrap().len(), 1);
+        assert_eq!(r["skipped"][0]["path"], path.to_str().unwrap());
+        assert_eq!(r["summary"]["skipped"], 1);
+        assert_eq!(r["results"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            r["results"][0]["status"],
+            if apply { "removed" } else { "would remove" }
+        );
+        assert_eq!(fs::read(path.join(".git")).unwrap(), marker);
+        assert_eq!(
+            fs::read_to_string(path.join("precious")).unwrap(),
+            "uncommitted work\n"
+        );
+        assert!(nested.join(".git").is_dir());
+    }
+    assert!(!f.worktree.exists());
+    assert_eq!(
+        git(
+            &f.repo,
+            &["rev-parse", &format!("refs/workctl/cleanup/{head}")]
+        ),
+        head
+    );
+}
+
+#[test]
+fn orphan_discovery_explicit_inputs_fail_before_any_mutation_even_with_overlap() {
+    let f = Fixture::new();
+    let path = orphan(&f);
+    let subdir = path.join("subdir");
+    fs::create_dir(&subdir).unwrap();
+    let marker = fs::read_to_string(path.join(".git")).unwrap();
+    let target = marker.strip_prefix("gitdir: ").unwrap().trim_end();
+    let refs = git(&f.repo, &["for-each-ref"]);
+    for operation in [
+        vec!["git", "reset"],
+        vec!["git", "worktree", "clean", "--apply"],
+    ] {
+        for explicit in [&path, &subdir] {
+            for reverse in [false, true] {
+                let mut command = Command::new(BIN);
+                env(&mut command).args(&operation).arg("--json");
+                let paths = if reverse {
+                    [explicit.as_path(), f.temp.path()]
+                } else {
+                    [f.temp.path(), explicit.as_path()]
+                };
+                let r = json_output(command.args(paths), 1);
+                assert!(
+                    r["error"]
+                        .as_str()
+                        .unwrap()
+                        .contains("missing Git metadata"),
+                    "{r}"
+                );
+                assert!(r["error"].as_str().unwrap().contains(target), "{r}");
+                assert!(!f.repo.join(".git/FETCH_HEAD").exists());
+                assert_eq!(git(&f.repo, &["for-each-ref"]), refs);
+                f.unchanged();
+            }
+        }
+    }
+}
+
+#[test]
+fn orphan_discovery_relative_gitfiles_non_utf8_paths_and_duplicates_are_stable() {
+    use std::os::unix::ffi::OsStringExt;
+    let f = Fixture::new();
+    let original = orphan(&f);
+    let marker = fs::read_to_string(original.join(".git")).unwrap();
+    let target = Path::new(marker.strip_prefix("gitdir: ").unwrap().trim_end());
+    let relative = Path::new("../main/.git/worktrees").join(target.file_name().unwrap());
+    fs::write(
+        original.join(".git"),
+        format!("gitdir: {}\r\n", relative.display()),
+    )
+    .unwrap();
+    let name = if cfg!(target_os = "linux") {
+        b"orphan-\xff-\n".to_vec()
+    } else {
+        "orphan-\n-é".as_bytes().to_vec()
+    };
+    let path = f
+        .temp
+        .path()
+        .canonicalize()
+        .unwrap()
+        .join(std::ffi::OsString::from_vec(name));
+    fs::rename(&original, &path).unwrap();
+    let other = orphan(&f);
+    let before = fs::read(path.join(".git")).unwrap();
+    let nested_scope = f.temp.path().canonicalize().unwrap().join("scope");
+    fs::create_dir(&nested_scope).unwrap();
+    // Overlapping containers must report each orphan once, in a stable path order.
+    for operation in [
+        vec!["git", "reset", "--list"],
+        vec!["git", "worktree", "clean"],
+    ] {
+        let mut command = Command::new(BIN);
+        env(&mut command).args(operation).arg("--json");
+        let r = json_output(
+            command
+                .arg(&nested_scope)
+                .arg(f.temp.path())
+                .arg(f.temp.path()),
+            0,
+        );
+        let skipped = r["skipped"].as_array().unwrap();
+        let expected = [&other, &path];
+        assert_eq!(skipped.len(), expected.len());
+        for (row, path) in skipped.iter().zip(expected) {
+            assert_eq!(
+                row["path_bytes"],
+                serde_json::json!(path.as_os_str().as_encoded_bytes())
+            );
+        }
+        assert_eq!(fs::read(path.join(".git")).unwrap(), before);
+        assert!(path.join("precious").exists());
+    }
+}
+
+#[test]
+fn orphan_discovery_empty_target_sets_report_skips_in_text_and_json() {
+    let f = Fixture::new();
+    let original = orphan(&f);
+    let scope = f.temp.path().canonicalize().unwrap().join("scope");
+    fs::create_dir(&scope).unwrap();
+    let path = scope.join("orphan");
+    fs::rename(original, &path).unwrap();
+    let marker = fs::read_to_string(path.join(".git")).unwrap();
+    let missing_registration = marker.strip_prefix("gitdir: ").unwrap().trim_end();
+    // Also cover the common repository having no remaining registrations directory.
+    git(
+        &f.repo,
+        &["worktree", "remove", f.worktree.to_str().unwrap()],
+    );
+    for operation in [
+        vec!["git", "reset", "--list"],
+        vec!["git", "reset"],
+        vec!["git", "worktree", "clean"],
+        vec!["git", "worktree", "clean", "--apply"],
+    ] {
+        for json in [false, true] {
+            let mut command = Command::new(BIN);
+            env(&mut command).args(&operation).arg(&scope);
+            if json {
+                command.arg("--json");
+            }
+            let out = command.output().unwrap();
+            assert!(out.status.success(), "{}", text(&out));
+            assert!(String::from_utf8_lossy(&out.stderr).contains("Skipped orphaned worktree"));
+            assert!(String::from_utf8_lossy(&out.stderr).contains(path.to_str().unwrap()));
+            assert!(
+                String::from_utf8_lossy(&out.stderr).contains(missing_registration),
+                "skip warning must identify the missing registration: {}",
+                text(&out)
+            );
+            if json {
+                let r: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+                assert_eq!(r["skipped"].as_array().unwrap().len(), 1);
+                assert!(
+                    r["skipped"][0]["reason"]
+                        .as_str()
+                        .unwrap()
+                        .contains(missing_registration),
+                    "JSON skip reason must identify the missing registration: {r}"
+                );
+                if r.get("results").is_some() {
+                    assert!(r["results"].as_array().unwrap().is_empty());
+                }
+            }
+            assert!(path.join("precious").exists());
+            assert!(!f.repo.join(".git/FETCH_HEAD").exists());
+        }
+    }
+}
+
+#[test]
+fn orphan_discovery_other_metadata_failures_are_not_silently_skipped() {
+    for kind in [
+        "malformed",
+        "missing-common",
+        "invalid-common",
+        "arbitrary-target",
+        "existing-corrupt-registration",
+        "symlink-registration",
+        "bad-common-config",
+        "unreadable-marker",
+        "symlink-marker",
+        "dotdot-target",
+    ] {
+        let f = Fixture::new();
+        let original = orphan(&f);
+        let scope = f.temp.path().canonicalize().unwrap().join("scope");
+        fs::create_dir(&scope).unwrap();
+        let path = scope.join("broken");
+        fs::rename(original, &path).unwrap();
+        let marker = path.join(".git");
+        let text = fs::read_to_string(&marker).unwrap();
+        let target = PathBuf::from(text.strip_prefix("gitdir: ").unwrap().trim_end());
+        match kind {
+            "malformed" => fs::write(&marker, "invalid gitfile\n").unwrap(),
+            "missing-common" => fs::write(
+                &marker,
+                format!(
+                    "gitdir: {}/absent/worktrees/registration\n",
+                    f.temp.path().display()
+                ),
+            )
+            .unwrap(),
+            "invalid-common" => {
+                let common = f.temp.path().join("fake-common");
+                fs::create_dir(&common).unwrap();
+                fs::write(
+                    &marker,
+                    format!("gitdir: {}/worktrees/registration\n", common.display()),
+                )
+                .unwrap();
+            }
+            "arbitrary-target" => fs::write(&marker, "gitdir: ../absent\n").unwrap(),
+            "existing-corrupt-registration" => fs::create_dir(&target).unwrap(),
+            "symlink-registration" => symlink("absent", &target).unwrap(),
+            "bad-common-config" => {
+                fs::write(f.repo.join(".git/config"), "[invalid config\n").unwrap()
+            }
+            "unreadable-marker" => {
+                fs::set_permissions(&marker, fs::Permissions::from_mode(0o000)).unwrap()
+            }
+            "symlink-marker" => {
+                let saved = path.join("saved-gitfile");
+                fs::rename(&marker, &saved).unwrap();
+                symlink(saved, &marker).unwrap();
+            }
+            "dotdot-target" => fs::write(
+                &marker,
+                format!(
+                    "gitdir: {}/absent/worktrees/..\n",
+                    f.repo.join(".git").display()
+                ),
+            )
+            .unwrap(),
+            _ => unreachable!(),
+        }
+        for operation in [
+            vec!["git", "reset", "--list"],
+            vec!["git", "worktree", "clean", "--apply"],
+        ] {
+            let mut command = Command::new(BIN);
+            env(&mut command).args(operation).arg("--json");
+            let r = json_output(command.arg(&scope), 1);
+            assert!(r["error"].is_string(), "{kind}: {r}");
+            assert!(r.get("skipped").is_none(), "{kind}: {r}");
+            assert!(path.join("precious").exists());
+            assert!(f.worktree.exists());
+            assert!(!f.repo.join(".git/FETCH_HEAD").exists());
+        }
+        fs::set_permissions(&marker, fs::Permissions::from_mode(0o644)).unwrap();
+    }
+}
+
+#[test]
+fn orphan_discovery_unrelated_git_failures_are_not_reclassified_as_skips() {
+    let f = Fixture::new();
+    let path = orphan(&f);
+    let shim = f.shim(
+        r#"if [ "$PWD" = "$PROBE_ORPHAN" ]; then
+echo 'fatal: injected configuration failure' >&2
+exit 128
+fi"#,
+    );
+    for operation in [
+        vec!["git", "reset", "--list"],
+        vec!["git", "worktree", "clean", "--apply"],
+    ] {
+        let mut command = Command::new(BIN);
+        env(&mut command).args(operation).arg("--json");
+        command.env("PROBE_ORPHAN", &path).env(
+            "PATH",
+            format!("{}:{}", shim.display(), std::env::var("PATH").unwrap()),
+        );
+        let r = json_output(command.arg(f.temp.path()), 1);
+        assert!(r["error"]
+            .as_str()
+            .unwrap()
+            .contains("injected configuration failure"));
+        assert!(r.get("skipped").is_none());
+        f.unchanged();
+        assert!(!f.repo.join(".git/FETCH_HEAD").exists());
+    }
+}
+
+#[test]
+fn orphan_discovery_cleanup_never_selects_skipped_paths_through_other_registrations() {
+    let mut f = Fixture::new();
+    let root = f.temp.path().canonicalize().unwrap();
+    let path = root.join("orphan");
+    let peer = root.join("orphan-linked-peer");
+    git(
+        &f.repo,
+        &[
+            "worktree",
+            "move",
+            f.worktree.to_str().unwrap(),
+            peer.to_str().unwrap(),
+        ],
+    );
+    f.worktree = peer;
+    let primary_peer = root.join("orphan-primary-peer");
+    git(
+        &root,
+        &[
+            "clone",
+            f.remote.to_str().unwrap(),
+            primary_peer.to_str().unwrap(),
+        ],
+    );
+    git(
+        &f.repo,
+        &["worktree", "add", "--detach", path.to_str().unwrap()],
+    );
+    let admin = PathBuf::from(git(&path, &["rev-parse", "--absolute-git-dir"]));
+    let alias = admin.with_file_name("renamed-registration");
+    fs::rename(&admin, &alias).unwrap();
+    let nested = path.join("registered-nested");
+    git(
+        &f.repo,
+        &["worktree", "add", "--detach", nested.to_str().unwrap()],
+    );
+    fs::write(path.join("precious"), "preserve\n").unwrap();
+    let marker = fs::read(path.join(".git")).unwrap();
+    let mut reset = Command::new(BIN);
+    env(&mut reset).args(["git", "reset", "--list", "--json"]);
+    let listed = json_output(reset.arg(&primary_peer).arg(&root), 0);
+    assert_eq!(listed["skipped"].as_array().unwrap().len(), 1);
+    let mut expected = vec![f.repo.canonicalize().unwrap(), primary_peer.clone()];
+    expected.sort();
+    assert_eq!(listed["checkouts"], serde_json::json!(expected));
+    assert!(!f.repo.join(".git/FETCH_HEAD").exists());
+    assert!(!primary_peer.join(".git/FETCH_HEAD").exists());
+    let mut cleanup = Command::new(BIN);
+    env(&mut cleanup).args(["git", "worktree", "clean", "--json"]);
+    let preview = json_output(cleanup.arg(&f.worktree).arg(&root), 0);
+    assert_eq!(preview["summary"]["skipped"], 1);
+    assert_eq!(
+        preview["summary"]["would_remove"], 1,
+        "a sibling sharing an orphan's name prefix must remain eligible: {preview}"
+    );
+    assert_eq!(preview["results"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        preview["results"][0]["path_bytes"],
+        serde_json::json!(f.worktree.as_os_str().as_encoded_bytes())
+    );
+    f.unchanged();
+    // Even explicit discard approval cannot turn a discovery exclusion into a target.
+    for option in ["--discard-local", "--discard-ignored", "--preserve-commits"] {
+        let mut command = Command::new(BIN);
+        env(&mut command)
+            .args(["git", "worktree", "clean", "--apply", "--json", option])
+            .arg(&path);
+        let r = json_output(command.arg(f.temp.path()), 1);
+        assert!(r["error"]
+            .as_str()
+            .unwrap()
+            .contains("not a selected linked worktree"));
+        f.unchanged();
+    }
+    let mut command = Command::new(BIN);
+    env(&mut command).args(["git", "worktree", "clean", "--apply", "--json"]);
+    let r = json_output(command.arg(f.temp.path()), 0);
+    assert_eq!(r["summary"]["skipped"], 1);
+    assert_eq!(r["summary"]["removed"], 1);
+    assert_eq!(r["results"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        r["results"][0]["path_bytes"],
+        serde_json::json!(f.worktree.as_os_str().as_encoded_bytes())
+    );
+    assert_eq!(r["results"][0]["status"], "removed");
+    assert!(!f.worktree.exists());
+    assert!(primary_peer.join("file").is_file());
+    assert_eq!(fs::read(path.join(".git")).unwrap(), marker);
+    assert!(path.join("precious").is_file());
+    assert!(alias.is_dir());
+    assert!(nested.join(".git").is_file());
+}
+
+#[test]
+fn orphan_discovery_explicit_nested_repositories_cannot_override_a_container_skip() {
+    let f = Fixture::new();
+    let path = orphan(&f);
+    let nested = path.join("nested-primary");
+    fs::create_dir(&nested).unwrap();
+    git(&nested, &["init", "-b", "main"]);
+    let refs = git(&f.repo, &["for-each-ref"]);
+    for operation in [
+        vec!["git", "reset", "--list"],
+        vec!["git", "reset"],
+        vec!["git", "worktree", "clean", "--apply"],
+    ] {
+        for reverse in [true, false] {
+            let mut command = Command::new(BIN);
+            env(&mut command).args(&operation).arg("--json");
+            let paths = if reverse {
+                [nested.as_path(), f.temp.path()]
+            } else {
+                [f.temp.path(), nested.as_path()]
+            };
+            let r = json_output(command.args(paths), 1);
+            assert!(
+                r["error"]
+                    .as_str()
+                    .unwrap()
+                    .contains("explicit target is inside skipped orphaned worktree"),
+                "{r}"
+            );
+            assert_eq!(git(&f.repo, &["for-each-ref"]), refs);
+            assert!(!f.repo.join(".git/FETCH_HEAD").exists());
+            assert!(path.join("precious").is_file());
+            f.unchanged();
+        }
+    }
+}
+
 fn terminal(mut command: Command, width: u16) -> (i32, Vec<u8>) {
     use std::io::Read;
     use std::os::fd::FromRawFd;

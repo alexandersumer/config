@@ -91,11 +91,14 @@ pub(crate) fn run(cli: ResetArgs, json: bool) -> u8 {
         }
     };
     let started = std::time::Instant::now();
-    match discover::select(&options.paths) {
+    match discover::select(&options.paths).and_then(|selection| {
+        discover::report_skipped(&selection.skipped)?;
+        Ok(selection)
+    }) {
         Ok(selection) if options.list => {
             let result = serde_json::json!({"schema_version":1,"operation":"git.reset.inspect",
                 "scope":crate::presentation::paths(&options.paths),"checkouts":crate::presentation::paths(selection.repos.iter().map(|r| &r.path)),
-                "excluded":crate::presentation::paths(&selection.excluded),"status":if crate::runtime::interrupted() {"interrupted"} else {"completed"}});
+                "excluded":crate::presentation::paths(&selection.excluded),"skipped":discover::skipped_json(&selection.skipped),"status":if crate::runtime::interrupted() {"interrupted"} else {"completed"}});
             if json {
                 let written = crate::presentation::json(&result);
                 return if written == 0 && crate::runtime::interrupted() {

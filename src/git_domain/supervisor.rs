@@ -258,7 +258,7 @@ fn run_inner(options: &Options, selection: Selection, started: Instant) -> Resul
     if total == 0 {
         if options.json {
             return Ok(crate::presentation::json(
-                &serde_json::json!({"schema_version":1,"operation":"git.reset","status":"completed","scope":crate::presentation::paths(&options.paths),"results":[],"excluded":crate::presentation::paths(&selection.excluded),"summary":{"succeeded":0,"failed":0,"cancelled":0,"elapsed_seconds":started.elapsed().as_secs_f64()}}),
+                &serde_json::json!({"schema_version":1,"operation":"git.reset","status":"completed","scope":crate::presentation::paths(&options.paths),"results":[],"excluded":crate::presentation::paths(&selection.excluded),"skipped":super::discover::skipped_json(&selection.skipped),"summary":{"skipped":selection.skipped.len(),"succeeded":0,"failed":0,"cancelled":0,"elapsed_seconds":started.elapsed().as_secs_f64()}}),
             ));
         }
         writeln!(
@@ -421,6 +421,12 @@ fn run_inner(options: &Options, selection: Selection, started: Instant) -> Resul
             .map_err(|e| e.to_string())?,
     )
     .map_err(|e| e.to_string())?;
+    fs::write(
+        logs.join("skipped-worktrees.json"),
+        serde_json::to_vec_pretty(&super::discover::skipped_json(&selection.skipped))
+            .map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
     if !retain {
         fs::remove_dir_all(&logs)
             .map_err(|e| format!("could not remove temporary logs at {}: {e}", display(&logs)))?;
@@ -440,7 +446,7 @@ fn run_inner(options: &Options, selection: Selection, started: Instant) -> Resul
     };
     if options.json {
         if crate::presentation::json(
-            &serde_json::json!({"schema_version":1,"operation":"git.reset","status":if code==0 {"completed"}else if code==130 {"interrupted"}else{"failed"},"scope":crate::presentation::paths(&options.paths),"excluded":crate::presentation::paths(&selection.excluded),"results":result,"diagnostics":if retain {Some(logs.to_string_lossy())}else{None},"summary":{"succeeded":ok,"failed":total-ok-stopped,"cancelled":stopped,"elapsed_seconds":started.elapsed().as_secs_f64()}}),
+            &serde_json::json!({"schema_version":1,"operation":"git.reset","status":if code==0 {"completed"}else if code==130 {"interrupted"}else{"failed"},"scope":crate::presentation::paths(&options.paths),"excluded":crate::presentation::paths(&selection.excluded),"skipped":super::discover::skipped_json(&selection.skipped),"results":result,"diagnostics":if retain {Some(logs.to_string_lossy())}else{None},"summary":{"skipped":selection.skipped.len(),"succeeded":ok,"failed":total-ok-stopped,"cancelled":stopped,"elapsed_seconds":started.elapsed().as_secs_f64()}}),
         ) != 0
         {
             return Ok(1);

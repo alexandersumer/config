@@ -126,10 +126,15 @@ impl Runtime {
         out
     }
     fn cleanup(&self, args: &[&str], code: i32) -> serde_json::Value {
+        self.cleanup_with_policy(args, code, true)
+    }
+    fn cleanup_with_policy(&self, args: &[&str], code: i32, strict: bool) -> serde_json::Value {
         let mut cmd = self.command(self.root(), &self.binary);
-        // Exercise the strict remote-publication contract explicitly.
-        cmd.args(["git", "worktree", "clean", "--json", "--strict"])
-            .args(args);
+        cmd.args(["git", "worktree", "clean", "--json"]);
+        if strict {
+            cmd.arg("--strict");
+        }
+        cmd.args(args);
         let out = self.run(cmd);
         assert_eq!(out.status.code(), Some(code), "{}", text(&out));
         assert!(
@@ -410,6 +415,287 @@ fn text(out: &Output) -> String {
 }
 fn path(path: &Path) -> &str {
     path.to_str().unwrap()
+}
+
+struct OrphanWorkspace {
+    rt: Runtime,
+    scope: PathBuf,
+    primary: PathBuf,
+    eligible: PathBuf,
+    active: PathBuf,
+    orphan: PathBuf,
+    nested: PathBuf,
+    marker: Vec<u8>,
+    old_tip: String,
+    upstream: String,
+    private_tip: String,
+}
+impl OrphanWorkspace {
+    fn new() -> Self {
+        let mut rt = Runtime::new();
+        let seed = rt.root().join("seed");
+        fs::create_dir(&seed).unwrap();
+        rt.git(&seed, &["init", "-b", "trunk"]);
+        fs::write(seed.join("file"), "initial\n").unwrap();
+        rt.git(&seed, &["add", "."]);
+        rt.git(&seed, &["commit", "-m", "baseline"]);
+        let origin = rt.root().join("origin.git");
+        rt.git(rt.root(), &["clone", "--bare", path(&seed), path(&origin)]);
+        let url = rt.serve(&origin);
+        let scope = rt.root().join("workspace");
+        fs::create_dir(&scope).unwrap();
+        let scope = scope.canonicalize().unwrap();
+        let primary = scope.join("primary");
+        rt.git(rt.root(), &["clone", &url, path(&primary)]);
+        let eligible = scope.join("eligible");
+        rt.git(
+            &primary,
+            &["worktree", "add", "-b", "private", path(&eligible)],
+        );
+        fs::write(
+            eligible.join("private-commit"),
+            "recover unpublished history\n",
+        )
+        .unwrap();
+        rt.git(&eligible, &["add", "."]);
+        rt.git(&eligible, &["commit", "-m", "private worktree commit"]);
+        let private_tip = rt.git(&eligible, &["rev-parse", "HEAD"]);
+        let active = scope.join("active");
+        rt.git(
+            &primary,
+            &["worktree", "add", "-b", "active", path(&active)],
+        );
+        fs::write(active.join("file"), "active edits\n").unwrap();
+        let orphan = scope.join("orphan with spaces");
+        rt.git(&primary, &["worktree", "add", "--detach", path(&orphan)]);
+        let admin = PathBuf::from(rt.git(&orphan, &["rev-parse", "--absolute-git-dir"]));
+        fs::remove_dir_all(&admin).unwrap();
+        // Git emits absolute gitfiles; also exercise the supported relative form.
+        let marker = format!(
+            "gitdir: ../primary/.git/worktrees/{}\n",
+            admin.file_name().unwrap().to_str().unwrap()
+        )
+        .into_bytes();
+        fs::write(orphan.join(".git"), &marker).unwrap();
+        fs::write(orphan.join("precious"), "orphan edits\n").unwrap();
+        let nested = orphan.join("nested-primary");
+        fs::create_dir(&nested).unwrap();
+        rt.git(&nested, &["init", "-b", "trunk"]);
+        fs::write(primary.join("local-commit"), "recover old main tip\n").unwrap();
+        rt.git(&primary, &["add", "."]);
+        rt.git(&primary, &["commit", "-m", "divergent local tip"]);
+        let old_tip = rt.git(&primary, &["rev-parse", "HEAD"]);
+        fs::write(seed.join("file"), "upstream\n").unwrap();
+        rt.git(&seed, &["commit", "-am", "advance upstream"]);
+        rt.git(&seed, &["push", path(&origin), "trunk"]);
+        let upstream = rt.git(&seed, &["rev-parse", "HEAD"]);
+        Self {
+            rt,
+            scope,
+            primary,
+            eligible,
+            active,
+            orphan,
+            nested,
+            marker,
+            old_tip,
+            upstream,
+            private_tip,
+        }
+    }
+    fn assert_preserved(&self) {
+        assert_eq!(fs::read(self.orphan.join(".git")).unwrap(), self.marker);
+        assert_eq!(
+            fs::read_to_string(self.orphan.join("precious")).unwrap(),
+            "orphan edits\n"
+        );
+        assert_eq!(
+            fs::read_to_string(self.orphan.join("file")).unwrap(),
+            "initial\n"
+        );
+        assert_eq!(
+            fs::read_to_string(self.active.join("file")).unwrap(),
+            "active edits\n"
+        );
+        assert!(self.nested.join(".git").is_dir());
+        assert!(!self.nested.join(".git/FETCH_HEAD").exists());
+        assert!(self
+            .rt
+            .git(&self.primary, &["status", "--porcelain"])
+            .is_empty());
+    }
+    fn assert_skip(&self, result: &serde_json::Value) {
+        assert_eq!(result["skipped"].as_array().unwrap().len(), 1);
+        assert_eq!(result["skipped"][0]["path"], path(&self.orphan));
+        assert_eq!(
+            result["skipped"][0]["path_bytes"],
+            serde_json::json!(self.orphan.as_os_str().as_encoded_bytes())
+        );
+        assert!(result["skipped"][0]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("missing worktree registration"));
+    }
+}
+
+#[test]
+fn standalone_reset_skips_orphans_and_refuses_conflicting_explicit_scopes() {
+    let f = OrphanWorkspace::new();
+    let before = f.rt.git(&f.primary, &["show-ref", "--head"]);
+    let listing = f.rt.reset(
+        f.rt.root(),
+        &["--list", "--json", path(&f.scope), path(&f.scope)],
+        0,
+    );
+    let listed: serde_json::Value = serde_json::from_slice(&listing.stdout).unwrap();
+    f.assert_skip(&listed);
+    assert_eq!(listed["checkouts"], serde_json::json!([path(&f.primary)]));
+    assert_eq!(listed["excluded"].as_array().unwrap().len(), 2);
+    assert_eq!(f.rt.git(&f.primary, &["show-ref", "--head"]), before);
+    assert!(!f.primary.join(".git/FETCH_HEAD").exists());
+    for explicit in [&f.orphan, &f.nested] {
+        for paths in [
+            [path(&f.scope), path(explicit)],
+            [path(explicit), path(&f.scope)],
+        ] {
+            let out = f.rt.reset(f.rt.root(), &["--json", paths[0], paths[1]], 1);
+            assert_eq!(
+                f.rt.git(&f.primary, &["show-ref", "--head"]),
+                before,
+                "explicit orphan scopes must refuse before any target fetches or resets"
+            );
+            assert!(!f.primary.join(".git/FETCH_HEAD").exists());
+            assert!(f.eligible.exists());
+            let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+            let error = result["error"].as_str().unwrap();
+            assert!(
+                error.contains(if explicit == &f.orphan {
+                    "missing Git metadata"
+                } else {
+                    "explicit target is inside skipped orphaned worktree"
+                }),
+                "{result}"
+            );
+            f.assert_preserved();
+        }
+    }
+    let out = f.rt.reset(f.rt.root(), &["--json", path(&f.scope)], 0);
+    let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    f.assert_skip(&result);
+    assert_eq!(result["summary"]["succeeded"], 1);
+    assert_eq!(result["summary"]["skipped"], 1);
+    assert_eq!(f.rt.git(&f.primary, &["rev-parse", "HEAD"]), f.upstream);
+    assert_eq!(
+        fs::read_to_string(f.primary.join("file")).unwrap(),
+        "upstream\n"
+    );
+    assert!(f
+        .rt
+        .git(
+            &f.primary,
+            &[
+                "for-each-ref",
+                "--format=%(objectname)",
+                "refs/home-reset-backups/"
+            ]
+        )
+        .lines()
+        .any(|oid| oid == f.old_tip));
+    assert_eq!(f.rt.git(&f.eligible, &["rev-parse", "HEAD"]), f.private_tip);
+    assert_eq!(
+        fs::read_to_string(f.eligible.join("private-commit")).unwrap(),
+        "recover unpublished history\n"
+    );
+    let log = Path::new(result["diagnostics"].as_str().unwrap()).join("skipped-worktrees.json");
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&fs::read(log).unwrap()).unwrap(),
+        result["skipped"]
+    );
+    f.assert_preserved();
+}
+
+#[test]
+fn standalone_cleanup_skips_orphans_and_refuses_conflicting_explicit_scopes() {
+    let f = OrphanWorkspace::new();
+    let before = f.rt.git(&f.primary, &["show-ref", "--head"]);
+    let registrations = f.rt.git(&f.primary, &["worktree", "list", "--porcelain"]);
+    let preview = f.rt.cleanup_with_policy(&[path(&f.scope)], 0, false);
+    f.assert_skip(&preview);
+    assert_eq!(preview["policy"], "pragmatic");
+    assert_eq!(preview["summary"]["would_remove"], 1);
+    assert_eq!(preview["summary"]["protected_worktrees"], 1);
+    assert_eq!(f.rt.git(&f.primary, &["show-ref", "--head"]), before);
+    assert_eq!(
+        f.rt.git(&f.primary, &["worktree", "list", "--porcelain"]),
+        registrations
+    );
+    for explicit in [&f.orphan, &f.nested] {
+        for paths in [
+            [path(&f.scope), path(explicit)],
+            [path(explicit), path(&f.scope)],
+        ] {
+            let result =
+                f.rt.cleanup_with_policy(&["--apply", paths[0], paths[1]], 1, false);
+            assert!(
+                result["error"]
+                    .as_str()
+                    .unwrap()
+                    .contains(if explicit == &f.orphan {
+                        "missing Git metadata"
+                    } else {
+                        "explicit target is inside skipped orphaned worktree"
+                    }),
+                "{result}"
+            );
+            assert_eq!(f.rt.git(&f.primary, &["show-ref", "--head"]), before);
+            assert_eq!(
+                f.rt.git(&f.primary, &["worktree", "list", "--porcelain"]),
+                registrations
+            );
+            assert!(f.eligible.exists());
+            f.assert_preserved();
+        }
+    }
+    // Strict mode must use fresh protocol evidence and still report the orphan.
+    let strict = f.rt.cleanup(&[path(&f.scope)], 1);
+    f.assert_skip(&strict);
+    assert_eq!(strict["summary"]["blocked"], 2);
+    assert!(strict["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|row| row["reason"].as_str().unwrap().contains("unpublished")));
+    assert_eq!(f.rt.git(&f.primary, &["show-ref", "--head"]), before);
+    let applied =
+        f.rt.cleanup_with_policy(&["--apply", path(&f.scope)], 0, false);
+    f.assert_skip(&applied);
+    assert_eq!(applied["summary"]["removed"], 1);
+    assert_eq!(applied["summary"]["protected_worktrees"], 1);
+    assert!(!f.eligible.exists());
+    assert!(!f
+        .rt
+        .git(&f.primary, &["worktree", "list", "--porcelain"])
+        .contains(path(&f.eligible)));
+    let recovery = format!("refs/workctl/cleanup/{}", f.private_tip);
+    assert_eq!(
+        f.rt.git(&f.primary, &["rev-parse", &recovery]),
+        f.private_tip
+    );
+    assert_eq!(
+        f.rt.git(&f.primary, &["show", &format!("{recovery}:private-commit")]),
+        "recover unpublished history"
+    );
+    assert_eq!(f.rt.git(&f.primary, &["rev-parse", "HEAD"]), f.old_tip);
+    assert!(!f.primary.join(".git/FETCH_HEAD").exists());
+    f.assert_preserved();
+    let after = f.rt.git(&f.primary, &["show-ref", "--head"]);
+    let repeated =
+        f.rt.cleanup_with_policy(&["--apply", path(&f.scope)], 0, false);
+    f.assert_skip(&repeated);
+    assert_eq!(repeated["summary"]["removed"], 0);
+    assert_eq!(repeated["summary"]["protected_worktrees"], 1);
+    assert_eq!(f.rt.git(&f.primary, &["show-ref", "--head"]), after);
+    f.assert_preserved();
 }
 
 #[test]

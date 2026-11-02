@@ -142,6 +142,11 @@ collisions block reset. Replaced branch tips are backed up under
 `refs/home-reset-backups/`; detached-HEAD commits receive no additional backup.
 Other local branches and linked worktrees are preserved. A batch has no automatic
 rollback: earlier changes may remain when a later checkout fails.
+Workspace discovery reports and skips orphaned linked worktrees with missing
+registrations when their common repository can still be verified. Their files
+remain untouched, and other targets continue. Explicit orphan targets and other
+invalid metadata still stop discovery before any mutations. Cleanup uses the
+same discovery policy; neither operation repairs or deletes orphaned directories.
 Recovery commands select the affected checkout explicitly and quote paths and
 references for bash and zsh, so they can be run from any directory.
 

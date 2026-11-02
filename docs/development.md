@@ -63,6 +63,12 @@ completion files, and preserve unrelated legacy files. The Git protocol E2E star
 loopback daemon and checks reset backups, cleanup previews and partial application,
 stale remote references, explicit local-data discard, and persisted registrations.
 Missing Git or loopback networking fails the lane instead of skipping it.
+The protocol lane also runs reset and cleanup over mixed workspaces containing
+an orphan with a relative gitfile, a private committed worktree, and active local
+edits. It verifies fetched commits, reset backups, cleanup recovery refs, repeated
+cleanup, strict publication checks, and explicit orphan/nested-scope refusal
+before any mutation. These cases run in the existing `reset_e2e` target and its
+Linux/macOS CI matrix; no separate opt-in is required.
 The CI workflow runs the public CLI
 contracts on Linux and macOS; configured CI is distinct from a completed hosted run.
 

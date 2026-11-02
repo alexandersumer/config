@@ -113,6 +113,7 @@ struct Candidate {
 struct Selection {
     candidates: Vec<Candidate>,
     protected: BTreeSet<PathBuf>,
+    skipped: discover::Skipped,
 }
 fn select(paths: &[PathBuf]) -> Result<Selection, String> {
     let mut progress = presentation::Discovery::new("worktrees")?;
@@ -121,6 +122,8 @@ fn select(paths: &[PathBuf]) -> Result<Selection, String> {
     let mut explicit_linked = BTreeSet::new();
     let mut repos = BTreeMap::new();
     let mut walked = BTreeSet::new();
+    let mut skipped = discover::Skipped::new();
+    let mut explicit_paths = Vec::new();
     // Validate the entire scope before publication probes or mutation.
     for path in paths {
         progress.update()?;
@@ -130,6 +133,7 @@ fn select(paths: &[PathBuf]) -> Result<Selection, String> {
         if !p.is_dir() {
             return Err(format!("{}: expected directory", display(path)));
         }
+        explicit_paths.push(p.clone());
         if let Some((repo, linked)) = discover::repository(&p)? {
             if linked {
                 explicit_linked.insert(repo.path.clone());
@@ -151,8 +155,9 @@ fn select(paths: &[PathBuf]) -> Result<Selection, String> {
             continue;
         }
         if git::exists(&p.join(".git"))? {
-            let (repo, _) = discover::repository(&p)?.ok_or("invalid Git metadata")?;
-            repos.insert(repo.common, repo.path);
+            if let Some((repo, _)) = discover::discovered_repository(&p, &mut skipped)? {
+                repos.insert(repo.common, repo.path);
+            }
             continue;
         }
         for e in fs::read_dir(&p).map_err(|e| e.to_string())? {
@@ -162,6 +167,7 @@ fn select(paths: &[PathBuf]) -> Result<Selection, String> {
             }
         }
     }
+    discover::validate_explicit(&explicit_paths, &skipped)?;
     let mut candidates = Vec::new();
     let mut protected = BTreeSet::new();
     for (common, probe) in repos {
@@ -176,6 +182,12 @@ fn select(paths: &[PathBuf]) -> Result<Selection, String> {
         }
         protected.insert(primary.clone());
         for registration in registrations.into_iter().skip(1) {
+            if skipped
+                .keys()
+                .any(|path| registration.path.starts_with(path))
+            {
+                continue;
+            }
             if explicit.contains(&common)
                 || explicit_linked.contains(&registration.path)
                 || containers.iter().any(|p| registration.path.starts_with(p))
@@ -192,6 +204,7 @@ fn select(paths: &[PathBuf]) -> Result<Selection, String> {
     Ok(Selection {
         candidates,
         protected,
+        skipped,
     })
 }
 fn config_value(value: &[u8]) -> Result<Vec<u8>, String> {
@@ -1464,6 +1477,7 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
             approved.insert(p);
         }
     }
+    discover::report_skipped(&selected.skipped)?;
     if !json || !selected.candidates.is_empty() {
         let mut overview: Box<dyn Write> = if json {
             Box::new(std::io::stderr())
@@ -1740,7 +1754,7 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
     };
     if json {
         if presentation::json(
-            &serde_json::json!({"schema_version":2,"operation":"git.worktree.clean","status":status,"apply":args.apply,"policy":if args.strict {"strict"}else{"pragmatic"},"scope":presentation::paths(&args.paths),"protected":presentation::paths(&selected.protected),"results":results,"summary":{"removed":removed,"would_remove":would_remove,"protected_worktrees":protected_worktrees,"workers":workers,"blocked":blocked,"failed":failed,"unverified":unverified,"errors":errors,"interrupted":interrupted,"elapsed_seconds":started.elapsed().as_secs_f64()}}),
+            &serde_json::json!({"schema_version":2,"operation":"git.worktree.clean","status":status,"apply":args.apply,"policy":if args.strict {"strict"}else{"pragmatic"},"scope":presentation::paths(&args.paths),"protected":presentation::paths(&selected.protected),"skipped":discover::skipped_json(&selected.skipped),"results":results,"summary":{"skipped":selected.skipped.len(),"removed":removed,"would_remove":would_remove,"protected_worktrees":protected_worktrees,"workers":workers,"blocked":blocked,"failed":failed,"unverified":unverified,"errors":errors,"interrupted":interrupted,"elapsed_seconds":started.elapsed().as_secs_f64()}}),
         ) != 0
         {
             return Ok(1);

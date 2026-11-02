@@ -25,6 +25,25 @@ Overlapping scopes are deduplicated. Linked worktrees encountered in containers 
 excluded; explicit linked-worktree reset targets are refused. Invalid scope prevents
 all resets. `--list` is inspection only and does not fetch.
 
+During container discovery, reset and cleanup skip an orphaned linked worktree
+whose regular `.git` file points to a missing `worktrees/<name>` registration,
+provided Git can still verify the common repository. Each skip reports the full
+path and missing registration; its files stay in place and discovery does not
+descend into it. Cleanup also excludes registrations naming that directory or
+its descendants. Other eligible targets continue; an orphan-only container
+completes successfully with no targets and an explicit skip report.
+
+Explicit orphan targets and their ordinary subdirectories remain errors and
+prevent all mutations, even when also covered by a container argument. Relative
+gitfile paths are supported. Explicit nested repositories cannot override an
+orphan exclusion from an overlapping container scope. Malformed or unreadable
+metadata, symlink gitfiles,
+existing but invalid registrations, missing common repositories, and unrelated
+Git failures remain errors rather than skips. No command repairs or prunes the
+orphan automatically. Preserve and inspect its files before deciding whether to
+reconstruct its worktree or remove the leftover directory; a missing registration
+can prevent `git worktree repair` from recovering it.
+
 The existing reset policy is preserved: tracked/index changes, dirty submodules,
 unfinished Git operations, masked tracked paths, and untracked/ignored paths that
 collide with either the fetched target or local target branch cause refusal.
@@ -163,13 +182,22 @@ verifies recovery refs, protected local work, primary checkout state, and remova
 
 Detailed Git logs require `--verbose` or an actionable failure. Reset retains private
 diagnostics on failure, interruption, or `--keep-logs`, including `results.json`
-and `excluded-worktrees.json`. Successful default runs remove them. Cleanup removes
+and `excluded-worktrees.json`, plus `skipped-worktrees.json` for orphan exclusions.
+Successful default runs remove them. Cleanup removes
 its temporary publication repositories and captures automatically.
 
 Reset and cleanup include scope, per-target `results`, and summary
 counts with `elapsed_seconds`. Reset additionally reports excluded worktrees,
 recovery refs, attempts, and retained diagnostics. Cleanup reports protected primary
 checkouts, discard decisions, and publication/local-data evidence for eligible targets.
+Successful discovery adds a top-level `skipped` array to reset inspection, reset
+execution, and cleanup JSON. Each entry contains `path`, exact `path_bytes`, and
+`reason`. Execution summaries also include `skipped`, counting orphan exclusions
+separately from targets, valid linked-worktree exclusions, and deletion outcomes.
+The array is empty when there are no orphan exclusions. These additive fields do
+not change the schema versions or existing status/exit meanings; reported orphan
+exclusions alone do not cause failure. Text and JSON invocations also print each
+skip and its reason on stderr, including when no eligible targets remain.
 Cleanup version 2 reports `policy` (`pragmatic` or `strict`) and `protected_worktrees`
 in the summary. Pragmatic local-work skips have target status `protected` and do not
 make the command fail. Strict mode retains `blocked` and exit 1 for these refusals.
