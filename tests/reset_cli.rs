@@ -1,4 +1,5 @@
 //! Acceptance tests exercise the public compiled CLI and real disposable Git repos.
+mod common;
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::os::unix::{
@@ -23,6 +24,7 @@ struct Fixture {
 }
 fn env(cmd: &mut Command) -> &mut Command {
     cmd.env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("WORKCTL_STATE_DIR", common::state_dir())
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_AUTHOR_NAME", "Test")
         .env("GIT_AUTHOR_EMAIL", "test@example.com")
