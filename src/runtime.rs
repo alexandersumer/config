@@ -62,11 +62,14 @@ pub(crate) fn stop_group(child: &mut Child) -> Result<ExitStatus, String> {
     let status = child.wait().map_err(|e| e.to_string())?;
     // Reaping the leader does not terminate its descendants. Verify that no
     // live group members remain before releasing repository coordination.
+    // Darwin does not deliver an in-flight group signal to a member forked
+    // concurrently, so keep signalling until the group is inert.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
     while !group_is_inert(child.id())? {
         if std::time::Instant::now() >= deadline {
             return Err("worker group still active after termination".into());
         }
+        unsafe { libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL) };
         std::thread::sleep(std::time::Duration::from_millis(2));
     }
     Ok(status)
@@ -308,6 +311,36 @@ fn capture_inner(
         .and_then(|_| err.read_to_end(&mut stderr))
         .map_err(|e| e.to_string())?;
     Ok((code, stdout, stderr))
+}
+
+#[cfg(test)]
+mod group_tests {
+    use super::*;
+    use std::os::unix::process::CommandExt;
+
+    #[test]
+    fn stop_group_stops_members_forked_while_the_group_is_signalled() {
+        struct Group(libc::pid_t);
+        impl Drop for Group {
+            fn drop(&mut self) {
+                unsafe { libc::kill(-self.0, libc::SIGKILL) };
+            }
+        }
+        // A member forked while the group signal is in flight can miss it, so
+        // a leader that forks continuously must still leave nothing running.
+        for _ in 0..20 {
+            let mut leader = std::process::Command::new("/bin/sh")
+                .args(["-c", "while :; do /bin/sleep 30 & done"])
+                .process_group(0)
+                .spawn()
+                .unwrap();
+            let group = leader.id() as libc::pid_t;
+            let _cleanup = Group(group);
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            stop_group(&mut leader).expect("every group member must be stopped");
+            assert!(group_is_inert(group as u32).unwrap());
+        }
+    }
 }
 
 #[cfg(all(test, target_os = "macos"))]
