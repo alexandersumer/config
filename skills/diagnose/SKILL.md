@@ -7,7 +7,7 @@ description: Diagnose hard bugs and performance regressions with falsifiable evi
 
 Reuse proof only when it is visible, same-scope, after the last relevant edit, and not invalidated by touched files, config, dependencies, fixtures, generated output, runtime state, or environment. Otherwise run the narrowest check that proves the claim, artifact, or behavior; broaden only when risk or policy requires it. Final reports must separate reused proof, new commands, and checks not run.
 
-Diagnose `symptom`, `$ARGUMENTS`, pasted error, or the conversation bug.
+Diagnose `$ARGUMENTS`, a pasted error, or the conversation bug.
 
 Do not hypothesize without falsifiable evidence. Prefer the smallest deterministic agent-runnable signal that shows the user's failure: test, CLI command, HTTP script, browser script, trace replay, fixture harness, fuzz loop, differential run, or repeated stress loop for flakes. When reproduction is unsafe or impossible, continue only if static evidence, historical traces, or captured state can distinguish the ranked hypotheses; otherwise stop with what you tried and the artifact or access needed.
 

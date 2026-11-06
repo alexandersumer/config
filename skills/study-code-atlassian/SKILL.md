@@ -5,7 +5,7 @@ description: Study locally available Atlassian repositories with the current age
 
 # Study Code: Atlassian
 
-Study `aspect`, else `$ARGUMENTS`, else infer the aspect from the conversation, active design, current implementation need, or Atlassian product context. Use only the current agent. Do not invoke subagents. Do not edit inspected repositories; this is a read-only research skill unless the user separately asks for changes.
+Study the aspect in `$ARGUMENTS`, else infer the aspect from the conversation, active design, current implementation need, or Atlassian product context. Use only the current agent. Do not invoke subagents. Do not edit inspected repositories; this is a read-only research skill unless the user separately asks for changes.
 
 ## Resolve the study target
 

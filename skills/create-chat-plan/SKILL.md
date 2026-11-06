@@ -3,7 +3,7 @@ name: create-chat-plan
 description: Create a lightweight implementation-ready plan directly in chat. Use when planning should be grounded, interrogated, and verified upfront without writing plan files.
 ---
 
-Use `topic`, else `$ARGUMENTS`, else infer the planning target from the conversation, active design, current branch, or referenced files. Produce the plan in chat only. Planning itself does not authorize code edits, files, or subagents; follow any separately authorized implementation or deeper-research request after planning.
+Use `$ARGUMENTS`, else infer the planning target from the conversation, active design, current branch, or referenced files. Produce the plan in chat only. Planning itself does not authorize code edits, files, or subagents; follow any separately authorized implementation or deeper-research request after planning.
 
 First read enough context to avoid generic planning: relevant README/CONTRIBUTING/AGENTS instructions, nearby docs, entry points, interfaces, representative callers, tests, existing plans, and current diffs when they matter. Keep this bounded; the goal is a high-confidence lightweight plan, not a durable design artifact.
 
@@ -15,12 +15,12 @@ When planning verification, allow reused proof only when it is visible, same-sco
 
 Interrogate the plan before presenting it. Run a brief pre-mortem against missing data/API/schema compatibility, migration and rollback needs, concurrency or idempotency risks, permissions/security concerns, user-visible behavior, observability, test seams, ownership boundaries, and hidden coupling. Include only risks that are concrete for the scoped work, each paired with the design response.
 
-Break implementation into reviewable end-to-end chunks. Each chunk should deliver observable behavior, reduce uncertainty, or unlock the next slice. Avoid helper-only phases, vague cleanup, "write tests" as a separate phase, or broad refactors unless they are the smallest path to the acceptance criteria. Prefer the smallest coherent plan that can pass the verification plan.
+Break implementation into reviewable end-to-end chunks. Each chunk should deliver observable behavior, reduce uncertainty, or unlock the next slice. Avoid helper-only phases, vague cleanup, "write tests" as a separate phase, or broad refactors unless they are the smallest path to the acceptance criteria. Carry the plan through rollout and cleanup when the change needs them. Prefer the smallest coherent plan that can pass the verification plan.
 
 Return this structure, omitting empty sections:
 
-## Goal
-One or two sentences describing the outcome and user/system value.
+## End state
+One or two sentences describing what is true once everything has shipped, and why it matters.
 
 ## Acceptance criteria
 - Observable behavior or artifact that must be true when done.
@@ -39,9 +39,8 @@ One or two sentences describing the outcome and user/system value.
 - Concrete risks and the design response for each.
 
 ## Plan
-1. End-to-end implementation slice with its checkable signal.
-2. Next slice, only if needed.
-3. Cleanup/docs/migration only when tied to acceptance.
+1. First PR or reviewable slice: one-line scope and its checkable signal.
+2. Every remaining PR in order, through rollout and cleanup such as flag removal, migration completion, or dead-code deletion. Mark uncertain items.
 
 ## Out of scope
 - Explicit exclusions and tempting follow-ups not included in this plan.

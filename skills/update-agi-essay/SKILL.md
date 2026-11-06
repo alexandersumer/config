@@ -7,7 +7,7 @@ description: Use when researching, planning, editing, fact-checking, refreshing,
 
 Reuse proof only when it is visible, same-scope, after the last relevant edit, and not invalidated by touched files, config, dependencies, fixtures, generated output, runtime state, or environment. Otherwise run the narrowest check that proves the claim, artifact, or behavior; broaden only when risk or policy requires it. Final reports must separate reused proof, new commands, and checks not run.
 
-Apply `scope`, else `$ARGUMENTS`, else infer the requested update mode from the conversation. Use this skill when the user asks to research, plan, update, refresh, edit, verify, or style-audit `src/content/blog/what-to-do-if-you-take-agi-seriously.md`.
+Apply `$ARGUMENTS`, else infer the requested update mode from the conversation. Use this skill when the user asks to research, plan, update, refresh, edit, verify, or style-audit `src/content/blog/what-to-do-if-you-take-agi-seriously.md`.
 
 Keep this as one coherent editorial workflow. Do not split the job across separate research, planning, editing, or audit skills. Do not commit, push, deploy, or publish; use `$git-publish-to-origin` only after the user asks to publish.
 

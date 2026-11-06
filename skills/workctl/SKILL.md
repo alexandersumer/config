@@ -59,18 +59,22 @@ Read the exit status and JSON outcome. Cleanup's `protected` results are expecte
 skips, not failures. Report the result and actionable blockers briefly. Workctl
 already bounds retries; address a reported failure before repeating the command.
 
-Read the [guide](../../docs/workctl.md) only for details such as custom profiles,
-recovery commands, or strict cleanup policy.
+## Cleanup details
 
-Age selection uses directory creation time; unknown ages are never selected. Use
-`--exclude PATH` to protect a path, descendants, and its containing worktree or
-repository, or `--scope NAME` instead of
-positional paths for configured roots. Bulk discard requires explicit file-loss
-authorization. Abandoned merge/rebase discard additionally requires
-`--discard-operations`; process locks remain blockers. Verified orphan removal
-additionally requires `--remove-orphans` and reports unavailable commit recovery.
-Preview before apply. Reconciliation never repeats deletion without a new apply
-and fresh discard decisions. `--storage` enables bounded allocation estimates;
-APFS reclamation is not exact. Use `doctor --profile PROFILE --managed` for
-client-executable prerequisites and managed-install drift, without credential calls
-or repairs. Never treat a client executable's presence as verified access.
+- Age selection uses directory creation time; unknown ages are never selected.
+- `--exclude PATH` protects a path, its descendants, and its containing worktree
+  or repository. `--scope NAME` replaces positional paths with configured roots.
+- `--discard-all-local` requires explicit file-loss authorization.
+  `--discard-operations` additionally discards abandoned merge/rebase state;
+  process locks remain blockers. `--remove-orphans` requires
+  `--discard-all-local` and reports unavailable commit recovery.
+- Preview before `--apply`. Reconciliation never repeats deletion without a new
+  apply and fresh discard decisions.
+- `--storage` adds bounded allocation estimates; APFS reclamation is not exact.
+
+Use `doctor --profile PROFILE --managed` for client-executable prerequisites and
+managed-install drift, without credential calls or repairs. A client
+executable's presence is not verified access.
+
+Read the [guide](references/workctl.md) only for details such as custom profiles,
+recovery commands, or strict cleanup policy.

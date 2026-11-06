@@ -3,7 +3,7 @@ name: create-plan
 description: Write a saved spec, proposal, design document, or implementation plan. Use when the user requests a planning artifact or output file; use create-chat-plan for planning directly in conversation.
 ---
 
-Use `topic`, `$ARGUMENTS`, or the conversation context as the seed. Write the requested spec, design, proposal, or implementation plan. Keep implementation steps in the same file when that is sufficient; add a companion plan only when requested or when the detail warrants a separate file.
+Use `$ARGUMENTS` or the conversation context as the seed. Write the requested spec, design, proposal, or implementation plan. Keep implementation steps in the same file when that is sufficient; add a companion plan only when requested or when the detail warrants a separate file.
 
 Record the decisions an implementer needs to start: scope, behavior, affected files, and acceptance checks.
 
@@ -15,7 +15,7 @@ Resolve paths before writing:
 
 The primary artifact must answer the questions an implementer would otherwise have to ask: what problem is being solved, what behavior changes, what design decisions are already made, what files or modules are implicated, what acceptance signal proves it works, and what is deliberately out of scope.
 
-Implementation steps, whether inline or in a companion plan, must break the work into reviewable end-to-end chunks. Each chunk must ship observable behavior or a usable capability through a real path, with a checkable signal. No helper-only chunks, no "write tests" chunks, no vague cleanup phases unless they unblock named behavior.
+Implementation steps, whether inline or in a companion plan, must break the work into reviewable end-to-end chunks. Each chunk must ship observable behavior or a usable capability through a real path, with a checkable signal. No helper-only chunks, no "write tests" chunks, no vague cleanup phases unless they unblock named behavior. Carry the steps through rollout and cleanup when the change needs them, and mark uncertain steps.
 
 When planning verification, allow reused proof only when it is visible, same-scope, after the last relevant edit, and not invalidated by files, config, dependencies, fixtures, generated output, runtime state, or environment. Otherwise name the narrowest check that proves the claim, artifact, or behavior. Justify broad suites, full builds, CI, or live/E2E only when risk or policy requires it: shared contracts, infrastructure changes, auth/security/persistence/concurrency risk, merge risk, or missing targeted seams.
 

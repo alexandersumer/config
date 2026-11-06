@@ -7,7 +7,7 @@ description: Perform live end-to-end QA through a real running system without wr
 
 Reuse proof only when it is visible, same-scope, after the last relevant edit, and not invalidated by touched files, config, dependencies, fixtures, generated output, runtime state, or environment. Otherwise run the narrowest check that proves the claim, artifact, or behavior; broaden only when risk or policy requires it. Final reports must separate reused proof, new commands, and checks not run.
 
-Operate `scope`, `$ARGUMENTS`, or the current effective diff through a real running system. Produce runtime evidence without writing automated tests or running CI/test lanes. For durable automated coverage, use `e2e-automated-tests`.
+Operate `$ARGUMENTS` or the current effective diff through a real running system. Produce runtime evidence without writing automated tests or running CI/test lanes. For durable automated coverage, use `e2e-automated-tests`.
 
 ## Choose the route
 
@@ -34,7 +34,7 @@ Do not replace the changed path with mocks, fake adapters, internal helpers, tes
 
 ## Resolve obstacles
 
-Inspect logs, readiness, config, and lane wiring; repair in-scope setup problems. Use `auth-preflight` for missing or expired access and command approval for sandbox restrictions, then resume the scenario. A timeout or unavailable client does not prove the capability is unavailable; try a supported equivalent route without changing identity or weakening the contract. Request a necessary human action when discovered and continue independent work while waiting. Stop only the affected path when no safe useful next action remains; preserve its failed or unverified status and finish the remaining authorized work.
+Inspect logs, readiness, and config; repair in-scope setup problems. Use `auth-preflight` for missing or expired access and command approval for sandbox restrictions, then resume the scenario. A timeout or unavailable client does not prove the capability is unavailable; try a supported equivalent route without changing identity or weakening the contract. Request a necessary human action when discovered and continue independent work while waiting. Stop only the affected path when no safe useful next action remains; preserve its failed or unverified status and finish the remaining authorized work.
 
 ## Finish
 

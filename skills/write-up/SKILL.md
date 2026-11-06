@@ -3,11 +3,11 @@ name: write-up
 description: Produce a tight, fact-checked write-up adapted to the user's purpose, audience, and argument. Use for recaps, decision summaries, investigation notes, recommendations, status updates, and synthesis.
 ---
 
-Write the requested write-up in chat only. Apply `focus` or `$ARGUMENTS` if provided.
+Write the requested write-up in chat only. Apply `$ARGUMENTS` if provided.
 
 ## Aim
 
-Produce clear writing that helps the reader understand the point, the evidence, the trade-off, and the next implication. Do not default to a fixed template. Do not open with a heading named `Conclusion`.
+Produce clear writing that helps the reader understand the point, the evidence, the trade-off, and the next implication. Do not default to a fixed template or open with a heading named `Conclusion`.
 
 ## Grounding
 
@@ -42,10 +42,9 @@ Use headings only when they improve scanning. Prefer natural, specific headings 
 
 Before sending, revise once:
 
-1. Remove any default-template feel, especially an opening `Conclusion` heading.
-2. Delete sentences that do not change the reader's understanding or action.
-3. Collapse technical lists into higher-level paragraphs unless the details are necessary.
-4. Check that the first paragraph answers the user's real question.
-5. Check that caveats and open questions are material, not defensive.
+1. Delete sentences that do not change the reader's understanding or action.
+2. Collapse technical lists into higher-level paragraphs unless the details are necessary.
+3. Check that the first paragraph answers the user's real question.
+4. Check that caveats and open questions are material, not defensive.
 
 Forbidden: em dashes, emojis, sycophancy, rule-of-three padding, aphorisms, filler openers, unsupported estimates, restating the user's question, and AI tells like `delve`, `leverage`, `robust`, `comprehensive`, `seamless`, `underscore`, `tapestry`, `realm`, `landscape`.

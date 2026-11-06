@@ -7,11 +7,11 @@ description: Fix real check failures from arguments, pasted errors, local checks
 
 Reuse proof only when it is visible, same-scope, after the last relevant edit, and not invalidated by touched files, config, dependencies, fixtures, generated output, runtime state, or environment. Otherwise run the narrowest check that proves the claim, artifact, or behavior; broaden only when risk or policy requires it. Final reports must separate reused proof, new commands, and checks not run.
 
-Fix a real failing check from `error_output`, `$ARGUMENTS`, current-branch CI, or documented local checks. With no arguments, discover the current branch's failing CI/check signal yourself before asking the user for logs.
+Fix a real failing check from `$ARGUMENTS`, pasted output, current-branch CI, or documented local checks. With no arguments, discover the current branch's failing CI/check signal yourself before asking the user for logs.
 
 ## Resolve the target
 
-1. If `error_output` or `$ARGUMENTS` names a failing command, job, test, assertion, diagnostic, or pasted log, that is the scope. Fix it first; do not chase unrelated failures unless they block reproduction or proof.
+1. If `$ARGUMENTS` or pasted output names a failing command, job, test, assertion, diagnostic, or pasted log, that is the scope. Fix it first; do not chase unrelated failures unless they block reproduction or proof.
 2. With no supplied failure, inspect repository and SCM context: current branch, upstream or PR, working tree diff, recent commits, and branch/PR check status. Use the latest branch-relevant failing CI/check run as the source of truth.
 3. If CI is unavailable, inaccessible, green, inconclusive, or not relevant to this branch, fall back to documented local checks, package scripts, build files, and nearby test commands to find the smallest real failure.
 4. If no failing signal is found after CI and local discovery, stop and report that no actionable failure was found. Do not invent a change.

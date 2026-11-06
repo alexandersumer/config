@@ -1,24 +1,25 @@
 ---
 name: feature-flag-clean-up
-description: Clean up a rolled-out feature flag while preserving enabled behavior
+description: Clean up a fully rolled-out feature flag while preserving its live behavior. Use when the user asks to remove, inline, or retire a feature flag or toggle.
 ---
 
 ## Proof policy
 
 Reuse proof only when it is visible, same-scope, after the last relevant edit, and not invalidated by touched files, config, dependencies, fixtures, generated output, runtime state, or environment. Otherwise run the narrowest check that proves the claim, artifact, or behavior; broaden only when risk or policy requires it. Final reports must separate reused proof, new commands, and checks not run.
 
-Remove fully rolled out flag `flag_key` or `$ARGUMENTS`. Keep enabled behavior. Delete disabled behavior.
+Remove the flag named in `$ARGUMENTS` or the conversation as a repo concept. Keep the live behavior and delete the dead path.
 
-Do not stop at the first conditional. Remove the flag as a repo concept: checks, aliases, constants, config, tests, docs, fixtures, dead helpers.
+Establish the live value before editing. Use the user's statement, flag-service evidence, or committed defaults and overrides for every environment. Keep the branch that value selects. For inverted flags such as `disable_*` or kill switches, that is usually the off path. If the live value differs across environments or is not evidenced, ask before editing.
 
-Search first for full key, enum/constant/generated names, aliases, and string variants across production, tests, config, docs, and fixtures.
+Search for the full key, enum, constant, and generated names, aliases, and string variants across production code, tests, config, docs, and fixtures. Do not stop at the first conditional.
 
-Inline enabled branches. Delete disabled-only tests. Remove unused imports, helpers, types, and config.
+Inline the live branch. Convert tests that cover both values into tests of the retained behavior, and delete tests that only cover the dead path. Remove the imports, helpers, types, config entries, and fixtures that become unused.
 
-Repeat searches until no relevant references remain. Verify retained behavior through a targeted real path; add one if important behavior has no check. Reuse proof when valid; run broader tests only when the proof policy justifies them.
+Repeat the search until no relevant references remain. Remote flag definitions in a flag service are not repo code. Leave archiving them to the user and say so. Verify the retained behavior through a targeted real path, and add a check if important behavior has none.
 
 Final:
-- Removed: `<flag>`
+- Removed: `<flag>` (kept `<live value>` behavior)
 - References: `<0 or remaining with reason>`
 - Checks: `<command>` -> `<result>`, `reused — <prior proof and why still valid>`, or `not run — <reason>`
 - Files: `<changed files>`
+- Follow-up: `<remote flag archive or none>`

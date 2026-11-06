@@ -7,7 +7,7 @@ description: "Create or harden real automated end-to-end tests. Use when the use
 
 Reuse proof only when it is visible, same-scope, after the last relevant edit, and not invalidated by touched files, config, dependencies, fixtures, generated output, runtime state, or environment. Otherwise run the narrowest check that proves the claim, artifact, or behavior; broaden only when risk or policy requires it. Final reports must separate reused proof, new commands, and checks not run.
 
-Create or strengthen an automated E2E for `scope`, `$ARGUMENTS`, recent changes, or the conversation target. Deliver the test, its lane wiring, and verification. For one-off runtime QA without automated tests, use `e2e-live-check`.
+Create or strengthen an automated E2E for `$ARGUMENTS`, recent changes, or the conversation target. Deliver the test, its lane wiring, and verification. For one-off runtime QA without automated tests, use `e2e-live-check`.
 
 ## Discover the real path
 

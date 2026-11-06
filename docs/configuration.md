@@ -120,7 +120,6 @@ Expected symlink behavior:
 - `~/.zshrc` links to this config checkout's `zsh/zshrc` file.
 - `~/.config/ghostty/config` links to this config checkout's `ghostty/config` file.
 - `~/Library/Application Support/com.mitchellh.ghostty/config` is absent so Ghostty loads the managed config only once.
-- `~/.config/relay/config.toml` links to this config checkout's `relay/config.toml` file.
 - `~/.local/bin/config-tools` and `~/.local/bin/workctl` are runnable copies of the Rust multicall executable.
 - Codex runs directly from the official Homebrew installation. The shell prefers `/opt/homebrew/bin` over older `/usr/local/bin` tools; no config-repair wrapper is installed.
 - `~/.codex/skills/.system` remains a Codex-owned directory with Codex system skills.

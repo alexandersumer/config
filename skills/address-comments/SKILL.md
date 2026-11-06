@@ -7,13 +7,13 @@ description: Address actionable PR comments and publish coherent fixes
 
 Reuse proof only when it is visible, same-scope, after the last relevant edit, and not invalidated by touched files, config, dependencies, fixtures, generated output, runtime state, or environment. Otherwise run the narrowest check that proves the claim, artifact, or behavior; broaden only when risk or policy requires it. Final reports must separate reused proof, new commands, and checks not run.
 
-Address actionable comments on `pr_target`, or the current branch PR. With no arguments, discover the current branch PR and its open review comments yourself before asking the user to paste comments.
+Address actionable comments on the PR in `$ARGUMENTS`, or the current branch PR. With no arguments, discover the current branch PR and its open review comments yourself before asking the user to paste comments.
 
 Invoking this skill is explicit authorization to perform the git writes required for this PR-comment workflow: stage intended changes, create a coherent commit, and push the current branch to `origin` after validation. Use a suitable branch/worktree for the verified PR source when needed. Do not open PRs, merge, resolve comment threads, or post PR replies unless explicitly requested. Stop instead of pushing if the current branch is `main`, `master`, or the resolved remote default branch, unless the user explicitly named that branch as the push target.
 
 ## Resolve the target
 
-1. If `pr_target`, `$ARGUMENTS`, or `focus` names a PR, comment, thread, file, or reviewer, use that to narrow scope. `focus` narrows the review surface; it does not authorize unrelated cleanup.
+1. If `$ARGUMENTS` names a PR, comment, thread, file, or reviewer, use it to narrow scope. Narrowing does not authorize unrelated cleanup.
 2. With no supplied target, inspect repository and SCM context: current branch, upstream, remote default branch, working tree diff, unpushed commits, and the current branch PR when available.
 3. Resolve the target PR's source repository, source branch, head SHA, and push destination. Refresh the exact source ref when needed. Use the matching checkout when suitable; otherwise reuse or create an isolated worktree from the verified PR source. Preserve unrelated local work and reconcile any intended local fixes without discarding either history. Before pushing, verify that only coherent fixes extend the current PR head and that the push targets its source repository and branch. Ask only if the intended changes or destination remain ambiguous.
 4. Fetch open or unresolved review comments and comment threads for the target PR. Prefer current, unresolved comments over stale, resolved, outdated, or superseded comments; keep stale comments only when they still point to code present in the effective diff.

@@ -5,7 +5,7 @@ description: Study locally available OSS repositories with the current agent to 
 
 # Study Code: OSS
 
-Study `aspect`, else `$ARGUMENTS`, else infer the aspect from the conversation, active design, or current implementation need. Use only the current agent. Do not invoke subagents. Do not edit inspected repositories; this is a read-only research skill unless the user separately asks for changes.
+Study the aspect in `$ARGUMENTS`, else infer the aspect from the conversation, active design, or current implementation need. Use only the current agent. Do not invoke subagents. Do not edit inspected repositories; this is a read-only research skill unless the user separately asks for changes.
 
 ## Resolve the study target
 

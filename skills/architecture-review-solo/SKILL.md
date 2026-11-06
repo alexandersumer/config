@@ -7,7 +7,7 @@ description: Direct codebase architecture review without subagents. Use for ordi
 
 Review codebase architecture directly in this session. Do not invoke subagents. Preserve the same quality bar as `architecture-review-deep` by doing explicit, sequential architecture-review passes and validating every candidate against concrete files, current friction, and a realistic future change path. Do not edit product code.
 
-1. **Resolve scope.** Use `scope`, `$ARGUMENTS`, the conversation target, or the current repo. Prefer the smallest coherent surface with callers, tests, and future change pressure. If that cannot be bounded quickly after reading available context, ask one narrowing question.
+1. **Resolve scope.** Use `$ARGUMENTS`, the conversation target, or the current repo. Prefer the smallest coherent surface with callers, tests, and future change pressure. If that cannot be bounded quickly after reading available context, ask one narrowing question.
 
 2. **Build the context packet for yourself.** Read relevant `CONTEXT.md`, `CONTEXT-MAP.md`, `docs/adr/**`, `AGENTS.md`, `CLAUDE.md`, `REVIEW.md`, README, entry points, key interfaces, representative callers, error/logging paths, and nearby tests. Keep excerpts focused. Capture domain vocabulary and ADR constraints so you do not invent names or re-litigate decisions.
 

@@ -9,7 +9,7 @@ description: Resume and finish in-progress branch/worktree changes from the cumu
 
 Reuse proof only when it is visible, same-scope, after the last relevant edit, and not invalidated by touched files, config, dependencies, fixtures, generated output, runtime state, or environment. Otherwise run the narrowest check that proves the claim, artifact, or behavior; broaden only when risk or policy requires it. Final reports must separate reused proof, new commands, and checks not run.
 
-Act as a fresh agent inheriting an in-progress branch or dirty worktree. Do not rely on session memory. Use explicit user context, `plan`, `$ARGUMENTS`, or pasted notes as the source of intended scope; use the cumulative branch/worktree change set as the source of truth for current implementation state. Infer intent from the diff only when no stronger intent artifact exists.
+Act as a fresh agent inheriting an in-progress branch or dirty worktree. Do not rely on session memory. Use explicit user context, `$ARGUMENTS`, a plan, or pasted notes as the source of intended scope; use the cumulative branch/worktree change set as the source of truth for current implementation state. Infer intent from the diff only when no stronger intent artifact exists.
 
 ## 1. Resolve evidence before editing
 

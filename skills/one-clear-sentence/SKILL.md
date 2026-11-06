@@ -5,7 +5,7 @@ description: Rewrite a source or relevant takeaway as exactly one useful, self-c
 
 Write exactly one self-contained sentence and nothing else.
 
-Your primary job is to compress the user's current target into the single most useful sentence, not the shortest possible sentence and not an acknowledgement of the style request. Optimize for immediate clarity over brevity when those conflict.
+Your job is to compress the user's current target into the single most useful sentence, which is neither the shortest possible sentence nor an acknowledgement of the style request. When clarity and brevity conflict, choose clarity.
 
 ## Source selection
 
@@ -17,55 +17,24 @@ Use the most specific available source in this order:
 
 If there is truly no source or topic to rewrite, ask exactly one short sentence for the text to condense.
 
-## Relevance filter
+## Select
 
-Preserve the user's meaning, facts, and intended audience, but extract the relevant takeaway rather than preserving every detail. Prefer the outcome, decision, blocker, risk, next action, or definition of done the user likely cares about.
+Preserve the user's meaning, facts, and intended audience, but extract the relevant takeaway rather than preserving every detail. Prefer the outcome, decision, blocker, risk, next action, or definition of done the user likely cares about. For a long list, status report, investigation, or plan, drop file inventories, examples, subtask lists, and incidental evidence unless one of them is the central point.
 
-A useful sentence may be a normal full sentence, not a headline or slogan. Include the key subject, action or decision, and the consequence, reason, blocker, or condition when that context is needed for the sentence to stand on its own.
+The sentence must stand on its own for a reader who has not seen the source. Keep the concrete subject, the problem or decision, and the consequence or next action. For technical, operational, planning, or incident text, also keep the mechanism: the system, trigger, failure mode, boundary condition, and practical response. If a reader would have to ask which system, what failed, why, when, or what to do next, and the source answers it, include the answer. Dense sources often need 25 to 45 words; there is no target count.
 
-When the source is a long list, status report, investigation, or implementation plan, synthesize the highest-value point and drop file inventories, examples, subtask lists, and incidental evidence unless one of them is the central point.
+Do not invent detail, hide important uncertainty, or soften nuance to save words.
 
-Do not invent detail, hide important uncertainty, or soften important nuance just to make the sentence shorter.
+## Style
 
-## Clarity floor
+Write a normal full sentence in a natural tone, not a headline or slogan. Use concrete subjects, plain verbs, and active voice, and match the author's register without fake casualness. Join essential clauses with conjunctions rather than cramming incidental detail into a run-on.
 
-The sentence must stand on its own for a reader who has not seen the source. If the source includes them, keep the concrete subject, the specific problem or decision, the causal mechanism or blocker, and the consequence or next action.
+Cut filler openers, inflated vocabulary, slogans, praise, decorative endings, synonym lists added for rhythm, unsupported "from X to Y" sweeps, and stacked hedges. Replace phrases such as "leverage our expertise" with the actual action. State the point directly instead of using "not X, but Y" framing unless the distinction carries essential meaning. Keep precise domain terms such as "model drift" or "decision boundary" when a plainer word would change the meaning.
 
-For technical, operational, planning, or incident text, do not compress away the mechanism that explains why the issue happens or why the action matters. A good sentence often needs the system, trigger, failure mode, timing or boundary condition, and practical response.
+Use no em dashes, colons, or semicolons.
 
-Avoid vague summaries that force obvious follow-up questions like which system, what failed, why it failed, when it happens, what to do next, or what condition changes the answer. If a reader would need to ask one of those questions and the source answers it, revise the sentence to include that answer.
+## Output
 
-Do not default to tiny 8 to 15 word summaries for dense source material. There is no target word count, but dense technical or planning sources often need 25 to 45 words to be useful.
+Do not acknowledge, confirm, promise future behavior, or say anything like "Got it", "Sure", or "I will use that style". Do not add headings, labels, quotes, bullet points, explanations, alternatives, or preamble unless the user explicitly asks for that exact wrapper.
 
-## Output rules
-
-Do not acknowledge, confirm, promise future behavior, or say anything like "Got it", "Sure", or "I will use that style".
-
-Do not add headings, labels, quotes, bullet points, explanations, alternatives, or preamble unless the user explicitly asks for that exact wrapper.
-
-The output must be one clear, simple sentence in a natural tone, with no em dashes, colons, or semicolons.
-
-## Plain style
-
-Use concrete subjects, plain verbs, active voice, and natural phrasing. Match the author's register without adding fake casualness or flattening their personality.
-
-Cut filler openers, inflated vocabulary, slogans, praise, and decorative endings. Replace phrases such as "leverage our expertise" with the actual action. State the point directly instead of using "not X, but Y" framing unless the distinction carries essential meaning.
-
-Remove synonym lists added for rhythm, unsupported "from X to Y" sweeps, and clauses that merely restate the point. Keep the uncertainty the source supports while cutting stacked hedges.
-
-Keep precise domain terms such as "model drift" or "decision boundary" when a plainer substitute would change the meaning or make it vague. Judge words by their function rather than a blacklist.
-
-Use conjunctions to connect essential clauses within the single sentence. Do not cram a paragraph into a run-on sentence to retain incidental details.
-
-## Before replying
-
-Revise once to ensure:
-
-1. The output is exactly one sentence.
-2. The sentence captures the most relevant thing the user cares about.
-3. The point is immediately understandable.
-4. The tone sounds natural, direct, and not academic.
-5. The sentence is specific enough to be useful on its own without becoming padded or vague.
-6. There are no em dashes, colons, or semicolons.
-
-Prefer the shortest phrasing that still carries the useful substance, but never remove the concrete detail needed for the sentence to be understood and acted on without a follow-up.
+Before replying, check that the output is exactly one sentence that captures what the user most cares about, reads immediately, and is specific enough to act on without a follow-up question.

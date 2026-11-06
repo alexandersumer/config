@@ -15,13 +15,11 @@ pub(crate) fn install_command(args: &[String]) -> Result<()> {
     let skills_dir = config_root.join("skills");
     let zsh_dir = config_root.join("zsh");
     let ghostty_dir = config_root.join("ghostty");
-    let relay_dir = config_root.join("relay");
 
     require_dir(&skills_dir, "config skills directory")?;
     validate_config_skills(&config_root)?;
     require_dir(&zsh_dir, "config zsh directory")?;
     require_dir(&ghostty_dir, "config Ghostty directory")?;
-    require_dir(&relay_dir, "config Relay directory")?;
     let codex_skill_plan = prepare_codex_skill_links(&skills_dir, &home_dir)?;
     let claude_skill_plan = prepare_claude_skill_links(&skills_dir, &home_dir)?;
     repair_codex_config(&home_dir)?;
@@ -29,12 +27,6 @@ pub(crate) fn install_command(args: &[String]) -> Result<()> {
         format!(
             "{}: cannot create Ghostty config directory: {err}",
             home_dir.join(".config/ghostty").display()
-        )
-    })?;
-    fs::create_dir_all(home_dir.join(".config/relay")).map_err(|err| {
-        format!(
-            "{}: cannot create Relay config directory: {err}",
-            home_dir.join(".config/relay").display()
         )
     })?;
 
@@ -58,13 +50,6 @@ pub(crate) fn install_command(args: &[String]) -> Result<()> {
         &config_root,
     )?;
     cleanup_duplicate_ghostty_app_config(&home_dir, &ghostty_dir.join("config"))?;
-    link_path(
-        &relay_dir.join("config.toml"),
-        &home_dir.join(".config/relay/config.toml"),
-        "Relay config",
-        &config_root,
-    )?;
-    cleanup_legacy_relay_config(&home_dir, &relay_dir.join("config.toml"))?;
     apply_skill_links(SkillLinkPlan {
         links: Vec::new(),
         ..codex_skill_plan
@@ -89,10 +74,6 @@ pub(crate) fn install_command(args: &[String]) -> Result<()> {
     println!(
         "Custom Claude Code skills point at {}.",
         skills_dir.display()
-    );
-    println!(
-        "Relay config points at {}.",
-        relay_dir.join("config.toml").display()
     );
     Ok(())
 }
@@ -128,38 +109,6 @@ fn cleanup_duplicate_ghostty_app_config(
             return Err(format!(
                 "{}: cannot remove Ghostty app config directory: {err}",
                 app_config_dir.display()
-            ));
-        }
-    }
-
-    Ok(())
-}
-
-fn cleanup_legacy_relay_config(home_dir: &Path, managed_relay_config: &Path) -> Result<()> {
-    let legacy_dir = home_dir.join(".relay");
-    let legacy_config = legacy_dir.join("config.toml");
-
-    if config_matches_managed(&legacy_config, managed_relay_config)? {
-        fs::remove_file(&legacy_config).map_err(|err| {
-            format!(
-                "{}: cannot remove legacy Relay config: {err}",
-                legacy_config.display()
-            )
-        })?;
-        println!("Removed legacy Relay config: {}", legacy_config.display());
-    }
-
-    match fs::remove_dir(&legacy_dir) {
-        Ok(()) => println!(
-            "Removed empty legacy Relay config directory: {}",
-            legacy_dir.display()
-        ),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-        Err(err) if err.kind() == std::io::ErrorKind::DirectoryNotEmpty => {}
-        Err(err) => {
-            return Err(format!(
-                "{}: cannot remove legacy Relay config directory: {err}",
-                legacy_dir.display()
             ));
         }
     }
@@ -379,11 +328,6 @@ fn managed_install_link_errors(config_root: &Path, home_dir: &Path) -> Result<Ve
             source: config_root.join("ghostty/config"),
             target: home_dir.join(".config/ghostty/config"),
         },
-        ManagedLink {
-            label: "Relay config",
-            source: config_root.join("relay/config.toml"),
-            target: home_dir.join(".config/relay/config.toml"),
-        },
     ];
 
     let mut errors = Vec::new();
@@ -393,7 +337,6 @@ fn managed_install_link_errors(config_root: &Path, home_dir: &Path) -> Result<Ve
         }
     }
     errors.extend(duplicate_ghostty_app_config_errors(home_dir)?);
-    errors.extend(legacy_relay_config_errors(home_dir)?);
     errors.sort();
     Ok(errors)
 }
@@ -475,21 +418,6 @@ fn duplicate_ghostty_app_config_errors(home_dir: &Path) -> Result<Vec<String>> {
         Err(err) => Err(format!(
             "{}: cannot inspect duplicate Ghostty app config: {err}",
             app_config.display()
-        )),
-    }
-}
-
-fn legacy_relay_config_errors(home_dir: &Path) -> Result<Vec<String>> {
-    let legacy_dir = home_dir.join(".relay");
-    match fs::symlink_metadata(&legacy_dir) {
-        Ok(_) => Ok(vec![format!(
-            "{} remains but Relay now reads ~/.config/relay; remove it after backing up anything intentional",
-            legacy_dir.display()
-        )]),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
-        Err(err) => Err(format!(
-            "{}: cannot inspect legacy Relay config directory: {err}",
-            legacy_dir.display()
         )),
     }
 }

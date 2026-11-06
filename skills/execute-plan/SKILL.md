@@ -7,7 +7,7 @@ description: Implement an existing plan or spec through reachable behavior and v
 
 Reuse proof only when it is visible, same-scope, after the last relevant edit, and not invalidated by touched files, config, dependencies, fixtures, generated output, runtime state, or environment. Otherwise run the narrowest check that proves the claim, artifact, or behavior; broaden only when risk or policy requires it. Final reports must separate reused proof, new commands, and checks not run.
 
-Implement `artifact`, `spec`, `$ARGUMENTS`, or the most relevant discovered planning artifact.
+Implement `$ARGUMENTS` or the most relevant discovered planning artifact.
 
 Do not stop at scaffolding, types, TODOs, docs, or unrelated green tests. Deliver reachable behavior through real repo entry points.
 

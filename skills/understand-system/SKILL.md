@@ -5,7 +5,7 @@ description: Understand one or more local codebases as a system. Resolves explic
 
 # Understand System
 
-Understand `system`, `repos`, `paths`, `$ARGUMENTS`, or the system implied by the conversation. A system may be one repo, many repos, generated artifacts, scripts, local state, logs, configs, processes, and debugging context discovered from evidence.
+Understand the system named in `$ARGUMENTS` or implied by the conversation. A system may be one repo, many repos, generated artifacts, scripts, local state, logs, configs, processes, and debugging context discovered from evidence.
 
 Use only the current agent. Do not invoke subagents. Do not edit inspected repos or local runtime files. This is read-only reconnaissance unless the user separately asks for changes.
 
@@ -170,13 +170,8 @@ Return a compact operator map, not a code dump. Include only applicable sections
 
 For small systems, shorten the report but keep evidence and unknowns. For large systems, rank the most important flows and relationships instead of listing everything.
 
-## Anti-patterns
+## Avoid
 
-- README-only summaries.
-- Grep-only relationship claims.
-- Hard-coded local paths or product conventions.
-- Large private code/log/config dumps.
+- Broad builds, installs, service starts, or tests before you understand the scripts and their safety.
 - Wandering into unrelated repos from common-word matches.
-- Broad builds, installs, service starts, or tests before understanding scripts and safety.
-- Static architecture summaries with no runtime/debug context.
-- Pattern harvesting instead of system understanding.
+- Static architecture summaries with no runtime or debug context.

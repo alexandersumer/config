@@ -11,7 +11,7 @@ cargo run -- install
 cargo run -- install-git-hooks
 ```
 
-`install` links the managed shell, Ghostty, Relay, and agent configuration into
+`install` links the managed shell, Ghostty, and agent configuration into
 this user's home directory. It also installs `config-tools` and `workctl` in
 `~/.local/bin`. Existing non-managed files are preserved. Use `--home PATH` to
 install into an isolated home instead.

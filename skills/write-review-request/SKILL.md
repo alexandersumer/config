@@ -45,7 +45,7 @@ Before returning, do a silent clarity pass:
 - Can a teammate explain the problem and change after one reading, without knowing the PR's internals? Rewrite any sentence that requires decoding a term or inferring a missing causal link.
 - Does each bullet add distinct information? Cut repetition, generic benefits, and implementation details that do not help the review.
 - Are evidence and material unknowns accurate and easy to distinguish? Include only gaps relevant to this change; do not append a standard list of unrun environments.
-- For a bug fix, are both Repro and Rollout present? For another behavior change, are Example (or Repro) and Rollout present? Restore any missing required bullet, stating unknowns when evidence is unavailable.
+- Are all required bullets present, with unknowns stated where evidence is missing?
 - Does Repro distinguish executed results from proposed steps, and does Rollout cover exposure, activation, rollback, and relevant limits using only supported facts?
 - If there is a specific review question, does it identify what needs judgment?
 

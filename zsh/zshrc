@@ -116,7 +116,6 @@ alias atlassian="cd $HOME/atlassian"
 alias vim="nvim"
 alias vi="nvim"
 alias clear="echo 'The clear command is disabled.'"
-alias axiom="atlas relay --agent axiom"
 
 # Project navigation
 alias blog="cd $HOME/src/alexandersumer.com"
@@ -142,7 +141,7 @@ alias atlassian-sandbox="cd $HOME/atlassian/sandboxes"
 for __project_dir in "$HOME"/atlassian/*(N/); do
   __project_name="${__project_dir:t}"
   case "$__project_name" in
-    convo-ai|alta-contrib|alta|relay)
+    convo-ai|alta-contrib|alta)
       __alias_atlassian_project "$__project_name"
       ;;
   esac
@@ -297,12 +296,5 @@ fi
 if [ -d /opt/homebrew/opt/node@24/bin ]; then
   export PATH="/opt/homebrew/opt/node@24/bin:$PATH"
 fi
-# >>> relay pinned bun >>>
-export BUN_INSTALL="${BUN_INSTALL:-$HOME/.bun}"
-case ":$PATH:" in
-  *":$BUN_INSTALL/bin:"*) ;;
-  *) export PATH="$BUN_INSTALL/bin:$PATH" ;;
-esac
-# <<< relay pinned bun <<<
 
 if [ -f "$HOME/.afm-bin-path-manager.zsh" ]; then source "$HOME/.afm-bin-path-manager.zsh"; fi

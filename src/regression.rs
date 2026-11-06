@@ -59,9 +59,8 @@ pub(crate) fn run_regression_tests() -> Result<()> {
     test_git_fetch_ref_cleanup()?;
     test_get_default_branch_refreshes_stale_remote_head()?;
     test_reset_executable()?;
-    test_axiom_alias_zsh_wiring()?;
+    test_project_alias_zsh_wiring()?;
     test_pure_prompt_syncs_git_branch_after_cd()?;
-    test_relay_axiom_config()?;
     Ok(())
 }
 
@@ -439,8 +438,6 @@ pub(crate) fn test_install_command() -> Result<()> {
         .tempdir()
         .map_err(|err| format!("cannot create temp install home: {err}"))?;
     create_codex_system_skills(home.path())?;
-    fs::create_dir_all(home.path().join(".relay"))
-        .map_err(|err| format!("cannot create legacy Relay config fixture dir: {err}"))?;
     let ghostty_app_config_dir = home
         .path()
         .join("Library/Application Support/com.mitchellh.ghostty");
@@ -449,11 +446,6 @@ pub(crate) fn test_install_command() -> Result<()> {
     #[cfg(unix)]
     {
         unix_fs::symlink(
-            fixture.path().join("relay/config.toml"),
-            home.path().join(".relay/config.toml"),
-        )
-        .map_err(|err| format!("cannot create legacy Relay config fixture symlink: {err}"))?;
-        unix_fs::symlink(
             fixture.path().join("ghostty/config"),
             ghostty_app_config_dir.join("config"),
         )
@@ -461,11 +453,6 @@ pub(crate) fn test_install_command() -> Result<()> {
     }
     #[cfg(not(unix))]
     {
-        fs::copy(
-            fixture.path().join("relay/config.toml"),
-            home.path().join(".relay/config.toml"),
-        )
-        .map_err(|err| format!("cannot create legacy Relay config fixture file: {err}"))?;
         fs::copy(
             fixture.path().join("ghostty/config"),
             ghostty_app_config_dir.join("config"),
@@ -538,9 +525,7 @@ pub(crate) fn test_install_command() -> Result<()> {
     .expect_err("install drift check should fail before install converges managed config");
     for expected in [
         "Managed config installation drift detected",
-        ".config/relay/config.toml",
         "Ghostty loads it after ~/.config/ghostty/config",
-        ".relay remains but Relay now reads ~/.config/relay",
         "deprecated [features].codex_hooks must be removed",
         "[features].apps must not be forced off",
         "is a stale managed Codex skill symlink",
@@ -679,13 +664,6 @@ pub(crate) fn test_install_command() -> Result<()> {
             "install should remove duplicate Ghostty app config: {}",
             duplicate_ghostty_app_config.display()
         ));
-    }
-    assert_symlink_resolves_to(
-        &home.path().join(".config/relay/config.toml"),
-        &fixture.path().join("relay/config.toml"),
-    )?;
-    if home.path().join(".relay").exists() {
-        return Err("install should remove empty legacy ~/.relay config directory".to_string());
     }
     check_install_command(&[
         "--config-root".to_string(),
@@ -1280,7 +1258,7 @@ done
     Ok(())
 }
 
-fn test_axiom_alias_zsh_wiring() -> Result<()> {
+fn test_project_alias_zsh_wiring() -> Result<()> {
     let config_root = std::env::current_dir()
         .map_err(|err| format!("cannot determine config root for zsh alias test: {err}"))?;
     let home = tempfile::Builder::new()
@@ -1293,8 +1271,6 @@ fn test_axiom_alias_zsh_wiring() -> Result<()> {
         ".zsh",
         "atlassian/alta",
         "atlassian/alta-1",
-        "atlassian/relay",
-        "atlassian/relay-3-old",
         "atlassian/alta-contrib",
         "atlassian/alta-contrib-3x",
         "atlassian/convo-ai",
@@ -1323,16 +1299,13 @@ fn test_axiom_alias_zsh_wiring() -> Result<()> {
 }}
 
 source "{}"
-expect_alias axiom "atlas relay --agent axiom"
 expect_alias atlassian "cd $HOME/atlassian"
 expect_alias blog "cd $HOME/src/alexandersumer.com"
 expect_alias atlassian-sandbox "cd $HOME/atlassian/sandboxes"
 expect_alias alta "cd $HOME/atlassian/alta"
-expect_alias relay "cd $HOME/atlassian/relay"
 expect_alias alta-contrib "cd $HOME/atlassian/alta-contrib"
 expect_alias convo-ai "cd $HOME/atlassian/convo-ai && sdk use java 21.0.8-amzn"
 ! alias alta-1 >/dev/null 2>&1
-! alias relay-3-old >/dev/null 2>&1
 ! alias alta-contrib-3x >/dev/null 2>&1
 ! alias convo-ai-test >/dev/null 2>&1
 "#,
@@ -1434,29 +1407,6 @@ render_prompt
     Ok(())
 }
 
-fn test_relay_axiom_config() -> Result<()> {
-    let config_root = std::env::current_dir()
-        .map_err(|err| format!("cannot determine config root for relay config test: {err}"))?;
-    let config_path = config_root.join("relay/config.toml");
-    let text = fs::read_to_string(&config_path)
-        .map_err(|err| format!("{}: cannot read Relay config: {err}", config_path.display()))?;
-    for expected in [
-        "[agents]",
-        "default = \"axiom\"",
-        "[agents.runners.axiom]",
-        "command = \"/opt/atlassian/bin/atlas\"",
-        "args = [\"alta\", \"agent\", \"run\", \"@atlassian/alta-agent-axiom-asumer\"]",
-    ] {
-        if !text.contains(expected) {
-            return Err(format!(
-                "{}: Relay config missing expected text {expected:?}",
-                config_path.display()
-            ));
-        }
-    }
-    Ok(())
-}
-
 fn assert_ref_exists(cwd: &Path, ref_name: &str) -> Result<()> {
     let output = Command::new("git")
         .current_dir(cwd)
@@ -1520,7 +1470,6 @@ fn copy_fixture() -> Result<TempDir> {
         &config_root.join("ghostty"),
         &temp_dir.path().join("ghostty"),
     )?;
-    copy_tree(&config_root.join("relay"), &temp_dir.path().join("relay"))?;
     Ok(temp_dir)
 }
 
