@@ -13,7 +13,7 @@ Invoking this skill explicitly authorizes only the git writes required for that 
 
 Default-branch publishing is an expected supported path of this skill. This includes `main` and `master`; the branch name alone is not a reason to ask for confirmation.
 
-Apart from the CI follow-through in step 8, this skill is push-only: do not create branches, open PRs, inspect PRs, update PRs, run tests or builds, pull, merge, rebase, force-push, switch branches, or change the push target.
+Apart from the CI and review-comment follow-through in step 8, this skill is push-only: do not create branches, open PRs, inspect PRs, update PRs, run tests or builds, pull, merge, rebase, force-push, switch branches, or change the push target.
 
 Normal path contract: local-first, direct push, push-verified. Use cheap local git state for deterministic push decisions. Do not run remote-default discovery in the normal path. Treat the actual `git push` result as the authoritative network freshness and safety check; if the remote rejects the push, stop and report that exact push blocker instead of doing speculative network discovery.
 
@@ -61,7 +61,7 @@ Whether the current branch is also the remote default does not change the target
 5. If working-tree changes exist, stage only intended changes and commit them with a valid Conventional Commit subject grounded in the staged diff and compatible with any existing unpushed commits. Leave unrelated untracked files unstaged.
 6. If there are no working-tree changes but there are unpushed local commits, skip committing and push those commits.
 7. Push `HEAD` to branch `<current-branch>` on `origin` with `git push -u origin HEAD:<current-branch>`. If the remote rejects the push, report the exact rejection as the blocker. Do not auto-pull, rebase, force-push, retry with a new strategy, or hide the rejection behind speculative preflight checks.
-8. If the push triggers CI, watch the pushed SHA until its checks finish; do not rely on the host to watch it. On failure, fix the root cause with `fix-failures`, commit and push the same way, and repeat until green or an exact blocker remains.
+8. If the push triggers CI, watch the pushed SHA until its checks finish; do not rely on the host to watch it. On failure, fix the root cause with `fix-failures`, commit and push the same way, and repeat until green or an exact blocker remains. If the pushed branch has an open PR, also run `address-comments` on its unresolved review comments, including comments that arrive while CI runs. A comment-fix push restarts CI, so repeat both until the latest SHA is green and a final comment check finds nothing actionable, or an exact blocker remains.
 
 Do not run tests or builds before pushing unless explicitly asked.
 
@@ -88,3 +88,4 @@ Report:
 - branch
 - push result
 - CI result: green, no CI triggered, or the exact remaining blocker
+- Comments: addressed, none actionable, no open PR, or the exact remaining blocker
