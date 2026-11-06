@@ -41,7 +41,7 @@ For Bitbucket, collect both PR `_statuses` and the matching pipeline runs for th
 
 Each refresh ends in exactly one state:
 
-- `needs-local-fix`: a current conflict, update requirement, failed check, or correct required comment has a safe local action.
+- `needs-local-fix`: a current conflict, update requirement, failed check, or correct unresolved review comment has a safe local action.
 - `waiting`: a required or user-relevant gate is queued, pending, running, missing, skipped, or canceled, and a bounded wait/refresh or one safe rerun remains.
 - `human-blocked`: approval, draft, changes-requested, Jira, compliance, ownership, permission, or policy state requires a human/system action.
 - `tooling-blocked`: provider data, logs, the required-gate list, the current SHA, or auth cannot be obtained after the allowed retry/auth step.
@@ -101,7 +101,7 @@ No blocker id, no work. No original evidence, no fix. No diff, target update, pr
 ## Blocker snapshot
 
 1. If `$ARGUMENTS` names a PR, check, job, run, comment, task, file, conflict, update warning, merge queue result, pasted failure, or gate, make it the active blocker and inspect only enough surrounding state to act safely.
-2. Otherwise collect one bounded snapshot: repository, current branch, upstream, remote default branch, working tree status, unpushed commits, PR id, source and target branches, latest source SHA, mergeability/conflict/update state, all visible current-sha checks/pipelines/statuses/custom gates with required flags when known, unresolved required comments/tasks, draft/approval/changes-requested state, and Jira/compliance/custom gate messages.
+2. Otherwise collect one bounded snapshot: repository, current branch, upstream, remote default branch, working tree status, unpushed commits, PR id, source and target branches, latest source SHA, mergeability/conflict/update state, all visible current-sha checks/pipelines/statuses/custom gates with required flags when known, unresolved review comments and required tasks, draft/approval/changes-requested state, and Jira/compliance/custom gate messages.
 3. Before any local write, resolve the review source repository, branch, head SHA, and the remote and destination ref that would receive the push (the configured upstream, otherwise `origin` and the review source branch). Prove that the selected remote has exactly one push URL identifying the review source repository, the destination ref is the review source branch, the current branch is the source branch, and the provider head SHA equals `HEAD` or is an ancestor of `HEAD` with only coherent local commits ahead. Refresh the source ref if needed. If any of this cannot be proven, stop with the exact checkout blocker; this skill does not authorize switching branches.
 4. Do not read the full PR diff, all comments, or all logs during the snapshot. Read code, diffs, and logs only for the active blocker.
 5. Prefer the latest signal for the latest SHAs. Ignore stale, resolved, outdated, superseded, or other-branch signals unless they still describe code or required state in the active blocker.
@@ -111,11 +111,11 @@ Choose the first blocker in this order unless the user named a narrower focus:
 
 1. Conflicts or branch-update-required states.
 2. Failed required or merge-blocking checks, including merge queue or synthetic-merge failures.
-3. Required unresolved review comments or tasks.
+3. Actionable unresolved review comments, from people or bots, and required tasks.
 4. Missing, skipped, canceled, queued, or pending required gates that can be rerun or waited on.
 5. Human review, draft, Jira, compliance, policy, permission, or tooling blockers.
 
-Once a blocker class is absent for the current source SHA, do not revisit it until a push, rerun, target update, or explicit user focus.
+Once a blocker class is absent for the current source SHA, do not revisit it until a push, rerun, target update, completed wait, or explicit user focus. Recheck comments after every wait, because reviewers and bots comment while CI runs.
 
 ## Playbooks
 
@@ -143,7 +143,10 @@ Use when the active blocker is a red check, job, pipeline, merge queue run, synt
 6. Prove the fix with the check tied to the original diagnostic. Do not rerun a required check that is already green for the latest SHA. A broad `check` or `test` command counts only when evidence shows it includes the failing diagnostic.
 7. Compare the original failing signal with the new passing or changed one. Without a diff, a changed status, or valid reused proof, do not say the blocker was fixed.
 
-### Required review comment or task
+### Review comment or task
+
+Apply the `address-comments` classification and fix rules, but publish through this loop rather than running a second one.
+
 
 1. Fetch unresolved comments/tasks once for the latest source SHA. If none exist, mark the class absent for that SHA.
 2. Prefer current unresolved comments; keep stale ones only when they still point to code in the effective diff.
@@ -180,4 +183,4 @@ Do not loop because the review UI still shows a comment the pushed diff already 
 
 ## Final
 
-Finish only at `green`, `human-blocked`, `tooling-blocked`, or `waiting` under a stop condition above. Lead with CI state and merge-blocker state together. Report the target, latest checked SHAs, remaining gates or human actions, helper and provider evidence, fixes and proof, commit/push/rerun results, and evidence gaps. Inspect final status and diff for unrelated changes. Keep it concise.
+Finish only at `green`, `human-blocked`, `tooling-blocked`, or `waiting` under a stop condition above. Lead with CI state and merge-blocker state together. Report the target, latest checked SHAs, remaining gates or human actions, helper and provider evidence, fixes and proof, comments addressed or left with their reasons, commit/push/rerun results, and evidence gaps. Inspect final status and diff for unrelated changes. Keep it concise.
