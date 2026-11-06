@@ -119,10 +119,16 @@ cargo run --locked -- test-parallel --locked --lib --test reset_cli --test reset
 
 Cargo remains responsible for compilation and dependency invalidation. No test
 results are cached, and no paths or branch names select which checks run. The
-staged snapshot and its Cargo target directory are still new for each invocation.
-Auth prompt-latency contracts run first without competing Git fixtures. The
-pre-commit integration suite then runs alone because it recursively validates
-snapshots. Remaining independent suites use at most two processes, with the long
+staged snapshot is rewritten from the index for each invocation at
+`target/pre-commit/snapshot`. Its Cargo target keeps only registry dependency
+outputs: every local package's outputs are discarded before the snapshot builds,
+as in hosted caching. A lock serializes hooks in the same checkout, and Git
+discovery inside the snapshot stops at `target/pre-commit`, so it never sees the
+enclosing repository. Registry validation runs before compilation, so invalid
+skills fail in seconds. Auth prompt-latency contracts run first without competing
+Git fixtures. The pre-commit integration suite then runs alone because it
+recursively validates snapshots. Its nested hook omits the integration suites,
+which the outer hook already runs on the same source. Remaining independent suites use at most two processes, with the long
 Git suites started first. The Cargo-building runner regression suite runs after
 the Git suites alongside doctests, so compiler startups cannot compete with
 their timing contracts. Every selected executable is awaited, including after an

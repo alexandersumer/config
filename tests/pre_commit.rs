@@ -89,6 +89,9 @@ fn pre_commit_validates_index_and_preserves_local_changes() {
     let fixture = tempfile::tempdir().expect("fixture checkout");
     let root = fixture.path();
     let source = Path::new(env!("CARGO_MANIFEST_DIR"));
+    // The outer hook already runs every integration suite on this source. The
+    // nested hook only proves index isolation, so it omits them instead of
+    // recursing into the full suite under load.
     if source.join(".git").exists() {
         git(
             source,
@@ -98,15 +101,14 @@ fn pre_commit_validates_index_and_preserves_local_changes() {
                 &format!("--prefix={}/", root.display()),
             ],
         );
-        fs::remove_file(root.join("tests/pre_commit.rs"))
-            .expect("exclude recursive integration tests");
+        fs::remove_dir_all(root.join("tests")).expect("exclude integration suites");
     } else {
         for entry in walkdir::WalkDir::new(source)
             .into_iter()
             .filter_entry(|entry| {
                 entry.depth() == 0
-                    || (!matches!(entry.file_name().to_str(), Some("target" | ".git"))
-                        && entry.path() != source.join("tests/pre_commit.rs"))
+                    || !matches!(entry.file_name().to_str(), Some("target" | ".git"))
+                        && entry.path() != source.join("tests")
             })
         {
             let entry = entry.expect("walk staged source");
