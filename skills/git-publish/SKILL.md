@@ -44,8 +44,9 @@ Non-default branches are normal publish sources. Never end with “PR not create
 11. If there are no publishable working-tree changes but the source branch already has a branch diff, skip committing and continue.
 12. Push the source branch to `origin`, setting upstream if needed.
 13. After the source branch has been pushed, always create or report a no-reviewer PR from the source branch to the resolved destination branch using the PR flow below. This applies equally when starting from an existing non-default branch.
+14. After the PR exists, run `clear-merge-blockers` on it until CI is green or an exact blocker remains. Do not rely on the host to watch CI; it may not track the provider.
 
-Do not run tests/builds unless explicitly asked.
+Do not run tests/builds before publishing unless explicitly asked.
 
 ## Subject rules
 
@@ -143,3 +144,4 @@ Report:
 - branch
 - push result
 - PR result
+- CI result: green, or the exact remaining blocker
