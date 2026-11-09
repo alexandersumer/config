@@ -1,56 +1,70 @@
 ---
 name: write-review-request
-description: Write a short, clear review request for an existing pull request that a teammate can understand without reading the diff, covering the behavior, reason, and any repro, validation, or rollout facts that matter. Use for review requests, not performing reviews, writing PR descriptions, or assigning reviewers.
+description: Write a short, clear review request for an existing pull request that a teammate can understand without reading the diff, covering what changes, why, and any testing, rollout, or review facts that matter. Use for review requests, not performing reviews, writing PR descriptions, or assigning reviewers.
 ---
 
 Write the message only. Do not send it, create a pull request, or assign reviewers.
 
-## Length is a hard limit
+## Purpose
 
-Keep the message under 80 words, excluding the PR link. Use two to four bullets, one sentence each. A reviewer reads this in a chat thread; the PR description holds the detail. If a draft runs over, cut bullets and clauses until it fits. Do not trade the limit for completeness. Only an explicit user request for more detail lifts it.
+A review request is a chat message. In about ten seconds the reader should know what changes, why it matters, how risky it is, and what you want from them. The PR description holds everything else.
 
-## Ground the message
+When rules conflict, follow this order: accuracy, then the length limit, then completeness.
 
-Use the supplied PR, diff, and conversation. Read the target with read-only tools when needed. Describe the whole PR's purpose, not its latest edit, and exclude unrelated local work. Ask one short question only if the target cannot be resolved.
+## Hard limits
 
-Never invent motivation, repro results, test results, flag states, or rollout guarantees. A test in the diff is not a passing test. Do not claim something is verified unless the evidence shows it.
+- Under 80 words for one PR, excluding links.
+- Two to four bullets, one sentence each, about 20 words or fewer per bullet.
+- No nested lists, file lists, test commands, or closing line.
+
+Do not go past the limit to add detail. Lift it only when the user asks for more. When asked to shorten, cut bullets before trimming words.
+
+## Ground it
+
+Use the supplied PR, diff, and conversation. Read the PR with read-only tools when needed. Describe the whole PR, not its latest commit, and leave out unrelated local work. If you cannot find the PR, ask one short question.
+
+Never invent motivation, results, flag states, or rollout guarantees. A test in the diff is not a passing test, and suggested steps are not a run repro. Say "passed in CI" or "passed locally" only when you have seen it.
 
 ## Format
 
-Open with `Could someone please review [#<number>](<URL>)?`, a blank line, then bullets with bold labels:
+Start with `Could someone please review [#<number>](<URL>)?`, then a blank line, then bullets from this list in this order:
 
-- **What:** The resulting behavior, in plain words. Always include.
-- **Why:** The problem it fixes or the need it meets. Always include.
-- **Repro** or **Example:** The trigger and before/after outcome, only when you have executed evidence or a one-line trigger that makes the change obvious.
-- **Validation:** What was checked and where, only when it adds evidence beyond Repro.
-- **Rollout:** The flag or control that activates it and how to turn it off, only for gated, risky, or hard-to-reverse changes.
-- **Review:** One specific question, only when a decision needs the reviewer's judgment.
+- **What:** The resulting behavior, described as what now happens. Always include.
+- **Why:** The trigger and the harm or need it fixes. Always include.
+- **Tested:** The strongest evidence you have and where it ran. Include only when it is real evidence beyond "tests added."
+- **Rollout:** What turns the change on and how to turn it off. Include for gated, risky, or hard-to-reverse changes. If a risky change has no control, say "No flag; revert to roll back."
+- **Review:** One specific question when a decision needs the reviewer's judgment. Name the decision, such as "Is 30s the right timeout for slow uploads?"
 
-Pick the two to four bullets that matter most. When an important fact is unknown, such as rollout control on a risky change, say so in a few words ("Rollout control: none found."). Do not list everything that was not verified.
+Docs, refactors, and small fixes usually need only What and Why.
 
-## Style
+For several PRs, write one ask line, then one bullet per PR: `[#<number>](<URL>): <what it does and why>`. Keep each bullet under 25 words.
 
-Write as a colleague asking a favor. Use concrete subjects and ordinary verbs. Name the actual behavior ("close the connection when the client disconnects") instead of abstractions ("improve lifecycle handling"). Keep an identifier only when the reviewer needs it, such as the exact flag. Skip "This PR introduces," "ensures," "robust," safety claims, file lists, test commands, em dashes, and closing lines.
+## Write it plainly
 
-Before returning, check once: under 80 words, each bullet says one new thing, nothing claims more than the evidence shows. Return only the ready-to-copy message, with no code fence or commentary.
+- Write for a teammate who has not seen the work. Explain internal names by what they do, or drop them.
+- Describe behavior ("close the connection when the client disconnects"), not abstractions ("improve lifecycle handling").
+- Keep an identifier only when the reviewer needs it, such as the exact flag name.
+- Avoid "This PR," "ensures," "robust," "streamlines," safety claims, hedging, and em dashes.
+
+Before returning, check that the message is under the limit, that every bullet says something new, and that no claim goes beyond the evidence. Return only the ready-to-copy message, with no code fence or commentary.
 
 ## Examples
 
-Fictional; never reuse their facts or flag names.
+These are fictional. Never reuse their facts or flag names.
 
 Could someone please review [#4328](https://example.com/pull/4328)?
 
-- **What:** Show a payment as pending when the provider times out, instead of as failed.
-- **Why:** Customers see a failure after being charged and pay again.
-- **Rollout:** Behind `payment-pending`, staff-only; turning it off restores the old display.
+- **What:** Show a payment as pending when the provider times out, instead of failed.
+- **Why:** Customers see a failure after being charged, and some pay twice.
+- **Rollout:** Behind `payment-pending`, staff-only; turning it off restores the old screen.
+- **Review:** Is "pending" clear enough while we wait for the provider?
 
 Could someone please review [#1234](https://example.com/pull/1234)?
 
 - **What:** The three importers now share one date parser and keep their accepted formats.
-- **Why:** Date fixes had to be copied three times and the copies drifted.
+- **Why:** Date fixes had to be copied three times, and the copies drifted.
 
-Could someone please review [#5678](https://example.com/pull/5678)?
+Could someone please review these?
 
-- **What:** Release the export slot when a client disconnects mid-export.
-- **Why:** Abandoned exports can hold every slot and block new ones.
-- **Repro:** Not run yet; disconnect during an export, then start another.
+- [#5678](https://example.com/pull/5678): Free the export slot when a client disconnects, so abandoned exports stop blocking new ones.
+- [#5679](https://example.com/pull/5679): Alert when export slots stay full for 10 minutes.
