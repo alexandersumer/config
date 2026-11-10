@@ -19,7 +19,8 @@ Match the command's advertised description or comment format.
   before treating prose as empty.
 - Jira descriptions and comments read back as ADF documents, not strings.
 
-For HTML mentions, resolve the person first and use a real Atlassian account ID:
+For HTML mentions, get the person's account ID first with
+`twg user get "<exact name or email>"`. Do not invent an account ID:
 
 ```html
 <span data-type="mention" data-user-id="AAID">@Display Name</span>

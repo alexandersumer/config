@@ -7,6 +7,9 @@ description: Read Bitbucket pipeline runs - recent and failed builds for a repos
 Use this reference for build and CI questions about a repository: recent runs,
 failures, flaky or recurring steps, and the checks behind a PR. For the checks on
 one PR, `twg bitbucket pull-requests get <id> --statuses` is usually enough.
+If the conclusion depends on which tests ran, read the linked pipeline's steps:
+an overall successful result can include skipped checks. Match the run to the
+relevant branch and commit; keep passed, failed, skipped, and unknown separate.
 
 Work in two steps: list runs with one query, then read only the runs whose
 details change the answer. Both commands take `--workspace <ws> --repo <repo>`.
@@ -18,6 +21,11 @@ details change the answer. Both commands take `--workspace <ws> --repo <repo>`.
 `--pattern`. It has no date filter and returns 15 runs by default: for a time
 window, raise `--limit` and check the returned timestamps before claiming the
 window is covered.
+
+For outstanding failures, check later runs of the same relevant workflow before
+recommending a repair. A successful unrelated workflow or a skipped step does not
+prove recovery. Reuse the run history already fetched; historical failure
+summaries do not need a current-state check.
 
 Use `--output json --output-summary auto`. Read `stdout_inline` when present;
 otherwise read `output_files.compact`. The compact view keeps every returned

@@ -80,6 +80,7 @@ const REQUIRED_CUSTOM_SKILL_NAMES: &[&str] = &[
     "twg-jira-resolve-merged-work",
     "twg-operational-health",
     "twg-responsibility-routing",
+    "twg-setup",
     "twg-space-creation",
     "twg-status-rollups",
     "understand-system",

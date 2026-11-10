@@ -19,7 +19,8 @@ to attest that you read and will follow that help; never pass it otherwise:
 twg confluence content body-formats html
 ```
 
-For mentions, resolve the person and use a real Atlassian account ID:
+For mentions, get the person's account ID first with
+`twg user get "<exact name or email>"`. Do not invent an account ID:
 
 ```html
 <span data-type="mention" data-user-id="AAID">@Display Name</span>
@@ -50,8 +51,9 @@ construct during round trips.
 
 ## Specialized Formats
 
-Whiteboards and databases use their own specialized helper information. Do not
-reuse page/blog/live-doc HTML or markdown guidance for these content types.
+Whiteboards and standalone databases (`--content-type database`) use their own
+specialized helper information. Do not reuse page/blog/live-doc HTML or markdown
+guidance for these content types.
 
 For whiteboards, load the whiteboard body-format helper before creating or
 editing SVG content:
@@ -66,6 +68,15 @@ or edit envelopes:
 ```bash
 twg confluence content body-formats --content-type database
 ```
+
+A page embeds a whiteboard, database, or Remix app as `native-embed:whiteboard`,
+`native-embed:database`, or a Maui extension (HTML: URL in `data-parameters`
+`macroParams.url.value`; Markdown: a `<url>` link). Page edits do not change
+embedded content, so keep each embed as fetched. To read or change a whiteboard
+or database, load its helper above, then run
+`twg confluence content get --id "<URL>" --format svg` (or `csv`) and
+`twg confluence content update --id "<URL>"` in the same format. For a Remix
+app, read `twg confluence remix maui edit --help` first.
 
 Each helper returns an index and follow-up `--reference` paths for that content
 type. Use the whiteboard helper only for whiteboards and the database helper

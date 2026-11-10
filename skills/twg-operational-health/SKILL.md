@@ -8,8 +8,8 @@ description: >
 
 # twg-operational-health
 
-Use together with the root `twg` skill. Exact command grammar comes from live
-`twg help` or `twg help describe <path>`.
+Use root `twg`: plan from `twg help-map` and reuse its batched describe contracts.
+Describe again only for missing details.
 
 ## CLI launcher fallback
 
@@ -17,6 +17,8 @@ Run `twg <command>`. On shell `command not found`, use `$HOME/.local/bin/twg`
 (macOS/Linux) / `$env:LOCALAPPDATA\Programs\twg\bin\twg.exe` (PowerShell), then
 tell user to add that directory to PATH. Do not treat auth or command errors as
 PATH failures.
+
+Agents: use host-set `TWG_AGENT_DEFAULTS=1` or `TWG_AGENT_DEFAULTS=1 twg <command>`. If assignments are blocked, pass `--mode agent` with explicit output flags. Respect host permissions. `--mode user` overrides the opt-in.
 
 ## Use When
 
@@ -28,15 +30,16 @@ PATH failures.
 
 ## First Move
 
-Resolve scope, window, anchors, owner/escalation, status, recency, and
+Identify scope, window, anchors, owner/escalation, status, recency, and
 follow-ups before joining surfaces. For incident, PIR, reliability, or on-call
 requests, start with native JSM incident, post-incident-review, or Jira
 workitem records when available. Use Rovo or document search only to
 disambiguate an anchor or fill a bounded gap, never as the incident inventory.
 Current escalation, owner, and readiness claims need current/open evidence;
 closed records provide recurrence context, not present-state proof.
-Run without `--site`; TWG inherits the user's pinned Jira/JSM site. Only add a
-site override when the user explicitly requests another tenant. Never assume a
+Pass `--site` for the site identified by the request or anchor URL. For
+multi-site requests, query each intended site explicitly. When no site is
+identified, use the configured default and state that scope. Never assume a
 vendor-internal incident site.
 
 ## Evidence Policy
@@ -49,7 +52,7 @@ vendor-internal incident site.
   by service, theme, owner, and recency. Hydrate highest-risk clusters and
   stop when theme, owner signal, and confidence are clear.
 - Separate `working theory`, `confirmed problem`, `mitigation`, and `root
-  cause`; require a causal mechanism for root cause and label claims
+cause`; require a causal mechanism for root cause and label claims
   `confirmed`, `supported`, `candidate`, or `missing evidence`.
 - After one repeated backend, auth, or schema error, report the gap and use
   remaining evidence instead of aliases or broad inventories.
@@ -61,7 +64,7 @@ vendor-internal incident site.
 
 ### Leadership Reliability Review / On-Call Handoff
 
-Load `references/reliability-review.md`. Resolve leader, platform, and window;
+Load `references/reliability-review.md`. Identify leader, platform, and window;
 cluster themes, separate cause from mitigation, connect prevention work, and
 rank actions. For handoffs, add a first-hour checklist and escalation map.
 
@@ -71,9 +74,9 @@ Use for active, newly mitigated, or pre-PIR incidents. Anchor on the incident,
 then gather responders, symptoms, impact, recent deploys/flags/config,
 topology, alert/log/metric pointers, ownership, runbooks, and similar cases.
 If fields are sparse, probe four golden-signal families with bounded follow-ups.
-See `references/incident-investigation.md`. Output a four-signal matrix,
-hypotheses, confidence, next checks, and mitigation options; never call
-mitigation the root cause without its mechanism.
+See `references/incident-investigation.md`. Track hypotheses, confidence,
+next checks, and mitigation options. Never call mitigation root cause without a
+causal mechanism.
 
 ### Post-Incident Root Cause / Learning
 
@@ -92,22 +95,22 @@ risk and report confidence/gaps. See `references/assets.md`.
 
 ### Capacity / Staffing / Meetings
 
-For staffing, resolve project/topic/org and identify people by related work,
+For staffing, identify project/topic/org and identify people by related work,
 ownership, review influence, docs, and project/goal involvement; check load
 before recommending. For meetings, query scoped recordings, preview transcripts,
 fetch full transcripts only for central ones, then summarize decisions, actions,
 and gaps.
 
-## Output Shape
+## Answer
 
-- Lead with severity, urgency, or recommendation, then owner, status, recency,
-  impact, confidence, and evidence.
-- For active investigations, add a four-signal matrix and an incident-to-
-  learning timeline covering problem, mitigation, root-cause status, and
-  prevention.
-- Group artifact patterns, rank next actions with a suggested owner, and call
-  out gaps such as missing transcripts, ACL/auth failures, stale updates, or
-  weak ownership.
+- Answer the operational question directly, with material severity, urgency,
+  recommendation, owner, status, recency, impact, confidence, and evidence.
+- Use a matrix or incident-to-learning timeline when requested or useful for
+  clarifying problem, mitigation, root-cause status, or prevention. Preserve
+  requested formats and fields.
+- Rank next actions with suggested owners, group useful patterns, and disclose
+  material gaps: missing transcripts, ACL/auth failures, stale updates, or weak
+  ownership.
 
 ## Anti-Patterns
 

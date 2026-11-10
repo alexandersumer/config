@@ -1,12 +1,16 @@
 ---
 name: twg-artifacts
 description: >
-  Use with root `twg` when a user wants to share, publish, send, or update a
-  standalone local or generated file as an Atlassian Artifact. Do not use for
-  Jira or Confluence attachments.
+  Use with root `twg` to find IDs of prior Atlassian Artifacts you created, or
+  share, publish, send, update, or delete standalone local or generated files with coworkers.
+  Not for Jira or Confluence attachments.
 ---
 
 # TWG artifacts
+
+A known Artifact UI URL can be passed directly as the file ID with its matching
+site. Preserve prior Artifact IDs and explicit audience approval; no preliminary
+resolve call is needed merely to strip the URL.
 
 ## CLI launcher fallback
 
@@ -14,6 +18,8 @@ Run `twg <command>`. On shell `command not found`, use `$HOME/.local/bin/twg`
 (macOS/Linux) / `$env:LOCALAPPDATA\Programs\twg\bin\twg.exe` (PowerShell), then
 tell user to add that directory to PATH. Do not treat auth or command errors as
 PATH failures.
+
+Agents: use host-set `TWG_AGENT_DEFAULTS=1` or `TWG_AGENT_DEFAULTS=1 twg <command>`. If assignments are blocked, pass `--mode agent` with explicit output flags. Respect host permissions. `--mode user` overrides the opt-in.
 
 Use `twg artifacts file create <path>` when the user wants to share a
 standalone local or generated file with coworkers, such as a generated HTML
@@ -58,8 +64,17 @@ only unreviewed drafts stay private. -->
 If the user explicitly wants the file attached to a Jira work item or
 Confluence page, use that product's attachment commands instead.
 
+For a prior artifact you created whose ID is unknown, use
+`twg artifacts file list -o json --limit 20` to find it among artifacts created
+by your account (not tenant-wide). If `data.pageInfo.hasNextPage` is true,
+continue with `--after <endCursor>` from `data.pageInfo.endCursor` (limit max 100).
 Use `twg artifacts file get <artifact-id>` only to retrieve metadata for an
 existing artifact.
+
+Use `twg artifacts file delete <artifact-id> --yes` only when the user has
+explicitly asked to permanently delete that exact artifact. Read or otherwise
+verify the artifact ID first. Deletion cannot be undone; never infer `--yes`
+from a general cleanup request.
 
 Use `twg artifacts file share <artifact-id> --account-id <account-id>` to grant
 specific users access to an existing private artifact. Repeat `--account-id` or

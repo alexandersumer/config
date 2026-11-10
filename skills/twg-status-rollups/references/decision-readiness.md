@@ -5,7 +5,7 @@ description: Build go/no-go, launch, rollout, milestone, or approval decision-re
 # Decision Readiness
 
 Use for launch/rollout readiness, milestone gates, approval asks, and other
-go/no-go or proceed/hold decisions. Resolve the native project, goal, work item,
+go/no-go or proceed/hold decisions. Start from the native project, goal, work item,
 service, or decision record first. Use its identity, current update, and explicit
 links as the scope boundary before widening.
 

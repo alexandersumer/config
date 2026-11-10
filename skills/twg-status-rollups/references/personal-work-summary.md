@@ -1,6 +1,6 @@
 ---
 description: >
-  Summarize person-scoped work for standups, OOO/return-after-time-away catch-up,
+  Summarize my manager's work or another person's activity for standups, OOO/return-after-time-away catch-up,
   handoffs, weekly updates, performance review evidence, appraisals, and
   year-bounded summaries across work, code, docs, meetings, and notifications.
 ---
@@ -34,17 +34,22 @@ reviews, review bottlenecks, repo contributors, hot areas, or PR-only status.
 
 ## First Move
 
-Resolve the subject and time window before querying:
+Identify the subject and time window before querying:
 
 - For "me", use exact command flags `--scope me` and set
   `SUBJECT_IS_ME=true`.
-- When the person's identity matters to the answer, resolve the authenticated
-  user once with the native user command and retain the returned account ID and
-  display name. Do not treat the literal `me` selector as evidence of identity
-  or tell the user to contact the same person because the subject was not
-  resolved.
-- For another person, resolve their account ID first, use exact command flags
-  `--scope user --identifier <id>`, and set `SUBJECT_IS_ME=false`.
+- When the person's identity matters, get the authenticated user once and
+  retain their account ID and display name. The literal `me` selector is not
+  identity evidence; do not recommend that the requester contact themselves.
+- For "my manager", get the caller's AAID, then use
+  `twg user manager --identifier '<requester-aaid>' -o json`.
+  Pass `data.managerIdentifier.ari` (3P), otherwise `data.manager.accountId`
+  (1P), to the person query below; stop if neither is returned. Empty
+  `org-tree` ancestors do not exclude a 3P manager.
+- For another person, use `--scope user` with the reference the user gave
+  (`--name`, `--email`, or `--identifier <aaid-or-1p-or-3p-ari>`), and set
+  `SUBJECT_IS_ME=false`. Load `../../twg/references/USER-IDENTIFIERS.md` for
+  identifier, manager, and actor-set handoffs.
 - If the prompt gives a relative window, use `--since <duration>`.
 - If it gives an explicit calendar window, use `--from <YYYY-MM-DD>` and
   `--to <YYYY-MM-DD>` when live `twg work query` help advertises those flags.
@@ -78,16 +83,22 @@ hydrate inferred evidence through its Jira or Confluence links.
    or use `--from <YYYY-MM-DD> --to <YYYY-MM-DD>` for explicit calendar windows.
    For self restart/catch-up after time away, use the same unrestricted query;
    omitting `--types` previews every supported person-scoped work section in one
-   batch. Do not narrow it to `assigned` or create source quotas. If the query
-   hits a relationship/safety limit or returns partial coverage, follow the
+   batch. Do not narrow it to `assigned` or create source quotas. Stop on a
+   policy/organization denial. If the query hits a relationship/safety limit,
+   recoverable source failure, or returns partial coverage, follow the
    command's repair guidance with supported person-scoped sections or a
    material-gap query while preserving the same person, window, and explicit
    scope. Do not silently shrink the requested window or types, treat a
    counts-only response as an inventory, or switch to a tenant-wide query.
    Record omitted, unavailable, and still-uncovered sections.
    For another person, run
-   `twg work query --scope user --identifier <id> --activity all --ranked --since <window> --items-per-section 2 -o json`,
+   `twg work query --scope user --identifier <aaid-or-user-ari-or-3p-user-ari> --activity all --ranked --since <window> --items-per-section 2 -o json`,
    or use `--from <YYYY-MM-DD> --to <YYYY-MM-DD>` for explicit calendar windows.
+   When a supporting tool returns the subject's bounded pre-expanded actor set,
+   use its exact `actorIdentifiers[].ari` values as repeated
+   `--actor-identifier` flags instead of `--identifier`, `--account-id`, or
+   `--assignee`; do not mix those selectors. Repeat `--actor-identifier` at
+   most 25 times per call.
    Inspect the returned inline/compact evidence before opening details; a shape
    or stats summary is not a complete inventory. Each item carries `activityAt`,
    the timestamp of the relationship that matched the window — use it for
@@ -101,8 +112,12 @@ hydrate inferred evidence through its Jira or Confluence links.
    use `twg pull-requests query --scope me ...` or
    `twg pull-requests query --scope user --account-id <id> ...` for authored,
    reviewed, participant, open, merged, or updated PRs when the baseline needs
-   more PR coverage. Do not fall back to the current operator's PRs for another
-   person. When the baseline uses `--from <YYYY-MM-DD> --to <YYYY-MM-DD>`,
+   more PR coverage. This command currently accepts only 1P AAIDs or
+   `IdentityUser` ARIs via repeatable `--account-id`; run
+   `twg help describe "pull-requests query"` before use. Do not pass a 3P
+   identity or substitute the current operator. Do not fall back to the current
+   operator's PRs for another person. When the baseline uses
+   `--from <YYYY-MM-DD> --to <YYYY-MM-DD>`,
    propagate the same exclusive calendar window to PR follow-ups as
    `--updated-since <from> --updated-before <to>`.
 3. PR activity:
@@ -123,6 +138,12 @@ hydrate inferred evidence through its Jira or Confluence links.
    add docs/query or docs/search, meetings/videos, Jira workitem details,
    projects, goals, or context commands only when they explain momentum,
    blockers, decisions, ownership, or stakeholder impact.
+   Follow the per-surface recipes in `../../twg/references/USER-IDENTIFIERS.md`:
+   artifact queries accept canonical selectors or exact hierarchy actor sets,
+   whereas `context user` takes one positional identity and has narrow 3P
+   conversation/mention coverage when its installed help advertises 3P support.
+   Do not assume provider or relationship parity
+   with a 1P account. Other people's viewed history is not available.
    For current or ongoing priorities, combine activity with active project/goal
    state and recorded commitments, deadlines, risks, or decisions. Absence from
    a recent activity window is not evidence that an active project is irrelevant.
@@ -152,7 +173,10 @@ Prefer two complementary signals for a selected cluster when available, but do
 not require them. Use a bounded batch of targeted hydrations and continue while
 each read can change identity, scope, priority, freshness, a decision, blocker,
 or next action. Use `collaborators` only when it can close a material ownership
-or discussion gap. Stop when those claims are supported or a remaining gap is
+or discussion gap for a verified 1P AAID; preserve that AAID explicitly for
+another person. For a 3P-only conversation/mention gap, use `context user <3p-ari>`
+instead, without presenting those relationships as collaboration scores.
+Stop when those claims are supported or a remaining gap is
 unavailable, and disclose incomplete coverage. Do not reopen broad inventories,
 hydrate every PR, force one candidate per source section, or invent a second
 workstream with weak support.
@@ -186,6 +210,9 @@ delivery from review/coordination. Reviewed PR counts mean PRs matched through
 reviewer relationships where the user is added as a reviewer; do not treat them
 as comments, approvals, or requested changes without PR activity evidence.
 Counts are useful context, not impact.
+Different results across canonical, actor-set, or artifact queries establish
+different observed coverage, not the cause. Report the scopes checked; do not
+attribute a discrepancy to a missing alias without supporting evidence.
 
 ## Stop Conditions
 

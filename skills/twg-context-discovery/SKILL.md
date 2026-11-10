@@ -1,15 +1,15 @@
 ---
 name: twg-context-discovery
 description: >
-  Use with root `twg` for deep context, dependency maps, related entities,
-  project-to-repo discovery, OOO catch-ups, and
+  Use with root `twg` for dependency maps, related entities, project-to-repo
+  discovery, person conversations and mentions, OOO catch-ups, and
   "catch me up" requests around a concrete anchor.
 ---
 
 # twg-context-discovery
 
-Use the root `twg` skill. Get command grammar from live `twg help`,
-`twg help <terms>`, or `twg help describe <path>`.
+Use root `twg`: plan from `twg help-map` and reuse its batched describe contracts.
+Use `twg help describe <path>` only when required details are missing.
 
 ## CLI launcher fallback
 
@@ -18,12 +18,14 @@ Run `twg <command>`. On shell `command not found`, use `$HOME/.local/bin/twg`
 tell user to add that directory to PATH. Do not treat auth or command errors as
 PATH failures.
 
+Agents: use host-set `TWG_AGENT_DEFAULTS=1` or `TWG_AGENT_DEFAULTS=1 twg <command>`. If assignments are blocked, pass `--mode agent` with explicit output flags. Respect host permissions. `--mode user` overrides the opt-in.
+
 ## First Move
 
-Resolve the anchor before widening:
+Identify the anchor before widening:
 
 - Stable key, URL, or ARI: use directly when the family is clear.
-- Named project/service: retain qualifiers; resolve/hydrate and verify
+- Named project/service: retain qualifiers; hydrate and verify
   identity before synthesis. Use an alias/successor only with source evidence;
   report missing named evidence as a scoped gap. Broad or ambiguous topics may
   explore plausible scopes.
@@ -49,6 +51,9 @@ when that workflow needs relationship or dependency expansion.
 
 ## Route Selection
 
+- Person anchors: load `../twg/references/USER-IDENTIFIERS.md` for context,
+  collaborators, reporting peers, and activity routes. Check live help for 3P
+  support; conversations/mentions do not imply full 1P coverage.
 - Known Jira work items usually need native workitem details plus relationship
   context.
 - Projects and goals need native details plus Jira, docs, search, PR, and
@@ -73,15 +78,11 @@ when that workflow needs relationship or dependency expansion.
 
 ## Evidence Policy
 
-For central candidates, fetch fields, owner, status, body, comments, URLs, and
-context edges/links/people/teams/projects/goals/docs/PRs/commits/branches.
-Use summary first; escalate to full for the central anchor and the small set of
-high-signal related anchors whose URLs, comments, body content, or provenance
-can change the requested conclusion. Do not stop at a numeric count while a
-material gap remains. Treat third-party URLs as nodes and retain relationship
-direction. Use inline or compact output first; targeted native follow-ups may
-close material missing relationships or coverage gaps within the established
-scope while each follow-up can change the conclusion.
+Use inline or compact output first. Fetch central candidates' fields, owner,
+status, body, comments, URLs, and context edges. Escalate to full output or
+targeted native follow-ups only for material evidence or coverage gaps within
+the established scope. Do not stop at a numeric count while such a gap remains.
+Treat third-party URLs as nodes and retain relationship direction.
 
 ## Expansion Rules
 
@@ -103,21 +104,13 @@ scope while each follow-up can change the conclusion.
 - Stop when the next candidate would not add new entities, links, contributors,
   teams, decisions, ownership, risk, or next action.
 
-## Graph Visualization
+## Answer
 
-For graph requests, pipe typed context output to `twg visualize`. Keep entities
-that change direction, ownership, risk, or next action; collapse duplicates.
-
-## Output Shape
-
-- Anchor snapshot: what it is and why it matters.
-- For OOO catch-ups, synthesize by priority workstream and next action; do not
-  add a relationship table. For other context work, include entity,
-  relationship, owner, importance, and evidence.
-- Risks and dependencies, separating confirmed edges from inferred relationships.
-- Suggested next actions.
-- Confidence and gaps when evidence is incomplete, access-limited, stale, or
-  sampled.
+Explain the anchor and the relationships that answer the question, with
+sources. For a catch-up, focus on priorities and next actions; for a dependency
+map, make edge direction and ownership clear. Distinguish confirmed links from
+inferences and note material risks or evidence gaps. Use a relationship table
+only when it clarifies a multi-entity map.
 
 ## Anti-Patterns
 
@@ -126,4 +119,3 @@ that change direction, ownership, risk, or next action; collapse duplicates.
 - Do not skip peer expansion for graph/dependency prompts because peers look
   "Done".
 - Do not dismiss a 1-hop candidate by title alone.
-- Do not hand-roll graph HTML.

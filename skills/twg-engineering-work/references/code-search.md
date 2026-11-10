@@ -1,8 +1,20 @@
 ---
-description: Discover and navigate implementations across available indexed code surfaces, then hydrate a bounded source-backed result set.
+description: >
+  Find source, callers, and API consumers outside the local workspace to answer
+  code questions, even without an explicit search request or known repository.
 ---
 
 # Code Search And Navigation
+
+## When To Use
+
+Use search-code when an answer needs source unavailable locally, including
+follow-up questions without an explicit search request. Start from the known
+service, behavior, error, API, or symbol; discover the repository if unknown.
+Verify implementation claims against source. Skip when local code, supplied
+context, or general knowledge answers the question.
+
+## Search And Navigate
 
 Choose the route from anchor precision:
 
@@ -26,11 +38,17 @@ Apply scope requirements by operation:
 
 - `search-code search` may omit `--workspace` for discovery; add it when an
   established tenant boundary improves precision.
-- `search-code file` requires the established `--workspace` when `--repo` is
-  supplied.
+- `search-code search` and `search-code file` accept an HTTPS Bitbucket/GitHub
+  repository root URL in `--repo`, deriving provider and workspace internally.
+  Other code commands accept Bitbucket root URLs; GitHub provider selection is
+  not supported by their existing backend contracts. With a bare repo, provide
+  the established `--workspace`. Pass file path and `--commit` separately:
+  never split a branch containing slashes out of a file URL.
 - Derive workspace and provider only from returned repository metadata or a
   resolved repository URL. Do not guess them or call `search-code file` before
-  its required scope is established.
+  its required scope is established. In JSON output, each `search-code search`
+  hit has `repository` (`<workspace>/<repo>`), a `snippet` of matched lines, and
+  `read_command`, the exact `search-code file` call for that file.
 
 For reverse-dependency questions, search the exact API or symbol first. If that
 does not establish direct consumption, search the package/import anchor, group

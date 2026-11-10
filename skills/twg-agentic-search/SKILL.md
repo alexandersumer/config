@@ -8,9 +8,10 @@ description: >
 
 # twg-agentic-search
 
-Use together with the root `twg` skill. Exact command grammar comes from live
-`twg help`, especially `twg help describe "rovo search"` when filter or output
-options matter.
+Use the root `twg` skill's **Fast path for common simple commands** table for simple searches and reads.
+Choose the command that fits; the rows are alternatives, not a required sequence.
+For other commands or unclear inputs or flags, follow its **Plan First** steps.
+Use `twg help describe "rovo search"` for unclear Rovo flags during that plan.
 
 ## CLI launcher fallback
 
@@ -19,6 +20,8 @@ Run `twg <command>`. On shell `command not found`, use `$HOME/.local/bin/twg`
 tell user to add that directory to PATH. Do not treat auth or command errors as
 PATH failures.
 
+Agents: use host-set `TWG_AGENT_DEFAULTS=1` or `TWG_AGENT_DEFAULTS=1 twg <command>`. If assignments are blocked, pass `--mode agent` with explicit output flags. Respect host permissions. `--mode user` overrides the opt-in.
+
 ## Workflow
 
 1. Classify the request as fuzzy or cross-product internal research. Prefer this
@@ -26,37 +29,44 @@ PATH failures.
    answer may span Confluence, Jira, Drive, Slack, Bitbucket, GitHub, or other
    Rovo-connected apps.
    When the user supplies an exact key, URL, title, or named canonical source,
-   preserve that anchor: resolve and verify the returned identity before
+   preserve that anchor: hydrate and verify the returned identity before
    considering similarly named results. A similar title is not a substitute for
    the requested source.
 2. Confirm or infer the Atlassian site. Ask only when no configured or explicit
    site is available and the ambiguity would change the search.
-3. For unanchored work or knowledge, begin with Jira and Confluence built-ins.
-   Expand to Drive, SharePoint, Bitbucket, GitHub, or another connector only
-   when the request names that source or the current evidence leaves a material
-   gap. If availability is unknown, run
-   `twg rovo list-apps -o json`; reuse readiness/auth and do not list apps before
-   every query, start setup/login, or fabricate an empty result when unavailable.
+3. For unanchored work or knowledge, run the default search with no `--app`: it
+   covers Jira, Confluence and the ready connectors. Complete or skip-only recovery
+   exits 0 (`skipped` names excluded sources). Other partial results exit 3 with ≤10
+   returned items, otherwise 0; count after duplicate removal and the requested limit.
+   Use retained results and follow failure guidance; exit 0 does not prove full coverage.
+   Retry temporary failures at most once after a delay. Report access gaps;
+   do not repeat the search to fix permissions. Narrow with `--app` only when the
+   request names that source. If availability is unknown, run
+   `twg rovo list-apps -o json` once. Do not list apps before every query, start
+   setup/login, or fabricate an empty result for a skipped connector.
 4. Start with one query combining the topic and requested artifact or decision.
+   Put exact identifiers such as issue keys or error codes in double quotes; leave ordinary words and phrases unquoted.
    Add a focused canonical/authoritative or recent refinement when results mix
    scopes, lack primary sources, or miss the requested time signal. Continue
    only while it can change identity, scope, authority, or freshness. Do not fan
    out exact-title searches for every returned candidate. Follow canonical,
    moved, or superseding source relationships while retaining requested semantics.
-5. Choose filters deliberately. Default to Confluence and Jira built-ins for
-   official/internal knowledge. Broaden to Slack, Google Drive, SharePoint,
-   Bitbucket, GitHub, or other connectors only when useful and available. Use app, type,
+5. Choose filters deliberately. Use app, type,
    recency, owner/contributor/assignee/reporter/status, title-only, label/space,
    and site filters when they narrow evidence without hiding likely answers.
-6. Search with bounded output:
+6. Search with the default scope and a small limit:
 
 ```bash
-twg rovo search "<query>" --output json --output-summary auto --agent-fields @compact
-twg rovo search "<query>" --output json --output-summary auto --agent-fields @evidence
+twg rovo search "<query>" --limit 10
+twg rovo search "<query>" --limit 10 -o json --agent-fields @evidence
 ```
 
-Use `@compact` to shortlist candidates and `@evidence` when snippets, URLs, and
-provenance need more detail.
+For one recall retry, increase `--limit` from 10 to 20 when the first results leave
+a gap that could change the answer. Otherwise, do not repeat a query with only a different `--app` or
+`--limit`. Use `@evidence` only when snippets and provenance need more detail.
+Public web-crawler hits rank below internal sources unless the prompt asks about public docs. 7. After 2–3 semantic misses, switch to CQL (`twg confluence search query --cql
+   'type=page AND title ~ "<term>"' --limit 50`, space-scoped when hits cluster) and JQL
+(`twg jira workitem query --jql 'text ~ "<term>"'`) with short entity + feature terms.
 
 ## Evidence Rules
 
@@ -68,7 +78,7 @@ provenance need more detail.
 - Hydrate a small, diverse primary-source set before final claims. For document
   discovery, cover distinct roles such as requirements, architecture/design,
   and current delivery rather than redundant pages. Use product-native
-  commands such as `twg confluence content get`, `twg jira workitem get`,
+  commands such as `twg confluence content get` (≤3 IDs per call), `twg jira workitem get`,
   `twg jira workitem query`, `twg bb pull-requests get <id>`,
   `twg bb repo get`, or the relevant product command for the result URL/type.
   When a native key or URL is known, hydrate it directly; use another search or
