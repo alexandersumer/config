@@ -1,6 +1,6 @@
 ---
 name: design-review-solo
-description: Direct design review without subagents. Use for ordinary, direct, inline, single-agent, or no-subagent review of software design, architecture proposals, API boundaries, module splits, data models, or design-sensitive diffs. Use design-review-deep when the user asks for deep, thorough, multi-agent, high-confidence, or heavyweight design review.
+description: Direct design review without subagents. Use for ordinary, direct, inline, single-agent, or no-subagent review of software designs, plans, architecture proposals, API boundaries, module splits, or data models. Use design-review-deep when the user asks for deep, thorough, multi-agent, high-confidence, or heavyweight design review, and review-solo for code changes.
 ---
 
 # Design Review Solo

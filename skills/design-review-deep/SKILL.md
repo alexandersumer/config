@@ -1,6 +1,6 @@
 ---
 name: design-review-deep
-description: Heavyweight design review using fresh-context Reviewer candidate generation and direct validation by this agent. Use when the user asks for deep, thorough, multi-agent, high-confidence, or heavyweight review of a software design, architecture proposal, API boundary, module split, data model, or design-sensitive diff. Use design-review-solo for ordinary/direct single-agent design review.
+description: Heavyweight design review using fresh-context Reviewer candidate generation and direct validation by this agent. Use when the user asks for deep, thorough, multi-agent, high-confidence, or heavyweight review of a software design, plan, architecture proposal, API boundary, module split, or data model. Use design-review-solo for ordinary/direct single-agent design review, and review-deep for code changes.
 ---
 
 # Design Review Deep

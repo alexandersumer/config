@@ -1,6 +1,6 @@
 ---
 name: review-solo
-description: Direct code-change review without subagents. Use for ordinary, direct, inline, single-agent, or no-subagent review of code/config/test changes. Use review-deep when the user asks for deep, thorough, multi-agent, high-confidence, or heavyweight review.
+description: Direct code-change review without subagents. Use for ordinary, direct, inline, single-agent, or no-subagent review of code/config/test changes, including the design decisions they make. Use review-deep when the user asks for deep, thorough, multi-agent, high-confidence, or heavyweight review.
 ---
 
 # Review Solo
@@ -11,13 +11,14 @@ Review the code directly in this session. Do not invoke subagents. Preserve the 
 
 2. **Read conventions and real code context.** Find every `CLAUDE.md`, `AGENTS.md`, or `REVIEW.md` whose directory is an ancestor of any changed file. Read them. Then read enough surrounding code to understand entry points, callers, state/model changes, public contracts, tests, configs, and failure paths touched by the diff. Keep this bounded to the smallest context needed to validate findings.
 
-3. **Run four direct review passes.** Do not report during the passes. Collect candidate issues only when they have a concrete root cause and plausible user/system impact:
+3. **Run five direct review passes.** Do not report during the passes. Collect candidate issues only when they have a concrete root cause and plausible user/system impact:
    - **Correctness** — logic errors, wrong returns, violated contracts, stale state, wrong ordering, broken data flow.
    - **Failure modes** — null/boundary inputs, races, swallowed errors, unclear or misleading error messages, missing diagnostic context, noisy or low-signal logging, leaks, retries, partial failures, regressions in adjacent touched code.
    - **Security** — injection, auth/permission gaps, secrets or sensitive data in logs/errors, unsafe deserialization, missing validation, trust-boundary mistakes.
-   - **Conventions** — rules scoped to changed files, local patterns, ownership boundaries; skip what a linter catches. For changed tests, flag low-value or redundant tests only when they add maintenance cost without a named realistic regression signal or duplicate stronger existing coverage.
+   - **Conventions** — rules scoped to changed files, local patterns; skip what a linter catches. For changed tests, flag low-value or redundant tests only when they add maintenance cost without a named realistic regression signal or duplicate stronger existing coverage.
+   - **Design** — decisions the diff makes that are hard to change later: data models and persisted formats, where contracts live and who controls them, module and trust boundaries, ownership and lifecycle of state, reliance on another component's internals or ordering, compatibility. Most diffs make none.
 
-4. **Validate every candidate yourself.** For each candidate, inspect the relevant file/function/caller/test path in enough detail to confirm or refute it. Prefer concrete execution paths, triggering input, violated rule, or a targeted command. Drop anything you cannot demonstrate concretely. Never keep a finding because it sounds plausible.
+4. **Validate every candidate yourself.** For each candidate, inspect the relevant file/function/caller/test path in enough detail to confirm or refute it. Prefer concrete execution paths, triggering input, violated rule, or a targeted command. For a design candidate, the evidence is the decision in the diff, what makes it costly to reverse (stored data, external callers, wire formats, another component's internals), and a cheaper option available now. Drop anything you cannot demonstrate concretely. Never keep a finding because it sounds plausible.
 
 5. **Report.** Dedupe by root cause, then rank Critical, High, Medium, Low. For each issue, include severity, `path:line` if known, what is wrong, why it matters, and the minimal fix — one concise paragraph each. If the review surface is too large to validate directly, say `Review limited` and name the unreviewed surface as residual risk. If no validated findings remain, say in one line that no material issue was found and name the reviewed surface.
 
