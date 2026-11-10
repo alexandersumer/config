@@ -298,3 +298,6 @@ if [ -d /opt/homebrew/opt/node@24/bin ]; then
 fi
 
 if [ -f "$HOME/.afm-bin-path-manager.zsh" ]; then source "$HOME/.afm-bin-path-manager.zsh"; fi
+
+# git-doctor: shell environment configuration
+[ -f "$HOME/.git-doctor/env.sh" ] && source "$HOME/.git-doctor/env.sh"
