@@ -176,7 +176,7 @@ Make the smallest change that truly clears the active blocker, and add a targete
 1. Inspect final status and the intended diff. With no diff and no merge commit or provider-state change, do not commit or push.
 2. Stage only blocker-fix or target-update changes. If unpushed commits or local changes are unrelated, ask how to split the publish.
 3. Commit with a grounded Conventional Commit subject; the default merge message is fine for a target-branch merge.
-4. Push with `git push <selected-remote> HEAD:<review-source-branch>`, adding `-u` only when no upstream exists.
+4. Push with `git push <selected-remote> HEAD:<review-source-branch>`, adding `-u` only when no upstream exists. If the pushed fixes change what the PR does, regenerate its title and description with `branch-description` and replace them on the PR; this is the only PR metadata write this skill makes.
 5. After a push, update, rerun, or wait, refresh one bounded snapshot for the latest SHAs across every previously observed surface and route the result through the state machine. Never collapse `waiting`, red non-required CI, or unknown data into "no local-fixable blockers" without naming the remaining state.
 
 Do not loop because the review UI still shows a comment the pushed diff already addresses.

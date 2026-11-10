@@ -38,7 +38,7 @@ Non-default branches are normal publish sources. Never end with “PR not create
    - working-tree diff: staged, unstaged, and relevant untracked changes
 6. If there is no branch diff and no working-tree diff, stop.
 7. Publish the coherent changes requested by the user. When unrelated work is present, isolate the intended changes on a suitable branch/worktree and preserve the rest. Ask only when the intended scope cannot be determined.
-8. Choose a valid Conventional Commit subject and write a non-empty, grounded PR body from the combined effective changes. Use plain paragraphs explaining the overall change and only the why or material implementation details supported by the evidence; do not add headings, checklists, invented issue context, risks, or test results. Freeze this subject/body pair for every provider path below.
+8. Write the PR title and body with `branch-description` from the combined effective changes, and keep them only after its `check_pr_description.py` check passes. The commit subject is that title without repository `[tag]` prefixes. Freeze this title/body pair for every provider path below.
 9. If HEAD is detached or on the destination/default branch, create a focused source branch at the current commit before staging or committing. Preserve existing commits and working-tree changes; choose an unused name without asking. Reuse a suitable existing branch/worktree when continuing its work. Do not push directly to the destination branch.
 10. If there are publishable working-tree changes, stage intended changes unless explicitly excluded, then commit them with the chosen subject before pushing. Do not stage unrelated files.
 11. If there are no publishable working-tree changes but the source branch already has a branch diff, skip committing and continue.
@@ -48,25 +48,12 @@ Non-default branches are normal publish sources. Never end with “PR not create
 
 Do not run tests/builds before publishing unless explicitly asked.
 
-## Subject rules
-
-Subject regex:
-
-```text
-^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9-]+\))?!?: [a-z].{0,70}[^.]$
-```
-
-Rules:
-- Use a grounded Conventional Commit subject from the actual diff.
-- No branch names, issue-title summaries, issue-key prefixes, chat summaries, provider defaults, or trailing period.
-- Keep the subject human-readable and specific.
-
 ## PR flow
 
 Determine the PR provider from the sole URL returned by `git remote get-url --push --all origin` before choosing tools. Use Bitbucket flows only for Bitbucket-compatible repositories. Use GitHub CLI only for GitHub repositories. If the provider is unsupported, fetch/push repository identity is unsafe for review targeting, or required tooling is unavailable, stop after the push and report the exact PR blocker instead of trying a wrong-provider command.
 
 Never use Bitbucket MCP to create, list, inspect, or update pull requests during publish. Do not add reviewers unless the user explicitly requested reviewers.
-Do not create a new PR with a missing or empty body.
+Do not create a new PR with a missing body or one that fails the `branch-description` check.
 
 ### Provider-compatible managed PR path, when available
 

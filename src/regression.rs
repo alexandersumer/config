@@ -49,6 +49,8 @@ pub(crate) fn run_regression_tests() -> Result<()> {
     test_required_custom_skill_inventory_matches_current_skills()?;
     test_one_clear_sentence_skill_rewrites_recent_context()?;
     test_clear_merge_blockers_ci_green_gate_helper()?;
+    test_branch_description_check_helper()?;
+    test_pr_writing_skills_use_branch_description()?;
     test_mutating_skill_write_boundaries()?;
     test_deep_review_skills_require_portable_managed_reviewer_contract()?;
     test_custom_skills_reject_accidental_environment_coupling()?;
@@ -160,6 +162,56 @@ fn test_one_clear_sentence_skill_rewrites_recent_context() -> Result<()> {
 fn test_clear_merge_blockers_ci_green_gate_helper() -> Result<()> {
     let scripts_dir = config_root_from_exe()?.join("skills/clear-merge-blockers/scripts");
     run_command(&scripts_dir, "python3", &["test_ci_green_gate.py"])
+}
+
+fn test_branch_description_check_helper() -> Result<()> {
+    let scripts_dir = config_root_from_exe()?.join("skills/branch-description/scripts");
+    run_command(&scripts_dir, "python3", &["test_check_pr_description.py"])
+}
+
+fn test_pr_writing_skills_use_branch_description() -> Result<()> {
+    let config_root = config_root_from_exe()?;
+    let contracts: &[(&str, &[&str])] = &[
+        (
+            "branch-description",
+            &[
+                "scripts/check_pr_description.py",
+                "Never return or publish a description that fails the check",
+                "regenerate the title and body from the current cumulative diff and replace both",
+            ],
+        ),
+        (
+            "git-publish",
+            &[
+                "Write the PR title and body with `branch-description`",
+                "fails the `branch-description` check",
+            ],
+        ),
+        (
+            "address-comments",
+            &["regenerate its title and description with `branch-description`"],
+        ),
+        (
+            "clear-merge-blockers",
+            &["regenerate its title and description with `branch-description`"],
+        ),
+    ];
+
+    for (skill_name, expected_fragments) in contracts {
+        let skill_path = config_root.join("skills").join(skill_name).join("SKILL.md");
+        let text = fs::read_to_string(&skill_path)
+            .map_err(|err| format!("{}: cannot read skill: {err}", skill_path.display()))?;
+        for expected in *expected_fragments {
+            if !text.contains(expected) {
+                return Err(format!(
+                    "{}: PR descriptions must come from branch-description and pass its check; missing {expected:?}",
+                    skill_path.display()
+                ));
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn test_mutating_skill_write_boundaries() -> Result<()> {
