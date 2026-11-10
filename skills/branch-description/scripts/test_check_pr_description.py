@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Regression tests for check_pr_description.py.
 
-Failing cases mirror real descriptions that buried reviewers: section headings,
-work logs, unlabeled prose, nested bullets, and bodies far past the limit. The
-SKILL.md examples must pass, so the documented format and the check stay in sync.
+Failing cases mirror real descriptions that buried reviewers: headings,
+unlabeled prose, bold lead-ins, nested bullets, and bodies far past the limit.
+The SKILL.md examples must pass, so the documented format and the check stay in
+sync.
 """
 
 from __future__ import annotations
@@ -91,7 +92,10 @@ def main() -> int:
         "Rename the `--out` flag to `--output`.\n\nBREAKING CHANGE: scripts passing `--out` must use `--output`.\n",
         "feat(cli)!: rename the out flag to output",
     )
-    expect_pass("io_is_not_first_person", "Batch file I/O so large exports stop timing out.\n")
+    expect_pass(
+        "label_then_code_block",
+        "Add a retry policy.\n\n**Rollout:** Set it in config:\n\n```yaml\nretries: 3\n\n# Back off between tries.\nbackoff: 2s\n```\n",
+    )
     for index, (title, body) in enumerate(skill_examples()):
         expect_pass(f"skill_example_{index}", body, title)
 
@@ -101,34 +105,31 @@ def main() -> int:
     expect_fail("title_without_type", GOOD, "title:", "Resume interrupted uploads")
     expect_fail("bang_without_footer", GOOD, "BREAKING CHANGE", "feat(uploads)!: resume uploads")
     expect_fail("markdown_heading", GOOD.replace("**Why:**", "## Why\n\n**Why:**"), "heading")
+    expect_fail("horizontal_rule", GOOD.replace("**Rollout:**", "---\n\n**Rollout:**"), "heading")
+    expect_fail("html_details", GOOD.replace("**Rollout:**", "<details>\n\n**Rollout:**"), "html")
+    expect_fail("opening_label", "**Why:** Uploads restart.\n", "opening:")
+    expect_fail("opening_heading", "## Summary\n\nResume uploads.\n", "opening:")
+    expect_fail("long_opening", "Resume uploads " + "and keep going " * 20 + "now.\n", "opening:")
     expect_fail("unknown_label", GOOD.replace("**Rollout:**", "**Risk:**"), "label 'Risk'")
-    expect_fail("period_label", GOOD.replace("**Rollout:**", "**Rollout.**"), "bold lead")
-    expect_fail("labels_out_of_order", GOOD.replace("**Why:**", "**Review:** Is this right?\n\n**Why:**"), "out of order")
-    expect_fail("duplicate_label", GOOD.replace("**Review:**", "**Why:** Again.\n\n**Review:**"), "more than once")
-    expect_fail("unlabeled_paragraph", GOOD.replace("**Rollout:**", "Also tidy the logger.\n\n**Rollout:**"), "starts with a label")
+    expect_fail("period_label", GOOD.replace("**Rollout:**", "**Rollout.**"), "bold")
+    expect_fail("labels_out_of_order", GOOD.replace("**Why:**", "**Review:** Is this right?\n\n**Why:**"), "keep the order")
+    expect_fail("duplicate_label", GOOD.replace("**Review:**", "**Why:** Again.\n\n**Review:**"), "once")
+    expect_fail("unlabeled_paragraph", GOOD.replace("**Rollout:**", "Also tidy the logger.\n\n**Rollout:**"), "section label")
     expect_fail(
         "footer_lookalike_is_still_checked",
         "Resume interrupted uploads.\n\nRollout: no flags. Change 1 takes effect on deploy.\n",
-        "starts with a label",
+        "section label",
     )
-    expect_fail("opening_label", "**Why:** Uploads restart.\n", "opening:")
-    expect_fail("long_opening", "Resume uploads " + "and keep going " * 20 + "now.\n", "opening:")
-    expect_fail("nested_list", GOOD.replace("chunk.\n", "chunk.\n  - Also the header.\n", 1), "nested list")
-    expect_fail("bold_list_lead", GOOD.replace("- Save", "- **Offsets.** Save"), "bold lead-ins")
+    expect_fail("changes_inline", GOOD.replace("**Changes:**\n", "**Changes:** Save offsets.\n\n"), "label 'Changes'")
+    expect_fail("empty_label", GOOD.replace("**Review:** Is 24 hours the right resume window?", "**Review:**"), "same line")
+    expect_fail("nested_list", GOOD.replace("chunk.\n", "chunk.\n  - Also the header.\n", 1), "nested item")
+    expect_fail("bold_list_lead", GOOD.replace("- Save", "- **Offsets.** Save"), "bold")
     expect_fail("long_list_item", GOOD.replace("- Save", "- Save " + "words " * 30), "over 25 words")
     expect_fail("too_many_items", GOOD.replace("- Save", "- One.\n" * 6 + "- Save"), "items")
-    expect_fail("list_without_label", GOOD.replace("**Rollout:**", "- Stray item.\n\n**Rollout:**"), "directly under a label")
-    expect_fail("changes_inline", GOOD.replace("**Changes:**\n", "**Changes:** Save offsets.\n\n"), "label 'Changes'")
-    expect_fail("table_outside_evidence", GOOD.replace("**Evidence:**\n", "| a |\n| --- |\n| b |\n\n**Evidence:**\n"), "table")
-    expect_fail("inline_bold", GOOD.replace("so some never", "so **some** never"), "bold:")
-    expect_fail("html_details", GOOD.replace("**Rollout:**", "<details>\n\n**Rollout:**"), "html")
-    expect_fail("first_person", GOOD.replace("Large uploads", "I found large uploads"), "first person")
-    expect_fail("this_pr", "This PR resumes interrupted uploads.\n", "'this PR'")
-    expect_fail("test_counts", GOOD.replace("Behind", "153 tests pass. Behind"), "test counts")
-    expect_fail("update_log", GOOD.replace("Refs:", "Update (Nov 3): fixed nits.\n\nRefs:"), "update log")
-    expect_fail("session_notes", GOOD.replace("Behind", "A scratch check confirmed it. Behind"), "session notes")
-    code_block = "```\n" + "line\n" * 13 + "```\n"
-    expect_fail("long_code_block", GOOD.replace("**Rollout:**", code_block + "\n**Rollout:**"), "code block")
+    expect_fail("list_without_label", GOOD.replace("**Rollout:**", "- Stray item.\n\n**Rollout:**"), "directly under")
+    expect_fail("table_under_other_label", "Retry uploads.\n\n**Why:** Drops:\n\n| a |\n| --- |\n| b |\n", "only under **Evidence:**")
+    expect_fail("second_table", GOOD.replace("| 2 GB | 7 | 1 |\n", "| 2 GB | 7 | 1 |\n\n| a |\n| --- |\n| b |\n"), "directly under")
+    expect_fail("inline_bold", GOOD.replace("so some never", "so **some** never"), "bold")
     long_body = GOOD.replace("Behind", "word " * 200 + "Behind")
     expect_fail("over_word_limit", long_body, "length:")
     expect_pass("raised_word_limit", long_body, TITLE, "--max-words", "400")

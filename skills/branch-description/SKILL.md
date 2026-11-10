@@ -17,7 +17,7 @@ When rules conflict, follow this order: accuracy, then the limits, then complete
 
 Do not use the branch name, issue title, provider default, conversation recency, your own last action, the latest commit, or a vague summary.
 
-Use the requested base or target PR destination as `<comparison-ref>`. Otherwise use a valid `origin/HEAD`, or the sole existing `origin/main`/`origin/master` fallback. Set `<base>` with `git merge-base <comparison-ref> HEAD`. If no unambiguous ref or merge base exists, report that gap and inspect the working tree.
+Use the requested base or target PR destination as `<comparison-ref>`. Otherwise use `origin/HEAD` when it resolves to an existing remote-tracking branch, or else the sole existing `origin/main` or `origin/master`. Set `<base>` with `git merge-base <comparison-ref> HEAD`. If no unambiguous ref or merge base exists, report that gap and inspect the working tree.
 
 Build one effective change set from every available source: `git log <base>..HEAD --oneline` and `git diff <base>..HEAD` when `<base>` exists, staged changes with `git diff --cached`, unstaged changes with `git diff`, and untracked files from `git ls-files --others --exclude-standard` rendered as new-file diffs. Always include staged, unstaged, and untracked changes even when the committed branch diff exists. If the committed branch diff is empty but the working tree has changes, describe those changes instead of treating the branch as empty. Ignore generated files, lockfiles, and formatting noise unless they are the change.
 
@@ -43,7 +43,7 @@ The first line is the PR title and a valid Conventional Commit subject:
 ^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9-]+\))?!?: [a-z].{0,70}[^.]$
 ```
 
-Use a lowercase imperative description of the branch-level change, with no trailing period, emoji, or issue key. Use `!` only with a `BREAKING CHANGE:` footer. When repository instructions require title tags, such as a severity label, put them first as `[tag]` tokens followed by a space; nothing else goes before the subject.
+Use a lowercase imperative description of the branch-level change, at most 72 characters after the `: `, with no trailing period, emoji, or issue key. Use `!` only with a `BREAKING CHANGE:` footer. When repository instructions require title tags, such as a severity label, put them first as `[tag]` tokens followed by a space; nothing else goes before the subject.
 
 ## Body
 
@@ -70,8 +70,8 @@ Use this shape. Only the opening paragraph is required; include each labeled sec
 
 - **Opening:** at most 50 words. Lead with the outcome a reviewer can verify, not the implementation. For small changes it is the whole body.
 - **Why:** include it unless the opening already makes the reason obvious. Describe what is wrong without the change, in present tense, and why this approach fixes it. Summarize linked discussions instead of relying on the link.
-- **Changes:** only for two or more notable changes. Two to six flat bullets of one sentence, under 25 words each, described as behavior. No file inventories; name a file or identifier only when the reviewer must find it.
-- **Evidence:** only proof you observed: a measured before/after, a reproduction, or the test that fails without the change. One or two sentences, optionally followed by one table of at most six rows for before/after numbers. Never list commands run or test counts, and say CI passed only when you saw it pass.
+- **Changes:** only for two or more notable changes. Two to six flat bullets of one sentence, 25 words or fewer each, described as behavior. No file inventories; name a file or identifier only when the reviewer must find it.
+- **Evidence:** only proof you observed: a measured before/after, a reproduction, or the test that fails without the change. One or two sentences, optionally followed by one small table of before/after numbers. Never list commands run or test counts, and say CI passed only when you saw it pass.
 - **Rollout:** only for gated, risky, migrating, or hard-to-reverse changes. If a risky change has no control, write "No flag; revert to roll back."
 - **Review:** only when a decision needs the reviewer, named specifically, such as "Is 30s the right timeout for slow uploads?"
 - **Follow-up:** only for deferred work a reviewer would otherwise ask about.
@@ -79,10 +79,10 @@ Use this shape. Only the opening paragraph is required; include each labeled sec
 
 ## Hard limits
 
-- Body under 200 words, excluding footers and attribution; aim for 80 to 150. Raise the limit with `--max-words` only when the user asks for a longer description.
-- No headings, horizontal rules, HTML, collapsed sections, nested lists, or bold outside the labels.
-- Every paragraph after the opening starts with one of the labels above, written exactly as shown, with a colon.
-- At most one code block of 12 lines or fewer, and one table, under Evidence only.
+- Body of 200 words or fewer, excluding footers and attribution; aim for 80 to 150. Raise the limit with `--max-words` only when the user asks for a longer description.
+- Opening of 50 words or fewer; Changes lists of six bullets or fewer, each 25 words or fewer.
+- Every paragraph after the opening starts with one of the labels above, written exactly as shown, with a colon. A list or table sits directly under its label; a table only under Evidence.
+- No headings, horizontal rules, HTML, nested lists, or bold outside the labels.
 
 ## Write it plainly
 
@@ -99,7 +99,7 @@ Write the title and body to files and run:
 python3 <skill-directory>/scripts/check_pr_description.py --title "<title>" --body-file <body-file>
 ```
 
-Fix every reported problem and rerun until it prints `ok`. Never return or publish a description that fails the check. The check covers form only. Then reread as the reviewer: the opening alone should say what changes, each section should say something new, and no claim should go beyond the evidence.
+Fix every reported problem and rerun until it prints `ok`. Never return or publish a description that fails the check. The check covers structure and length only. Then reread as the reviewer: the opening alone should say what changes, each section should say something new, and no claim should go beyond the evidence.
 
 ## Updating an existing PR
 

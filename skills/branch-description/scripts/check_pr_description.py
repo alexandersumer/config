@@ -4,10 +4,9 @@
 Usage:
   check_pr_description.py --title "<title>" --body-file <path> [--max-words N]
 
-The body is the opening paragraph, then optional labeled sections in a fixed
-order, then optional Conventional Commit footers. Exit 0 means the form is
-valid. Exit 1 prints one problem per line. Exit 2 means the input could not be
-read. The check covers form only; accuracy and clarity stay with the writer.
+Exit 0 prints "ok". Exit 1 prints one problem per line. Exit 2 means the body
+file could not be read. Only structure and length are checked; accuracy and
+clarity stay with the writer.
 """
 
 from __future__ import annotations
@@ -21,229 +20,167 @@ DEFAULT_MAX_WORDS = 200
 MAX_OPENING_WORDS = 50
 MAX_LIST_ITEMS = 6
 MAX_ITEM_WORDS = 25
-MAX_TABLE_ROWS = 6
-MAX_CODE_LINES = 12
-
 LABELS = ("Why", "Changes", "Evidence", "Rollout", "Review", "Follow-up")
 
 SUBJECT = re.compile(
     r"^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)"
-    r"(\([a-z0-9-]+\))?!?: [a-z].{0,70}[^.]$"
+    r"(\([a-z0-9-]+\))?(!?): [a-z].{0,70}[^.]$"
 )
 TITLE_TAGS = re.compile(r"^(\[[a-z0-9-]+\] )*")
-LABEL = re.compile(r"^\*\*([^*]+?):\*\*(?:\s+(.*))?$", re.S)
-BOLD_LEAD = re.compile(r"^\*\*[^*]+\*\*")
-LIST_ITEM = re.compile(r"^([-*+]|\d+[.)]) +")
-NESTED_ITEM = re.compile(r"^\s+([-*+]|\d+[.)]) +")
-HEADING = re.compile(r"^(#{1,6} |=+$|-{3,}$)")
-TRAILER = re.compile(
-    r"^(BREAKING[ -]CHANGE|Refs|Fixes|Closes|Resolves|Related|Issue|Jira|[A-Z][a-z]*(-[A-Za-z]+)+)"
-    r"(: \S| #\S)"
+LABEL = re.compile(r"^\*\*([^*]+?):\*\*(.*)$", re.S)
+BOLD = re.compile(r"\*\*|__")
+LIST_ITEM = re.compile(r"^([-*+]|\d+[.)]) ")
+NESTED_ITEM = re.compile(r"^\s+([-*+]|\d+[.)]) ")
+HEADING = re.compile(r"^(#{1,6} |=+\s*$|-{3,}\s*$|\*{3,}\s*$)")
+HTML = re.compile(r"<(details|summary|br|h\d|div|table)\b", re.I)
+FOOTER = re.compile(
+    r"^(BREAKING[ -]CHANGE|Refs|Fixes|Closes|Resolves|[A-Z][a-z]*(-[A-Za-z]+)+)(: | #)\S"
 )
 ATTRIBUTION = re.compile(r"Generated with \[|^Co-Authored-By: ", re.I)
-CODE_SPAN = re.compile(r"`[^`]*`")
-URL = re.compile(r"https?://\S+")
-
-WORK_LOG = (
-    (re.compile(r"\bI\b(?!/)"), "first person 'I': describe the change, not your session"),
-    (re.compile(r"\bthis (pr|pull request)\b", re.I), "'this PR': state what changes directly"),
-    (re.compile(r"\b\d[\d,]* (unit |integration |e2e )?tests?\b( pass| ran| run|,)", re.I),
-     "test counts: name the test that fails without the change instead"),
-    (re.compile(r"^(update|edit|edited)( \d+| \([^)]*\))?:", re.I | re.M),
-     "update log: rewrite the whole description instead of appending"),
-    (re.compile(r"\b(not committed|scratch check|left out on purpose)\b", re.I),
-     "session notes: keep investigation details out of the description"),
-)
+CODE_SPAN = re.compile(r"`[^`\n]*`")
 
 
-def words(text: str) -> int:
-    text = URL.sub("url", text)
-    return sum(1 for token in text.split() if re.search(r"[\w\d]", token))
+def word_count(text: str) -> int:
+    return sum(1 for token in text.split() if re.search(r"\w", token))
 
 
-def subject_of(title: str) -> str:
-    return TITLE_TAGS.sub("", title.strip(), count=1)
+def without_footers(body: str) -> tuple[list[str], list[str]]:
+    """Return the body lines and the trailing footer lines, minus attribution."""
+    lines = [line for line in body.splitlines() if not ATTRIBUTION.search(line)]
+    while lines and not lines[-1].strip():
+        lines.pop()
+    start = len(lines)
+    while start and FOOTER.match(lines[start - 1]):
+        start -= 1
+    if start == len(lines) or (start and lines[start - 1].strip()):
+        return lines, []
+    return lines[:start], lines[start:]
+
+
+def blocks(lines: list[str]) -> list[list[str]]:
+    """Split on blank lines, keep fenced code whole, and separate a label line
+    from the list or table written directly under it."""
+    result: list[list[str]] = [[]]
+    in_fence = False
+    for line in lines:
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence
+        if not line.strip() and not in_fence:
+            result.append([])
+        elif (
+            not in_fence
+            and len(result[-1]) == 1
+            and LABEL.match(result[-1][0])
+            and (LIST_ITEM.match(line) or line.lstrip().startswith("|"))
+        ):
+            result.append([line])
+        else:
+            result[-1].append(line)
+    return [block for block in result if block]
+
+
+def kind(block: list[str]) -> str:
+    first = block[0].lstrip()
+    if first.startswith("```"):
+        return "code"
+    if first.startswith("|"):
+        return "table"
+    if LIST_ITEM.match(block[0]):
+        return "list"
+    if LABEL.match(block[0]):
+        return "label"
+    return "text"
 
 
 def check_title(title: str) -> list[str]:
-    if not title.strip():
-        return ["title: empty"]
-    if not SUBJECT.match(subject_of(title)):
+    if not SUBJECT.match(TITLE_TAGS.sub("", title.strip(), count=1)):
         return [
-            "title: after optional [tag] prefixes, must be a Conventional Commit subject "
-            "matching type(scope)!: lowercase description, at most 72 characters, no trailing period"
+            "title: after optional [tag] prefixes, use a Conventional Commit subject: "
+            "type(scope)!: lowercase description, at most 72 characters, no trailing period"
         ]
     return []
 
 
-def split_footers(lines: list[str]) -> tuple[list[str], list[str]]:
-    """Strip attribution lines and the trailing footer block."""
-    lines = [line for line in lines if not ATTRIBUTION.search(line)]
-    while lines and not lines[-1].strip():
-        lines.pop()
-    end = len(lines)
-    while end and TRAILER.match(lines[end - 1].strip()):
-        end -= 1
-    if end < len(lines) and (end == 0 or not lines[end - 1].strip()):
-        footers = lines[end:]
-        lines = lines[:end]
-    else:
-        footers = []
-    return lines, footers
+def check_block(block: list[str], previous: str, following: str, seen: list[str]) -> list[str]:
+    block_kind = kind(block)
+    text = "\n".join(block)
+    if block_kind == "code":
+        return []
+
+    problems = []
+    prose = CODE_SPAN.sub("", text)
+    for line in block:
+        if HEADING.match(line):
+            problems.append(f"heading {line.strip()[:40]!r}: use the section labels instead")
+        if NESTED_ITEM.match(line):
+            problems.append(f"nested item {line.strip()[:40]!r}: keep lists flat")
+        if HTML.search(line):
+            problems.append(f"html {line.strip()[:40]!r}: use plain Markdown")
+    if problems:
+        return problems
+
+    match = LABEL.match(text)
+    if match:
+        label, rest = match.groups()
+        if BOLD.search(rest):
+            problems.append(f"label {label!r}: no bold inside the section text")
+        if label not in LABELS:
+            return problems + [f"label {label!r}: use only {', '.join(LABELS)}"]
+        if label in seen:
+            problems.append(f"label {label!r}: use each label once")
+        elif seen and LABELS.index(label) < LABELS.index(seen[-1]):
+            problems.append(f"label {label!r}: keep the order {', '.join(LABELS)}")
+        seen.append(label)
+        if label == "Changes" and (rest.strip() or following != "list"):
+            problems.append("label 'Changes': put the changes in a list directly below it")
+        elif label != "Changes" and not rest.strip() and following not in ("list", "table"):
+            problems.append(f"label {label!r}: write its text on the same line")
+        return problems
+
+    if BOLD.search(prose):
+        problems.append(f"bold in {block[0].strip()[:40]!r}: use bold only for section labels")
+    if block_kind == "text":
+        problems.append(f"paragraph {block[0].strip()[:40]!r}: start it with a section label")
+    elif previous != "label":
+        problems.append(f"{block_kind} {block[0].strip()[:40]!r}: put it directly under a section label")
+    elif block_kind == "table" and seen[-1] != "Evidence":
+        problems.append("table: allowed only under **Evidence:**")
+    elif block_kind == "list":
+        items = [line for line in block if LIST_ITEM.match(line)]
+        if len(items) > MAX_LIST_ITEMS:
+            problems.append(f"list: {len(items)} items; use at most {MAX_LIST_ITEMS} or split the PR")
+        for item in items:
+            if word_count(LIST_ITEM.sub("", item)) > MAX_ITEM_WORDS:
+                problems.append(f"item {item.strip()[:40]!r}: over {MAX_ITEM_WORDS} words")
+    return problems
 
 
-def blocks(lines: list[str]) -> list[list[str]]:
-    """Split into blank-line separated blocks, keeping fenced code intact."""
-    result: list[list[str]] = []
-    current: list[str] = []
-    in_fence = False
-    for line in lines:
-        if line.strip().startswith("```"):
-            in_fence = not in_fence
-            current.append(line)
-            continue
-        if not line.strip() and not in_fence:
-            if current:
-                result.append(current)
-                current = []
-            continue
-        current.append(line)
-    if current:
-        result.append(current)
-    return result
+def check(title: str, body: str, max_words: int = DEFAULT_MAX_WORDS) -> list[str]:
+    problems = check_title(title)
+    content, footers = without_footers(body)
+    parts = blocks(content)
+    if not parts:
+        return problems + ["body: empty; start with one or two sentences saying what now happens"]
 
+    opening = parts[0]
+    if kind(opening) != "text" or BOLD.search(opening[0]) or HEADING.match(opening[0]):
+        problems.append("opening: start with a plain paragraph saying what now happens")
+    elif word_count("\n".join(opening)) > MAX_OPENING_WORDS:
+        problems.append(f"opening: {word_count(' '.join(opening))} words; use at most {MAX_OPENING_WORDS}")
 
-def split_labels(all_blocks: list[list[str]]) -> list[list[str]]:
-    """Separate a label line from a list or table written directly under it."""
-    result: list[list[str]] = []
-    for block in all_blocks:
-        rest = block[1:]
-        if LABEL.match(block[0]) and rest and (LIST_ITEM.match(rest[0]) or rest[0].lstrip().startswith("|")):
-            result.extend([block[:1], rest])
-        else:
-            result.append(block)
-    return result
-
-
-def kind(block: list[str]) -> str:
-    first = block[0]
-    if first.strip().startswith("```"):
-        return "code"
-    if first.lstrip().startswith("|"):
-        return "table"
-    if LIST_ITEM.match(first):
-        return "list"
-    return "text"
-
-
-def check_body(body: str, max_words: int) -> list[str]:
-    problems: list[str] = []
-    content, _ = split_footers(body.splitlines())
-    if not "".join(content).strip():
-        return ["body: empty; start with one or two sentences stating what now happens"]
-
-    text_outside_code: list[str] = []
-    fence_count = 0
-    table_count = 0
     seen: list[str] = []
-    all_blocks = split_labels(blocks(content))
+    kinds = [kind(part) for part in parts] + [""]
+    for index in range(1, len(parts)):
+        problems += check_block(parts[index], kinds[index - 1], kinds[index + 1], seen)
 
-    for index, block in enumerate(all_blocks):
-        block_kind = kind(block)
-        joined = "\n".join(block)
+    total = word_count("\n".join(content))
+    if total > max_words:
+        problems.append(f"length: {total} words; use at most {max_words}, excluding footers, or split the PR")
 
-        if block_kind == "code":
-            fence_count += 1
-            if len(block) - 2 > MAX_CODE_LINES:
-                problems.append(f"code block: {len(block) - 2} lines; keep it under {MAX_CODE_LINES + 1}")
-            continue
-        text_outside_code.append(CODE_SPAN.sub("code", joined))
-
-        for line in block:
-            if HEADING.match(line):
-                problems.append(f"heading {line.strip()!r}: use the fixed bold labels, not headings")
-            if NESTED_ITEM.match(line):
-                problems.append(f"nested list item {line.strip()!r}: keep lists flat")
-            if re.search(r"<(details|summary|br|h\d)\b", line, re.I):
-                problems.append("html: no collapsed sections or html markup")
-
-        if HEADING.match(block[0]):
-            continue
-
-        if index == 0:
-            if block_kind != "text" or LABEL.match(joined) or BOLD_LEAD.match(joined):
-                problems.append("opening: start with a plain paragraph stating what now happens, before any label")
-            elif words(joined) > MAX_OPENING_WORDS:
-                problems.append(f"opening: {words(joined)} words; keep it to one or two sentences under {MAX_OPENING_WORDS + 1} words")
-            continue
-
-        follows_label = bool(LABEL.match("\n".join(all_blocks[index - 1])))
-        next_kind = kind(all_blocks[index + 1]) if index + 1 < len(all_blocks) else ""
-
-        if block_kind == "table":
-            table_count += 1
-            rows = [line for line in block if not re.match(r"^\s*\|[\s:|-]+\|\s*$", line)]
-            if len(rows) - 1 > MAX_TABLE_ROWS:
-                problems.append(f"table: {len(rows) - 1} rows; keep it to {MAX_TABLE_ROWS}")
-            if not follows_label or seen[-1:] != ["Evidence"]:
-                problems.append("table: allowed only directly under **Evidence:**")
-            continue
-
-        if block_kind == "list":
-            items = [line for line in block if LIST_ITEM.match(line)]
-            if len(items) > MAX_LIST_ITEMS:
-                problems.append(f"list: {len(items)} items; keep it to {MAX_LIST_ITEMS} or split the PR")
-            for item in items:
-                if BOLD_LEAD.match(LIST_ITEM.sub("", item)):
-                    problems.append(f"list item {item.strip()[:40]!r}: no bold lead-ins inside lists")
-                if words(item) > MAX_ITEM_WORDS + 1:
-                    problems.append(f"list item {item.strip()[:40]!r}: over {MAX_ITEM_WORDS} words")
-            if not follows_label:
-                problems.append("list: must sit directly under a label such as **Changes:**")
-            continue
-
-        match = LABEL.match(joined)
-        if match:
-            label = match.group(1)
-            if label not in LABELS:
-                problems.append(f"label {label!r}: use only {', '.join(LABELS)}")
-                continue
-            if label in seen:
-                problems.append(f"label {label!r}: appears more than once")
-            elif seen and LABELS.index(label) < LABELS.index(seen[-1]):
-                problems.append(f"label {label!r}: out of order; use {' > '.join(LABELS)}")
-            seen.append(label)
-            rest = (match.group(2) or "").strip()
-            if label == "Changes" and (rest or next_kind != "list"):
-                problems.append("label 'Changes': put the changes in a list on the lines below it")
-            elif not rest and next_kind not in ("list", "table"):
-                problems.append(f"label {label!r}: write its text on the same line")
-            continue
-
-        if BOLD_LEAD.match(joined):
-            problems.append(f"bold lead {joined.split(chr(10))[0][:40]!r}: use only {', '.join(LABELS)} with a colon")
-            continue
-        problems.append(
-            f"paragraph {joined[:40]!r}: after the opening, every paragraph starts with a label; "
-            "fold this text into the labeled paragraph it belongs to"
-        )
-
-    if fence_count > 1:
-        problems.append(f"code blocks: {fence_count}; keep at most one")
-    if table_count > 1:
-        problems.append(f"tables: {table_count}; keep at most one")
-
-    prose = "\n".join(text_outside_code)
-    inline_bold = re.sub(r"(^|\n)\*\*[^*]+?:\*\*", "", prose)
-    if "**" in inline_bold:
-        problems.append("bold: use bold only for the section labels")
-    for pattern, message in WORK_LOG:
-        if pattern.search(prose):
-            problems.append(message)
-
-    count = words("\n".join(content))
-    if count > max_words:
-        problems.append(f"length: {count} words; keep the body under {max_words + 1} excluding footers, or split the PR")
+    breaking = SUBJECT.match(TITLE_TAGS.sub("", title.strip(), count=1))
+    has_footer = any(re.match(r"BREAKING[ -]CHANGE: ", line) for line in footers)
+    if breaking and breaking.group(3) and not has_footer:
+        problems.append("footer: a '!' title needs a BREAKING CHANGE: footer")
     return problems
 
 
@@ -259,15 +196,12 @@ def main(argv: list[str]) -> int:
         print(f"cannot read body file: {err}", file=sys.stderr)
         return 2
 
-    problems = check_title(args.title) + check_body(body, args.max_words)
-    if re.match(r"^\w+(\([a-z0-9-]+\))?!:", subject_of(args.title)) and not re.search(r"^BREAKING[ -]CHANGE: ", body, re.M):
-        problems.append("footer: a '!' subject needs a BREAKING CHANGE: footer")
+    problems = check(args.title, body, args.max_words)
+    for problem in problems:
+        print(problem)
     if problems:
-        for problem in problems:
-            print(problem)
         return 1
-    content, _ = split_footers(body.splitlines())
-    print(f"ok: {words(chr(10).join(content))} words")
+    print(f"ok: {word_count(chr(10).join(without_footers(body)[0]))} words")
     return 0
 
 
