@@ -126,6 +126,11 @@ impl Fixture {
             .env("TERM", "dumb")
             .env("NO_COLOR", "1")
             .env("COLUMNS", "80")
+            .env_remove("MICROS_URL")
+            .env_remove("MICROS_PERIMETER")
+            .env_remove("MICROS_TOKEN")
+            .env_remove("MICROS_AUTH_HEADER")
+            .env_remove("SLAUTH_ENV")
             .stdin(Stdio::null());
         c
     }
@@ -1869,4 +1874,220 @@ fn client_readiness_preserves_healthy_bb_when_manual_twg_token_fails() {
     assert!(clients
         .iter()
         .any(|c| c["client"] == "twg-bitbucket" && c["usable"] == false));
+}
+
+#[test]
+fn micros_check_and_reuse_only_read_the_exact_mfa_cache() {
+    let f = Fixture::new(json!({}));
+    for mode in ["--check", "--reuse-valid"] {
+        let r = f.run(&["--profile", "micros", mode], 0);
+        assert_eq!(r["targets"][0]["target"], "micros");
+        assert_eq!(r["targets"][0]["status"], "valid");
+        assert!(r["targets"][0]["remaining_seconds"].as_u64().unwrap() > 300);
+    }
+    assert_eq!(f.calls().len(), 2);
+    for call in f.calls() {
+        assert_eq!(
+            call,
+            json!([
+                "atlas",
+                [
+                    "slauth",
+                    "token",
+                    "--aud",
+                    "micros-server",
+                    "--env",
+                    "prod",
+                    "--output",
+                    "jwt",
+                    "--mfa",
+                    "--cached"
+                ]
+            ])
+        );
+    }
+}
+
+#[test]
+fn micros_renewal_requires_issuance_server_login_and_cache_verification() {
+    let f = Fixture::new(json!({"assert_serial":true,"assert_interaction":true}));
+    let out = f
+        .command(&["auth", "preflight", "--profile", "micros", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out));
+    assert!(!text(&out).contains(SECRET));
+    let r: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(r["targets"][0]["status"], "refreshed");
+    let calls = f.calls();
+    assert_eq!(calls.len(), 5);
+    assert!(calls[1][1].as_array().unwrap().contains(&json!("--force")));
+    assert!(calls[2][1].as_array().unwrap().contains(&json!("--cached")));
+    assert_eq!(calls[3], json!(["atlas", ["micros", "login"]]));
+    assert!(calls[4][1].as_array().unwrap().contains(&json!("--cached")));
+}
+
+#[test]
+fn micros_missing_cache_never_prompts_in_check_or_noninteractive_modes() {
+    let f = Fixture::new(json!({"atlas_valid":false}));
+    for mode in ["--check", "--non-interactive"] {
+        let r = f.run(&["--profile", "micros", mode], 1);
+        assert_eq!(r["targets"][0]["status"], "blocked");
+    }
+    assert_eq!(f.calls().len(), 2);
+    assert!(f
+        .calls()
+        .iter()
+        .all(|c| c[1].as_array().unwrap().contains(&json!("--cached"))));
+}
+
+#[test]
+fn micros_failed_login_cannot_be_hidden_by_a_valid_cache() {
+    let f = Fixture::new(json!({"atlas_valid":false,"micros_login_fails":true}));
+    let r = f.run(&["--profile", "micros"], 1);
+    assert_eq!(r["targets"][0]["status"], "failed");
+    assert!(r["targets"][0]["reason"]
+        .as_str()
+        .unwrap()
+        .contains("Micros login failed"));
+    assert_eq!(f.calls().len(), 4);
+}
+
+#[test]
+fn micros_rejects_wrong_audience_outages_and_endpoint_overrides_without_login() {
+    for state in [
+        json!({"aud":"other"}),
+        json!({"mode":"outage"}),
+        json!({"mode":"malformed"}),
+        json!({"mode":"permission"}),
+    ] {
+        let f = Fixture::new(state);
+        let r = f.run(&["--profile", "micros"], 1);
+        assert_eq!(r["targets"][0]["status"], "failed");
+        assert_eq!(f.calls().len(), 1);
+    }
+    let f = Fixture::new(json!({}));
+    for key in [
+        "MICROS_URL",
+        "MICROS_PERIMETER",
+        "MICROS_TOKEN",
+        "MICROS_AUTH_HEADER",
+        "SLAUTH_ENV",
+    ] {
+        let out = f
+            .command(&[
+                "auth",
+                "preflight",
+                "--profile",
+                "micros",
+                "--check",
+                "--json",
+            ])
+            .env(key, SECRET)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1));
+        assert!(!text(&out).contains(SECRET));
+    }
+    assert!(f.calls().is_empty());
+}
+
+#[test]
+fn micros_profile_composes_deduplicates_and_inspects_offline() {
+    let f = Fixture::new(json!({}));
+    let out = f
+        .command(&["auth", "inspect", "--profile", "micros", "--json"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let r: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(r["targets"], json!([{"provider":"micros"}]));
+    assert_eq!(r["required_executables"], json!(["atlas"]));
+    assert!(f.calls().is_empty());
+    let r = f.run(
+        &[
+            "--profile",
+            "metrics",
+            "--include-profile",
+            "micros",
+            "--include-profile",
+            "micros",
+            "--check",
+        ],
+        0,
+    );
+    assert_eq!(r["targets"].as_array().unwrap().len(), 2);
+    assert_eq!(r["targets"][1]["target"], "micros");
+}
+
+#[test]
+fn micros_bad_issuance_never_runs_login_or_launches_a_wrapped_command() {
+    for state in [
+        json!({"atlas_valid":false,"refresh_fails":true}),
+        json!({"atlas_valid":false,"refresh_stale":true}),
+        json!({"atlas_valid":false,"refreshed_ttl":30}),
+        json!({"atlas_valid":false,"refresh_denied":true}),
+    ] {
+        let f = Fixture::new(state);
+        let out = f
+            .command(&[
+                "auth",
+                "exec",
+                "--profile",
+                "micros",
+                "--reuse-valid",
+                "--",
+                "/bin/sh",
+                "-c",
+                "echo child-must-not-run",
+            ])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+        assert!(!text(&out).contains("child-must-not-run"));
+        assert!(!text(&out).contains(SECRET));
+        assert!(!f.calls().iter().any(|c| c[1] == json!(["micros", "login"])));
+    }
+}
+
+#[test]
+fn micros_login_timeout_fails_even_with_a_fresh_cache() {
+    let f = Fixture::new(json!({"atlas_valid":false,"hang_keys":["atlas-micros-login"]}));
+    let r = f.run(&["--profile", "micros", "--login-timeout", "1"], 1);
+    assert_eq!(r["targets"][0]["status"], "failed");
+    let pid = fs::read_to_string(f.root.path().join("descendant-atlas-micros-login"))
+        .unwrap()
+        .parse::<i32>()
+        .unwrap();
+    assert!(!alive(pid), "Micros login descendant survived its deadline");
+    assert_eq!(f.calls().len(), 4);
+}
+
+#[test]
+fn micros_shares_atlas_worker_and_interaction_gate_with_other_profiles() {
+    let f = Fixture::new(json!({"assert_serial":true,"assert_interaction":true}));
+    let out = f
+        .command(&[
+            "auth",
+            "preflight",
+            "--profile",
+            "bitbucket",
+            "--include-profile",
+            "micros",
+            "--include-profile",
+            "metrics",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out));
+    assert!(!f.root.path().join("provider-overlap").exists());
+    assert!(!f.root.path().join("interaction-overlap").exists());
+    let r: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(r["targets"][1]["target"], "micros");
+    assert!(r["targets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|t| t["status"] == "refreshed"));
 }

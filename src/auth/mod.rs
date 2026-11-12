@@ -40,7 +40,7 @@ fn result(options: &Options, human: bool) -> Value {
                 config::Target::Bitbucket { .. } => 0,
                 config::Target::Twg {} | config::Target::TwgBitbucket {} => 1,
                 config::Target::Kerberos { .. } => 3,
-                config::Target::Slauth { .. } => 2,
+                config::Target::Slauth { .. } | config::Target::Micros {} => 2,
             };
             queues[provider].push((index, target));
         }
@@ -337,7 +337,7 @@ pub(crate) fn requirements(options: &Options) -> Result<Value, String> {
         .map(|t| match t {
             config::Target::Bitbucket { .. } => "bb",
             config::Target::Twg {} | config::Target::TwgBitbucket {} => "twg",
-            config::Target::Slauth { .. } => "atlas",
+            config::Target::Slauth { .. } | config::Target::Micros {} => "atlas",
             config::Target::Kerberos { .. } => "klist",
         })
         .collect::<std::collections::BTreeSet<_>>();

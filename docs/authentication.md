@@ -33,6 +33,7 @@ The built-in `work` profile contains eight independent credential targets:
 | `code` | Bitbucket CLI OAuth, TWG OAuth, and TWG Bitbucket token | Not SLAuth |
 | `bitbucket` / `twg` / `twg-bitbucket` | One corresponding credential | Not SLAuth |
 | `runtime` | Default-cache Kerberos TGT and principal | Not SLAuth |
+| `micros` (opt-in) | `micros-server` MFA cache + Micros user login | `prod`, no groups, MFA |
 | `logs` | `splunk.paas-inf.net` | `prod`, `atlassian-all`, MFA |
 | `risk` | `risk-mitigation-service` | `prod`, no groups, MFA |
 | `checks` | `pollinator` | `prod`, no groups, MFA |
@@ -52,6 +53,7 @@ order; every requested profile is validated before any provider call. With
 
 ```sh
 workctl auth preflight --profile work --include-profile runtime --reuse-valid
+workctl auth preflight --profile work --include-profile micros --reuse-valid
 workctl auth exec --profile code --include-profile runtime --reuse-valid -- COMMAND
 ```
 
@@ -66,6 +68,31 @@ Nebulae endpoint access, ASAP signing, or tenant/user-context authorization.
 
 Splunk issuance also warms the underlying Atlas login, but does not populate the
 other audience-specific caches or refresh service-signed runtime credentials.
+
+### Micros (opt-in)
+
+Use `--profile micros` or add `--include-profile micros` when Micros is needed.
+It is not included in `work` or `services`. Normal renewal first forces production
+`micros-server` issuance with MFA, verifies the cached audience and lifetime,
+then runs `atlas micros login` and checks the cache again. Login failure remains
+failure even if token issuance succeeded. Micros login itself may reuse a token,
+so it cannot prove forced renewal on its own.
+
+`--check` and a valid `--reuse-valid` inspect only that exact MFA cache. They do
+not invoke Micros read commands: those commands can initiate SLAuth issuance.
+Cache readiness does not prove server acceptance, the identity selected by
+Micros' netrc/user resolution, or service permissions. Only the renewal path
+performs server login. `--non-interactive` never initiates Micros issuance or
+login. Admin and JIT access are not requested.
+
+This profile supports default commercial production user authentication.
+`MICROS_URL`, `MICROS_PERIMETER`, `MICROS_TOKEN`, and `MICROS_AUTH_HEADER` must be
+unset; `SLAUTH_ENV` must be unset or `prod`. Overrides fail before provider calls
+so a production cache cannot claim readiness for a different target. Atlas owns
+all credentials. Micros shares the Atlas worker and browser/MFA interaction gate.
+
+The adapter follows the [Micros login implementation](https://bitbucket.org/atlassian/micros-cli-go/src/5d992a802de2c0b01741cfaa584ebda704f18ad9/cmd/login.go)
+and its [SLAuth request](https://bitbucket.org/atlassian/micros-cli-go/src/5d992a802de2c0b01741cfaa584ebda704f18ad9/pkg/credentials/slauth.go).
 
 ### Coverage evidence and boundaries
 
@@ -96,7 +123,7 @@ In particular:
   launches it through its pipe-based supervisor. Enter the token directly in the
   provider's terminal prompt, never chat. Narrow `bitbucket` or `twg` profiles
   remain available for tasks using only that client.
-- Micros, Sliver, Spinnaker, browser sessions, and package-registry credentials
+- Sliver, Spinnaker, browser sessions, and package-registry credentials
   retain their provider-specific checks. Registry reads succeeded in the reviewed
   sessions; an unpublished package was not an auth failure. These are not covered
   merely because another Atlas audience succeeds.
@@ -164,7 +191,7 @@ Complete the browser opened by Bitbucket if it needs a new login.
 
 Within one preflight, Bitbucket, TWG, Atlas, and Kerberos run in at most four provider
 workers. Every target's probe, renewal, and verification stays ordered; targets
-using the same provider run sequentially, including all SLAuth cache reads and
+using the same provider run sequentially, including Micros login and all SLAuth cache reads and
 issuance. Bitbucket browser login and Atlas issuance share one interaction gate,
 held from before process launch through descendant cleanup. Silent checks and
 refreshes in other providers can continue during browser/MFA waits. Provider
@@ -300,3 +327,10 @@ work on macOS. These tests are distinct from real account acceptance. The explic
 fails if a required provider, credential, network or browser/MFA step is unavailable;
 it verifies real preflight, cached reuse, wrapped output/exit, and the impossible
 SLAuth lifetime case. Ordinary CI skips this account-dependent lane explicitly.
+
+Run the explicit real-provider Micros acceptance lane when Atlas, production
+Micros access, and browser/MFA are available:
+
+```sh
+cargo test --locked --test auth_live real_micros_renewal_cache_and_wrapped_command -- --ignored --nocapture
+```

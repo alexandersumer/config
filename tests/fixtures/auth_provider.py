@@ -29,6 +29,8 @@ os.write(log, (json.dumps([name, args]) + '\n').encode())
 os.close(log)
 if name in ['klist', 'kinit']:
     key = name + '-' + ('test' if args else 'list')
+elif name == 'atlas' and args[:2] == ['micros', 'login']:
+    key = 'atlas-micros-login'
 elif name == 'atlas':
     audience = args[args.index('--aud') + 1]
     key = 'atlas-' + ('cache-' if '--cached' in args else 'force-') + audience
@@ -43,7 +45,7 @@ if state.get('assert_serial'):
     except BlockingIOError:
         (root / 'provider-overlap').touch()
         sys.exit(97)
-interactive = (name == 'bb' and args[:2] == ['auth', 'login']) or (name == 'atlas' and '--force' in args)
+interactive = (name == 'bb' and args[:2] == ['auth', 'login']) or (name == 'atlas' and ('--force' in args or args[:2] == ['micros', 'login']))
 if interactive and state.get('assert_interaction'):
     interaction_lock = (root / 'interaction-active.lock').open('a')
     try:
@@ -160,6 +162,12 @@ elif name == 'twg':
         print(json.dumps({'data': {'status': state.get('twg_refresh_status', 'refreshed'), 'secret': secret}}))
     else:
         raise RuntimeError('Unexpected TWG command')
+elif name == 'atlas' and args[:2] == ['micros', 'login']:
+    assert args == ['micros', 'login']
+    if state.get('micros_login_fails'):
+        print('Forbidden ' + secret, file=sys.stderr)
+        sys.exit(1)
+    print('Successfully logged in ' + secret)
 elif name == 'atlas':
     assert args[:2] == ['slauth', 'token']
     assert '--output' in args and args[args.index('--output') + 1] == 'jwt'

@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 #[derive(Args, Debug, Clone)]
 pub(crate) struct Options {
-    /// Named credential set: work, code, bitbucket, twg, twg-bitbucket, runtime, logs, services, risk, checks, config, metrics
+    /// Named credential set: work, code, bitbucket, twg, twg-bitbucket, runtime, micros, logs, services, risk, checks, config, metrics
     #[arg(long, default_value = "work")]
     pub profile: String,
     /// Also require another profile; repeatable, overlapping targets checked once
@@ -46,6 +46,7 @@ pub(crate) enum Target {
     },
     Twg {},
     TwgBitbucket {},
+    Micros {},
     Kerberos {
         #[serde(default)]
         principal: Option<String>,
@@ -69,6 +70,7 @@ impl Target {
             Self::Bitbucket { .. } => "Bitbucket",
             Self::Twg {} => "TWG",
             Self::TwgBitbucket {} => "TWG Bitbucket",
+            Self::Micros {} => "Micros",
             Self::Kerberos { .. } => "Kerberos",
             Self::Slauth { .. } => "SLAuth",
         }
@@ -106,6 +108,7 @@ impl Target {
             }
             Self::Twg {} => "twg".into(),
             Self::TwgBitbucket {} => "twg-bitbucket".into(),
+            Self::Micros {} => "micros".into(),
             Self::Kerberos { principal } => {
                 format!("kerberos:{}", principal.as_deref().unwrap_or("default"))
             }
@@ -249,6 +252,7 @@ pub(crate) fn targets(options: &Options) -> Result<Vec<Target>, String> {
             "twg" => vec![Target::Twg {}],
             "twg-bitbucket" => vec![Target::TwgBitbucket {}],
             "runtime" => vec![Target::Kerberos { principal: None }],
+            "micros" => vec![Target::Micros {}],
             "logs" => logs,
             "risk" => vec![risk],
             "checks" => vec![checks],
@@ -258,7 +262,7 @@ pub(crate) fn targets(options: &Options) -> Result<Vec<Target>, String> {
             "work" => code.into_iter().chain(logs).chain(services).chain([Target::TwgBitbucket {}]).collect(),
             _ => {
                 return Err(
-                    "Unknown built-in auth profile; use work, code, bitbucket, twg, twg-bitbucket, runtime, logs, services, risk, checks, config, metrics, or --config".into(),
+                    "Unknown built-in auth profile; use work, code, bitbucket, twg, twg-bitbucket, runtime, micros, logs, services, risk, checks, config, metrics, or --config".into(),
                 )
             }
         }

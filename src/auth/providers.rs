@@ -362,6 +362,32 @@ fn slauth_probe(target: &Target, ctx: &Context<'_>) -> Result<Probe, String> {
         account: None,
     }))
 }
+// Micros' login requests this exact production MFA audience, then calls /user/login.
+// Ordinary Micros reads can issue tokens, so check-only uses the cached-token API.
+fn micros_token() -> Target {
+    Target::Slauth {
+        audience: "micros-server".into(),
+        environment: "prod".into(),
+        groups: vec![],
+        mfa: true,
+    }
+}
+fn micros_scope() -> Result<(), String> {
+    for key in [
+        "MICROS_URL",
+        "MICROS_PERIMETER",
+        "MICROS_TOKEN",
+        "MICROS_AUTH_HEADER",
+    ] {
+        if std::env::var_os(key).is_some() {
+            return Err("Micros profile requires default production user authentication; remove Micros endpoint, perimeter, or credential overrides".into());
+        }
+    }
+    if std::env::var_os("SLAUTH_ENV").is_some_and(|v| v != "prod") {
+        return Err("Micros profile requires SLAUTH_ENV unset or prod".into());
+    }
+    Ok(())
+}
 fn probe(target: &Target, ctx: &Context<'_>) -> Result<Probe, String> {
     let options = ctx.options;
     match target {
@@ -408,6 +434,10 @@ fn probe(target: &Target, ctx: &Context<'_>) -> Result<Probe, String> {
         Target::TwgBitbucket {} => twg_bitbucket_probe(ctx),
         Target::Kerberos { principal } => kerberos_probe(principal.as_deref(), ctx),
         Target::Slauth { .. } => slauth_probe(target, ctx),
+        Target::Micros {} => {
+            micros_scope()?;
+            slauth_probe(&micros_token(), ctx)
+        }
     }
 }
 fn enough(evidence: &Evidence, options: &Options) -> bool {
@@ -419,7 +449,7 @@ fn ready(target: &Target, evidence: Evidence, refreshed: bool) -> Value {
     let checked_at = now();
     json!({"target":target.label(), "status":if refreshed {"refreshed"} else {"valid"}, "remaining_seconds":evidence.expires_at.map(|expiry|expiry.saturating_sub(checked_at)), "account":evidence.account,
         "checked_at_unix_seconds":checked_at, "expires_at_unix_seconds":evidence.expires_at,
-        "note":if matches!(target, Target::Twg {}) {Some("TWG OAuth API access verified; expiry unknown. TWG Bitbucket is verified separately by the code/work profiles. No unattended-duration guarantee.")} else if matches!(target, Target::TwgBitbucket {}) {Some("TWG Bitbucket API access verified; expiry unknown. Manually managed token: checked, never automatically rotated. No unattended-duration guarantee.")} else if matches!(target, Target::Kerberos { .. }) {Some("Kerberos TGT and default principal checked; expiry unknown. Runtime endpoint authorization is not verified. No unattended-duration guarantee.")} else if evidence.expires_at.is_none() {Some("Access verified now; provider does not expose credential expiry. No unattended-duration guarantee.")} else {None}})
+        "note":if matches!(target, Target::Micros {}) {Some("Production micros-server MFA cache checked; check/reuse does not verify server acceptance, selected Micros identity, or service permissions. Renewal also runs atlas micros login.")} else if matches!(target, Target::Twg {}) {Some("TWG OAuth API access verified; expiry unknown. TWG Bitbucket is verified separately by the code/work profiles. No unattended-duration guarantee.")} else if matches!(target, Target::TwgBitbucket {}) {Some("TWG Bitbucket API access verified; expiry unknown. Manually managed token: checked, never automatically rotated. No unattended-duration guarantee.")} else if matches!(target, Target::Kerberos { .. }) {Some("Kerberos TGT and default principal checked; expiry unknown. Runtime endpoint authorization is not verified. No unattended-duration guarantee.")} else if evidence.expires_at.is_none() {Some("Access verified now; provider does not expose credential expiry. No unattended-duration guarantee.")} else {None}})
 }
 fn blocked(target: &Target, reason: &str, action: &str) -> Value {
     json!({"target":target.label(),"status":"blocked","reason":reason,"action":action,"remaining_seconds":null})
@@ -499,6 +529,31 @@ fn refresh(
                 }))
         }
         Target::TwgBitbucket {} => Ok(false),
+        Target::Micros {} => {
+            micros_scope()?;
+            if options.non_interactive {
+                return Ok(false);
+            }
+            if !refresh(&micros_token(), ctx, evidence)? {
+                return Err(
+                    "Micros token issuance did not succeed; login was not attempted".into(),
+                );
+            }
+            match slauth_probe(&micros_token(), ctx)? {
+                Probe::Valid(e) if enough(&e, options) => {}
+                _ => {
+                    return Err(
+                        "Micros token cache is not ready after issuance; login was not attempted"
+                            .into(),
+                    )
+                }
+            }
+            let output = call(command("atlas", &["micros", "login"]), ctx, true)?;
+            if output.code != 0 {
+                return Err("Micros login failed after token issuance; inspect Micros access and connectivity".into());
+            }
+            Ok(true)
+        }
         Target::Kerberos { principal } => {
             if principal.is_some() {
                 kerberos_identity(principal.as_deref(), ctx)?;
@@ -586,6 +641,7 @@ pub(crate) fn check(target: &Target, options: &Options, session: &process::Sessi
             Target::Twg {} => "Run twg login in a terminal, then rerun preflight",
             Target::TwgBitbucket {} => "Run twg setup bitbucket --force in a terminal, then rerun preflight; enter the token directly in that terminal",
             Target::Kerberos { .. } => "Obtain a ticket for the intended principal using your supported Kerberos login, then rerun preflight; kinit -R only renews an existing renewable TGT",
+            Target::Micros {} => "Rerun without --check/--non-interactive and complete Atlas browser/MFA; Micros server login must succeed",
             Target::Slauth { .. } => "Rerun without --check/--non-interactive and complete Atlas browser/MFA; SLAuth TTL is at most one hour",
         };
         if matches!(target, Target::TwgBitbucket {}) {
@@ -594,10 +650,10 @@ pub(crate) fn check(target: &Target, options: &Options, session: &process::Sessi
         if options.check {
             return Ok(blocked(target, "Missing credential or insufficient remaining validity; check-only mode made no explicit refresh", action));
         }
-        if options.non_interactive && matches!(target, Target::Slauth { .. }) {
+        if options.non_interactive && matches!(target, Target::Slauth { .. } | Target::Micros {}) {
             return Ok(blocked(
                 target,
-                "SLAuth issuance disabled in noninteractive mode",
+                "Atlas issuance disabled in noninteractive mode",
                 action,
             ));
         }
@@ -606,7 +662,10 @@ pub(crate) fn check(target: &Target, options: &Options, session: &process::Sessi
             Err(error) => {
                 // Issuance can finish writing its normal cache just before a
                 // timeout or provider error. Check once; never repeat issuance.
-                if options.reuse_valid && !crate::runtime::cancelled() {
+                if options.reuse_valid
+                    && !matches!(target, Target::Micros {})
+                    && !crate::runtime::cancelled()
+                {
                     if let Ok(Probe::Valid(cached)) = probe(target, ctx) {
                         if enough(&cached, options) {
                             return Ok(ready(target, cached, true));

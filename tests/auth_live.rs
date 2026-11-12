@@ -185,3 +185,10 @@ fn real_kerberos_cache_and_exact_principal_are_checked_without_renewal() {
     }
     println!("Real Kerberos: default TGT, exact identity, and wrong-identity refusal verified without renewal");
 }
+
+#[test]
+#[ignore = "requires real Atlas, production Micros access, network, and browser/MFA"]
+fn real_micros_renewal_cache_and_wrapped_command() {
+    reuse_and_exec(&["--profile", "micros"], 1);
+    println!("Real Micros: forced MFA issuance, server login, cache check, and wrapped stdout/exit verified");
+}
