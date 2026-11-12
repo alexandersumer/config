@@ -3,23 +3,23 @@ name: branch-description
 description: Write or refresh a PR title and description in the canonical tight format and check it. Use whenever a pull request title or description is created, updated, or drafted, including inside git-publish, address-comments, clear-merge-blockers, or an ad hoc PR command, and for Conventional Commit branch summaries.
 ---
 
-Write the canonical PR title and description for the current branch. Every workflow that creates or updates a PR title or description uses this output, checked by this skill's script. Other skills and repository instructions add title tags or footers; they do not loosen the format.
+Write the canonical PR title and description for the current branch. Every workflow that creates or updates a PR title or description uses this checked output. Other skills and repository instructions may add title tags or footers; they do not loosen the format.
 
-This skill is read-only. Do not stage, commit, push, or create/update a PR. Use read-only provider commands when they establish the actual PR base or clarify the requested description. Callers publish the checked output unchanged.
+This skill is read-only: do not stage, commit, push, or create/update a PR. Read-only provider commands are fine for finding the actual PR base. Callers publish the checked output unchanged.
 
 ## Reader
 
-Write for a reviewer who has not seen the work, and for whoever reads the history later. In under a minute they should know what now happens, why, what proves it, and what to check. The description is not a work log, status report, or investigation record. How the problem was found, commands run, dead ends, test counts, and session notes stay in chat or linked documents.
+Write for a reviewer who has not seen the work, and for later history readers. In under a minute they should know what now happens, why, what proves it, and what to check. It is not a work log: how the problem was found, commands run, dead ends, test counts, and session notes stay in chat or linked documents.
 
 When rules conflict, follow this order: accuracy, then the limits, then completeness. Drop detail rather than exceed a limit. If the change cannot be explained within the limits, or it bundles unrelated changes, say it should be split instead of writing a longer description.
 
 ## Effective change set
 
-Do not use the branch name, issue title, provider default, conversation recency, your own last action, the latest commit, or a vague summary.
+Never describe from the branch name, issue title, provider default, conversation recency, your last action, or the latest commit.
 
-Use the requested base or target PR destination as `<comparison-ref>`. Otherwise use `origin/HEAD` when it resolves to an existing remote-tracking branch, or else the sole existing `origin/main` or `origin/master`. Set `<base>` with `git merge-base <comparison-ref> HEAD`. If no unambiguous ref or merge base exists, report that gap and inspect the working tree.
+Use the requested base or target PR destination as `<comparison-ref>`; otherwise `origin/HEAD` when it resolves to an existing remote-tracking branch, else the sole existing `origin/main` or `origin/master`. Set `<base>` with `git merge-base <comparison-ref> HEAD`. If no unambiguous ref or merge base exists, report that gap and use the working tree.
 
-Build one effective change set from every available source: `git log <base>..HEAD --oneline` and `git diff <base>..HEAD` when `<base>` exists, staged changes with `git diff --cached`, unstaged changes with `git diff`, and untracked files from `git ls-files --others --exclude-standard` rendered as new-file diffs. Always include staged, unstaged, and untracked changes even when the committed branch diff exists. If the committed branch diff is empty but the working tree has changes, describe those changes instead of treating the branch as empty. Ignore generated files, lockfiles, and formatting noise unless they are the change.
+The effective change set is `<base>..HEAD` plus staged, unstaged, and untracked changes (as new-file diffs), always including the working tree even when committed changes exist. If only the working tree has changes, describe those. Ignore generated files, lockfiles, and formatting noise unless they are the change.
 
 When the effective change set is empty, output exactly this diagnostic sentence and stop, replacing placeholders:
 
@@ -33,7 +33,7 @@ Use `git branch --show-current`, or `HEAD` if detached, and the actual compariso
 No branch description to write: current branch `<current-branch>` has no resolved comparison base, and there are no staged, unstaged, or untracked changes.
 ```
 
-The cumulative effective diff is the source of truth. Use conversation context only to clarify intent the diff supports. Identify the highest-level user-visible or system-behavior change that explains most meaningful diffs; read changed code, callers, or tests when the diff is implementation-heavy. Logging, tests, cleanup, refactors, and follow-up fixes appear only when they support the main change, unless they are its purpose.
+The cumulative effective diff is the source of truth; use conversation context only to clarify intent the diff supports. Describe the highest-level user-visible or system-behavior change that explains most of the diff. Logging, tests, cleanup, refactors, and follow-up fixes appear only when they support the main change, unless they are its purpose.
 
 ## Title
 
@@ -68,10 +68,10 @@ Use this shape. Only the opening paragraph is required; include each labeled sec
 <Footers, such as Refs: ABC-123 or BREAKING CHANGE: ...>
 ```
 
-- **Opening:** at most 50 words. Lead with the outcome a reviewer can verify, not the implementation. For small changes it is the whole body.
+- **Opening:** lead with the outcome a reviewer can verify, not the implementation. For small changes it is the whole body.
 - **Why:** include it unless the opening already makes the reason obvious. Describe what is wrong without the change, in present tense, and why this approach fixes it. Summarize linked discussions instead of relying on the link.
-- **Changes:** only for two or more notable changes. Two to six flat bullets of one sentence, 25 words or fewer each, described as behavior. No file inventories; name a file or identifier only when the reviewer must find it.
-- **Evidence:** only proof you observed: a measured before/after, a reproduction, or the test that fails without the change. One or two sentences, optionally followed by one small table of before/after numbers. Never list commands run or test counts, and say CI passed only when you saw it pass.
+- **Changes:** only for two or more notable changes. One-sentence flat bullets, described as behavior. No file inventories; name a file or identifier only when the reviewer must find it.
+- **Evidence:** only proof you observed: a measured before/after, a reproduction, or the test that fails without the change. One or two sentences, optionally one small before/after table. Never list commands run or test counts; say CI passed only when you saw it pass.
 - **Rollout:** only for gated, risky, migrating, or hard-to-reverse changes. If a risky change has no control, write "No flag; revert to roll back."
 - **Review:** only when a decision needs the reviewer, named specifically, such as "Is 30s the right timeout for slow uploads?"
 - **Follow-up:** only for deferred work a reviewer would otherwise ask about.
@@ -99,7 +99,7 @@ Write the title and body to files and run:
 python3 <skill-directory>/scripts/check_pr_description.py --title "<title>" --body-file <body-file>
 ```
 
-Fix every reported problem and rerun until it prints `ok`. Never return or publish a description that fails the check. The check covers structure and length only. Then reread as the reviewer: the opening alone should say what changes, each section should say something new, and no claim should go beyond the evidence.
+Fix every reported problem and rerun until it prints `ok`. Never return or publish a description that fails the check. It covers structure and length only, so then reread as the reviewer: the opening alone should say what changes, each section should say something new, and no claim should go beyond the evidence.
 
 ## Updating an existing PR
 

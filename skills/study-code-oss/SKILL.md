@@ -5,11 +5,11 @@ description: Study locally available OSS repositories with the current agent to 
 
 # Study Code: OSS
 
-Study the aspect in `$ARGUMENTS`, else infer the aspect from the conversation, active design, or current implementation need. Use only the current agent. Do not invoke subagents. Do not edit inspected repositories; this is a read-only research skill unless the user separately asks for changes.
+Study the aspect in `$ARGUMENTS`, else infer the aspect from the conversation, active design, or current implementation need. Use only the current agent; do not invoke subagents. Read-only: do not edit inspected repositories unless the user separately asks for changes.
 
 ## Resolve the study target
 
-If the aspect is unclear after reading the conversation, ask one narrowing question and stop. Good aspects include error handling, CLI architecture, testing seams, fixture design, dependency injection, configuration loading, API boundaries, plugin systems, state machines, migrations, observability, package layout, and type-safe domain modeling.
+If the aspect is unclear after reading the conversation, ask one narrowing question and stop. Example aspects: error handling, CLI architecture, testing seams, fixture design, dependency injection, configuration loading, API boundaries, plugin systems, state machines, migrations, observability, package layout, and type-safe domain modeling.
 
 Resolve candidate repositories in this order:
 
@@ -20,20 +20,20 @@ Resolve candidate repositories in this order:
 
 Do not assume a named home-directory layout or recursively crawl the home directory. If no bounded candidate location can be resolved, ask for an OSS repository or collection path.
 
-Choose a small candidate set before deep reading. Prefer mature, active, well-tested, well-documented repos that are idiomatic for their language and relevant to the aspect. Avoid random, toy, abandoned, generated, vendored, or low-signal repositories. If many repos match, pick the 1-3 strongest and say why before deep inspection.
+Choose a small candidate set before deep reading: prefer mature, active, well-tested, well-documented repos that are idiomatic for their language and relevant to the aspect. Avoid toy, abandoned, generated, vendored, or low-signal repositories. If many match, pick the 1-3 strongest and say why.
 
 ## Exploration workflow
 
-1. Check local repo instructions first when present: `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING`, README, architecture docs, ADRs, and development docs. Use them to interpret conventions, not to expand scope.
-2. Read high-signal surfaces before implementation details: package/workspace config, public API entry points, core interfaces, representative callers, and tests around the requested aspect.
-3. Search narrowly with terms from the aspect. For example: errors (`Result`, `Error`, `Diagnostic`, `catch`, `raise`), tests (`fixture`, `golden`, `snapshot`, `harness`, `integration`), config (`schema`, `parse`, `validate`, `env`), boundaries (`interface`, `port`, `adapter`, `service`, `client`).
-4. Follow one or two real flows end to end: public entry point → abstraction → implementation → caller → test. Prefer patterns proven by usage over isolated clever code.
+1. Read local repo instructions first (`AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING`, README, architecture docs, ADRs) to interpret conventions, not to expand scope.
+2. Read high-signal surfaces before implementation details: package/workspace config, public API entry points, core interfaces, representative callers, and tests around the aspect.
+3. Search narrowly with aspect terms, for example errors (`Result`, `Error`, `Diagnostic`, `catch`, `raise`), tests (`fixture`, `golden`, `snapshot`, `harness`, `integration`), config (`schema`, `parse`, `validate`, `env`), boundaries (`interface`, `port`, `adapter`, `service`, `client`).
+4. Follow one or two real flows end to end: public entry point → abstraction → implementation → caller → test. Prefer patterns proven by usage.
 5. Filter hard. Drop findings that are merely stylistic, fashionable, unsupported by tests or real callers, too framework-specific to transfer, clever without a clear payoff, or too large to explain accurately.
 6. Stop when you have enough evidence for up to seven high-quality patterns. One or two is correct when only one or two survive the filter; do not keep searching or lower the bar to fill a quota.
 
 ## Quality bar
 
-Call a pattern excellent only when file-backed evidence shows it reduces total complexity, hides a real decision, protects an invariant, improves locality, gives callers leverage, creates a useful test seam, improves operability, or makes future change cheaper. Prefer small transferable ideas over wholesale architecture copying. Extract the principle and constraints; do not recommend cargo-culting repo-specific structure. Include anti-patterns only when they clarify why the selected pattern is better.
+Call a pattern excellent only when file-backed evidence shows it reduces total complexity, hides a real decision, protects an invariant, improves locality, gives callers leverage, creates a useful test seam, improves operability, or makes future change cheaper. Extract small transferable principles and their constraints; do not recommend cargo-culting repo-specific structure. Include anti-patterns only when they clarify why the selected pattern is better.
 
 ## Output
 

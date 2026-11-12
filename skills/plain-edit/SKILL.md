@@ -5,31 +5,29 @@ description: Tighten existing writing while preserving meaning, structure, and v
 
 Edit the target text so it reads as if a clear human wrote it. Return the edited text, not a critique of it.
 
-Your job is mechanical style cleanup: remove the AI-default voice and tighten the prose. You are not rewriting the argument, restructuring the document, or fact-checking it. Preserve what the author meant and how they ordered it.
+This is mechanical style cleanup: remove the AI-default voice and tighten the prose. Do not rewrite the argument, restructure the document, or fact-check it.
 
 ## Source selection
 
-Use the most specific available source in this order:
-
 1. Explicit source text or `$ARGUMENTS` in the current request.
-2. The most recent substantive draft, answer, pasted block, or document when the user invokes this skill with no new text.
-3. If there is genuinely no text to edit, ask one short sentence for the text to clean up.
+2. With no new text, the most recent substantive draft, answer, pasted block, or document.
+3. If there is genuinely no text to edit, ask in one short sentence for it.
 
 ## Preserve
 
 - Meaning, facts, claims, numbers, names, and citations. Do not add, drop, or soften substance.
-- The author's structure and order. Do not reorganize sections, merge paragraphs, or change the argument's shape. Light cuts of filler within a paragraph are fine.
-- The author's voice and register. Match how formal or casual the original is. Plain does not mean flat, blunt, or stripped of personality.
-- Format and markup exactly: headings, lists, code, links, tables, quotes. Strip only leaked or stray markup that was clearly an error.
-- Domain terms of art. See "Keep what is load-bearing" before cutting any flagged word.
+- Structure and order. Do not reorganize sections, merge paragraphs, or change the argument's shape; light filler cuts within a paragraph are fine.
+- Voice and register, formal or casual. Plain does not mean flat, blunt, or stripped of personality, jokes, or considered word choices.
+- Format and markup exactly: headings, lists, code, links, tables, quotes. Strip only stray markup that was clearly an error.
+- Domain terms of art (see "Keep what is load-bearing").
 
-If the text needs real restructuring, fact-checking, or a fresh draft, that is `write-up`, not this skill. Say so rather than silently doing it.
+If the text needs real restructuring, fact-checking, or a fresh draft, say that is `write-up` rather than silently doing it.
 
 ## What to cut and fix
 
-Weight clusters over singletons. One flagged word in a long passage is usually fine. Three decorative ones in a sentence is slop anywhere. Favor the persistent tells over dated ones.
+Weight clusters over singletons: one flagged word in a long passage is usually fine; three decorative ones in a sentence is slop anywhere.
 
-**Inflated vocabulary.** Replace puffed-up words with the plain one. Common offenders, most persistent first: enhance, leverage, utilize, robust, seamless, comprehensive, showcase, underscore, foster, harness, navigate, streamline, empower, elevate, unlock, facilitate, ensure, pivotal, crucial, vital, intricate, nuanced, multifaceted, meticulous, vibrant, holistic, dynamic, transformative, innovative. Borrowed-grandeur nouns: tapestry, landscape, realm, testament, beacon, cornerstone, ecosystem, journey, blueprint, frontier, nexus. Also flag lands, boundary, and drift, subject to the load-bearing tests below. Use plain verbs and nouns: use, build, support, handle, improve, make sure, key, detailed.
+**Inflated vocabulary.** Replace puffed-up words with the plain one. Common offenders, most persistent first: enhance, leverage, utilize, robust, seamless, comprehensive, showcase, underscore, foster, harness, navigate, streamline, empower, elevate, unlock, facilitate, ensure, pivotal, crucial, vital, intricate, nuanced, multifaceted, meticulous, vibrant, holistic, dynamic, transformative, innovative. Borrowed-grandeur nouns: tapestry, landscape, realm, testament, beacon, cornerstone, ecosystem, journey, blueprint, frontier, nexus. Also flag lands, boundary, and drift, subject to the load-bearing tests below. Prefer use, build, support, handle, improve, make sure, key, detailed.
 
 **Filler openers and closers.** Cut throat-clearing and scene-setting: "It's worth noting that", "It's important to note", "When it comes to", "In today's fast-paced world", "In an era where", "At its core", "Needless to say". Cut wrap-up tags: "In conclusion", "In summary", "Overall", "At the end of the day", "The bottom line is". Start with the real first sentence; end on the last real point.
 
@@ -55,31 +53,23 @@ Weight clusters over singletons. One flagged word in a long passage is usually f
 
 ## Keep what is load-bearing
 
-Flagged words are often legitimate technical terms. Do not nuke a word that names a real thing in this text's domain. Before cutting any flagged word, run two tests:
+Flagged words are often legitimate technical terms. Before cutting one, run two tests:
 
 1. Substitution: swap in a plain synonym. If meaning is unchanged, it was decorative, so cut it. If the sentence becomes wrong or vaguer, it is load-bearing, so keep it.
 2. Specificity: is the word naming a defined referent, or dressing up a generic claim? Defined referent stays.
 
-Examples: keep "decision boundary", "domain boundary between services", "model drift", "config drift", "attack surface", "robust standard errors", "threat landscape" in security. Cut "pushing the boundaries", "society drifts toward", "robust solution", "ever-evolving landscape", "leverage our expertise". When unsure, keep the word and move on rather than risk changing meaning.
+Examples: keep "decision boundary", "domain boundary between services", "model drift", "config drift", "attack surface", "robust standard errors", "threat landscape" in security. Cut "pushing the boundaries", "society drifts toward", "robust solution", "ever-evolving landscape", "leverage our expertise". When unsure, keep the word.
 
 ## Do not overcorrect
 
-- Do not chop everything into short choppy sentences. Vary sentence and paragraph length; natural prose is uneven.
+- Do not chop everything into short sentences; natural prose varies sentence and paragraph length.
 - Do not add grammar errors, slang, or fake casualness to seem human.
-- Do not strip the author's real personality, jokes, or considered word choices.
 - Do not introduce new claims or examples to fill space you cut.
 
 ## Output rules
 
-Return only the edited text, in the same format as the source. No preamble, no "here is the edited version", no summary of changes unless the user asks. If the user asks what changed, give a short bulleted list of the categories of edits after the text.
+Return only the edited text, in the source's format: no preamble, no "here is the edited version", no change summary. If the user asks what changed, add a short bulleted list of edit categories after the text.
 
 ## Before replying
 
-Revise once and check:
-
-1. Meaning, facts, structure, and voice match the original.
-2. No inflated vocabulary, filler openers or closers, or AI-tell phrases remain.
-3. No negation flips, tricolon padding, sweeps, or aphorisms remain.
-4. Em dashes, semicolons, and stray colons are gone or converted by function.
-5. Every flagged word that stayed is load-bearing under the substitution test.
-6. The prose reads naturally, with varied rhythm, and is tighter than the original without losing substance.
+Revise once and check that meaning, facts, structure, and voice match the original; no listed tells remain; em dashes, semicolons, and reveal colons are converted by function; every flagged word that stayed passes the substitution test; and the result is tighter without losing substance.
