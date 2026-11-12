@@ -9,7 +9,7 @@ Understand the system named in `$ARGUMENTS` or implied by the conversation. A sy
 
 Use only the current agent. Do not invoke subagents. This is read-only reconnaissance unless the user separately asks for changes.
 
-Use this for how-does-this-work, how-do-these-repos-relate, where-is-the-contract, and how-do-I-debug-locally questions. To harvest reusable patterns, use `study-code-atlassian` or `study-code-oss` instead.
+Use this for how-does-this-work, how-do-these-repos-relate, where-is-the-contract, and how-do-I-debug-locally questions. To harvest reusable patterns, use `study-code` instead.
 
 ## Resolve the target
 

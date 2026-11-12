@@ -77,7 +77,6 @@ Load the narrowest companion skill:
 - Code and PRs: `../twg-engineering-work/SKILL.md`.
 - Stale work: `../twg-jira-resolve-merged-work/SKILL.md`.
 - Incidents: `../twg-operational-health/SKILL.md`.
-- Benchmarks: `../twg-bench-lite/SKILL.md` for requested read-only A/B comparisons.
 - Review context: `../twg-code-review/SKILL.md` for missing company context in an existing review.
   Keep the chosen review workflow; do not start a second review or require a report.
 - Artifacts: `../twg-artifacts/SKILL.md` for prior Artifact IDs, or to share or update one.

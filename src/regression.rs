@@ -227,13 +227,6 @@ fn test_mutating_skill_write_boundaries() -> Result<()> {
             ],
         ),
         (
-            "diagnose",
-            &[
-                "If the user asked for a fix",
-                "Otherwise leave product code and tests unchanged",
-            ],
-        ),
-        (
             "prove-check",
             &[
                 "Restore the exact pre-proof state",
@@ -294,11 +287,7 @@ fn test_deep_review_skills_require_portable_managed_reviewer_contract() -> Resul
     let config_root = config_root_from_exe()?;
     let skills_root = config_root.join("skills");
 
-    for skill_name in [
-        "architecture-review-deep",
-        "design-review-deep",
-        "review-deep",
-    ] {
+    for skill_name in ["design-review-deep", "review-deep"] {
         let skill_path = skills_root.join(skill_name).join("SKILL.md");
         let text = fs::read_to_string(&skill_path).map_err(|err| {
             format!(
@@ -438,28 +427,29 @@ fn test_custom_skills_reject_accidental_environment_coupling() -> Result<()> {
 
 fn test_study_skills_resolve_portable_collection_roots() -> Result<()> {
     let config_root = config_root_from_exe()?;
-    for skill_name in ["study-code-oss", "study-code-atlassian"] {
-        let skill_path = config_root.join("skills").join(skill_name).join("SKILL.md");
-        let text = fs::read_to_string(&skill_path)
-            .map_err(|err| format!("{}: cannot read study skill: {err}", skill_path.display()))?;
+    let skill_path = config_root
+        .join("skills")
+        .join("study-code")
+        .join("SKILL.md");
+    let text = fs::read_to_string(&skill_path)
+        .map_err(|err| format!("{}: cannot read study skill: {err}", skill_path.display()))?;
 
-        for expected in [
-            "Resolve candidate repositories in this order:",
-            "1. Explicit repository paths or names",
-            "2. The active workspace or current repository",
-            "3. Locally evidenced or configured bounded collection roots",
-            "4. Other bounded source collections explicitly exposed by the current environment.",
-            "Do not assume a named home-directory layout or recursively crawl the home directory.",
-            "If no bounded candidate location can be resolved, ask for",
-            "up to seven high-quality patterns",
-            "One or two is correct when only one or two survive the filter",
-        ] {
-            if !text.contains(expected) {
-                return Err(format!(
-                    "{}: study skills must resolve repository collections portably; missing {expected:?}",
-                    skill_path.display()
-                ));
-            }
+    for expected in [
+        "Resolve candidate repositories in this order:",
+        "1. Explicit repository paths or names",
+        "2. The active workspace or current repository",
+        "3. Locally evidenced or configured bounded collection roots",
+        "4. Other bounded source collections explicitly exposed by the current environment.",
+        "Do not assume a named home-directory layout or recursively crawl the home directory.",
+        "If no bounded candidate location can be resolved, ask for",
+        "up to seven high-quality patterns",
+        "One or two is correct when only one or two survive the filter",
+    ] {
+        if !text.contains(expected) {
+            return Err(format!(
+                "{}: study skill must resolve repository collections portably; missing {expected:?}",
+                skill_path.display()
+            ));
         }
     }
 
