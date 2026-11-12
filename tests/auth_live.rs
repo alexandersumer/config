@@ -83,11 +83,12 @@ fn real_slauth_preflight_cache_reuse_and_ttl_policy() {
 
 #[test]
 #[ignore = "requires real bb/TWG/Atlas installations, shared caches and network; never renews"]
-fn real_work_cache_checks_all_eight_targets_without_renewal() {
+fn real_work_cache_checks_all_nine_targets_without_renewal() {
     let checked = result(&["auth", "preflight", "--check", "--json"], 0);
     let targets = checked["targets"].as_array().unwrap();
-    assert_eq!(targets.len(), 8);
+    assert_eq!(targets.len(), 9);
     assert!(targets.iter().all(|t| t["status"] == "valid"));
+    assert!(targets.iter().any(|t| t["target"] == "micros"));
     for audience in [
         "splunk.paas-inf.net",
         "risk-mitigation-service",
@@ -100,7 +101,7 @@ fn real_work_cache_checks_all_eight_targets_without_renewal() {
             .unwrap()
             .contains(&format!(":{audience}:"))));
     }
-    println!("Real work profile: all eight current provider credentials verified without explicit renewal");
+    println!("Real work profile: all nine current provider credentials verified without explicit renewal");
 }
 
 #[test]

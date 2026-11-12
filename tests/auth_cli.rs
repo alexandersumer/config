@@ -198,7 +198,7 @@ fn valid_cache_reuse_is_read_only_and_json_never_contains_credentials() {
         assert_eq!(r["targets"][2]["status"], "valid");
         assert_eq!(r["duration_guaranteed"], false);
     }
-    assert_eq!(f.calls().len(), 18);
+    assert_eq!(f.calls().len(), 20);
     assert!(f.calls().iter().all(|c| c[1][1] == "status"
         || c[1][0] == "workspace"
         || c[1][0] == "doctor"
@@ -234,18 +234,18 @@ fn all_missing_renewable_credentials_are_refreshed_once_and_normal_cache_is_rech
             .iter()
             .filter(|c| c[0] == "atlas" && c[1].as_array().unwrap().contains(&json!("--force")))
             .count(),
-        5
+        6
     );
     assert_eq!(
         calls
             .iter()
             .filter(|c| c[0] == "atlas" && c[1].as_array().unwrap().contains(&json!("--cached")))
             .count(),
-        10
+        13
     );
     let before = calls.len();
     f.run(&[], 0);
-    assert_eq!(f.calls().len() - before, 9);
+    assert_eq!(f.calls().len() - before, 10);
 }
 #[test]
 fn silent_oauth_refresh_succeeds_without_browser_in_noninteractive_mode() {
@@ -269,7 +269,7 @@ fn check_only_never_makes_any_refresh_or_login_call() {
     let f = Fixture::new(json!({"bb_valid":false,"twg_valid":false,"atlas_valid":false}));
     let r = f.run(&["--check"], 1);
     assert_eq!(r["status"], "blocked");
-    assert_eq!(f.calls().len(), 8);
+    assert_eq!(f.calls().len(), 9);
 }
 #[test]
 fn noninteractive_blocks_mfa_instead_of_launching_a_browser() {
@@ -300,7 +300,7 @@ fn malformed_permission_and_outage_errors_do_not_trigger_auth_refresh() {
     for mode in ["malformed", "permission", "outage"] {
         let f = Fixture::new(json!({"mode":mode}));
         let r = f.run(&[], 1);
-        assert_eq!(f.calls().len(), 8);
+        assert_eq!(f.calls().len(), 9);
         assert!(r["targets"]
             .as_array()
             .unwrap()
@@ -888,9 +888,21 @@ fn default_preflight_forces_every_renewable_provider_once_on_every_invocation() 
             .as_array()
             .unwrap()
             .iter()
+            .any(|t| t["target"] == "micros" && t["status"] == "refreshed"));
+        assert!(result["targets"]
+            .as_array()
+            .unwrap()
+            .iter()
             .all(|v| v["status"] == "refreshed"
                 || (v["target"] == "twg-bitbucket" && v["status"] == "valid")));
     }
+    assert_eq!(
+        f.calls()
+            .iter()
+            .filter(|c| c[1] == json!(["micros", "login"]))
+            .count(),
+        2
+    );
     for provider in ["bb", "twg", "atlas"] {
         let calls = f.calls();
         let renewals: Vec<_> = calls
@@ -904,7 +916,7 @@ fn default_preflight_forces_every_renewable_provider_once_on_every_invocation() 
             .collect();
         assert_eq!(
             renewals.len(),
-            if provider == "atlas" { 10 } else { 2 },
+            if provider == "atlas" { 14 } else { 2 },
             "{provider} must renew exactly once per invocation"
         );
     }
@@ -935,7 +947,7 @@ fn forced_preflight_does_not_hide_failed_renewal_behind_valid_cache() {
             .iter()
             .filter(|c| c[0] == "atlas" && c[1].as_array().unwrap().contains(&json!("--force")))
             .count(),
-        5
+        6
     );
 }
 #[test]
@@ -1086,13 +1098,14 @@ fn work_covers_recent_service_dependencies_with_exact_descriptors() {
             "slauth:prod:mlp-config::mfa=false",
             "slauth:prod:phobos::mfa=false",
             "twg-bitbucket",
+            "micros",
         ]
     );
     let note = r["targets"][1]["note"].as_str().unwrap();
     assert!(note.contains("TWG Bitbucket") && note.contains("separately"));
     let calls = f.calls();
     let atlas: Vec<_> = calls.iter().filter(|c| c[0] == "atlas").collect();
-    assert_eq!(atlas.len(), 5);
+    assert_eq!(atlas.len(), 6);
     for call in atlas {
         let args = call[1].as_array().unwrap();
         let audience = args[3].as_str().unwrap();
@@ -1102,7 +1115,8 @@ fn work_covers_recent_service_dependencies_with_exact_descriptors() {
             [
                 "splunk.paas-inf.net",
                 "risk-mitigation-service",
-                "pollinator"
+                "pollinator",
+                "micros-server"
             ]
             .contains(&audience)
         );
@@ -1306,7 +1320,7 @@ fn provider_checks_overlap_and_completion_order_does_not_change_report_order() {
         .iter()
         .map(|v| v["target"].as_str().unwrap())
         .collect();
-    assert_eq!(labels.len(), 8);
+    assert_eq!(labels.len(), 9);
     assert_eq!(&labels[..2], &["bitbucket:active", "twg"]);
     assert!(labels[2].contains("splunk.paas-inf.net"));
     assert!(labels[6].contains("phobos"));

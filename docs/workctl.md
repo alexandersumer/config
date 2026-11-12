@@ -78,10 +78,11 @@ workctl auth exec --profile code -- bb pr list
 
 | Profile | Credentials |
 | --- | --- |
-| `work` (default) | `code` + `logs` + `services` (eight targets) |
+| `work` (default) | `code` + `logs` + `services` + `micros` (nine targets) |
 | `code` | Bitbucket CLI OAuth, TWG OAuth, and TWG Bitbucket token |
 | `bitbucket`, `twg`, `twg-bitbucket` | One selected client credential |
 | `runtime` | Default-cache Kerberos TGT and principal |
+| `micros` | Production `micros-server` MFA cache and Micros user login |
 | `logs` | Production Splunk |
 | `risk` | Risk Mitigation SLAuth, with MFA |
 | `checks` | Pollinator SLAuth, with MFA |

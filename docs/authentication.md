@@ -26,21 +26,21 @@ workctl auth exec --profile code -- bb pr list
 
 ## Choose a profile
 
-The built-in `work` profile contains eight independent credential targets:
+The built-in `work` profile contains nine independent credential targets:
 
 | Profile | Targets | SLAuth environment, groups, MFA |
 | --- | --- | --- |
 | `code` | Bitbucket CLI OAuth, TWG OAuth, and TWG Bitbucket token | Not SLAuth |
 | `bitbucket` / `twg` / `twg-bitbucket` | One corresponding credential | Not SLAuth |
 | `runtime` | Default-cache Kerberos TGT and principal | Not SLAuth |
-| `micros` (opt-in) | `micros-server` MFA cache + Micros user login | `prod`, no groups, MFA |
+| `micros` | `micros-server` MFA cache + Micros user login | `prod`, no groups, MFA |
 | `logs` | `splunk.paas-inf.net` | `prod`, `atlassian-all`, MFA |
 | `risk` | `risk-mitigation-service` | `prod`, no groups, MFA |
 | `checks` | `pollinator` | `prod`, no groups, MFA |
 | `config` | `mlp-config` | `prod`, no groups, no MFA requirement |
 | `metrics` | `phobos` | `prod`, no groups, no MFA requirement |
 | `services` | `risk` + `checks` + `config` + `metrics` | Exact descriptors above |
-| `work` (default) | `code` + `logs` + `services` | Exact descriptors above |
+| `work` (default) | `code` + `logs` + `services` + `micros` | Exact descriptors above |
 
 Select the narrowest profile for the work. These are explicit requirements, not
 guesses about other running chats. For example, use `--profile risk` before a risk
@@ -53,7 +53,7 @@ order; every requested profile is validated before any provider call. With
 
 ```sh
 workctl auth preflight --profile work --include-profile runtime --reuse-valid
-workctl auth preflight --profile work --include-profile micros --reuse-valid
+workctl auth preflight --reuse-valid
 workctl auth exec --profile code --include-profile runtime --reuse-valid -- COMMAND
 ```
 
@@ -69,10 +69,11 @@ Nebulae endpoint access, ASAP signing, or tenant/user-context authorization.
 Splunk issuance also warms the underlying Atlas login, but does not populate the
 other audience-specific caches or refresh service-signed runtime credentials.
 
-### Micros (opt-in)
+### Micros
 
-Use `--profile micros` or add `--include-profile micros` when Micros is needed.
-It is not included in `work` or `services`. Normal renewal first forces production
+Bare `workctl auth preflight` includes Micros through the default `work` profile.
+Use `--profile micros` for Micros alone; `services` stays scoped to its four
+service audiences. Normal renewal first forces production
 `micros-server` issuance with MFA, verifies the cached audience and lifetime,
 then runs `atlas micros login` and checks the cache again. Login failure remains
 failure even if token issuance succeeded. Micros login itself may reuse a token,

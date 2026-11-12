@@ -259,7 +259,7 @@ pub(crate) fn targets(options: &Options) -> Result<Vec<Target>, String> {
             "config" => vec![config],
             "metrics" => vec![metrics],
             "services" => services,
-            "work" => code.into_iter().chain(logs).chain(services).chain([Target::TwgBitbucket {}]).collect(),
+            "work" => code.into_iter().chain(logs).chain(services).chain([Target::TwgBitbucket {}, Target::Micros {}]).collect(),
             _ => {
                 return Err(
                     "Unknown built-in auth profile; use work, code, bitbucket, twg, twg-bitbucket, runtime, micros, logs, services, risk, checks, config, metrics, or --config".into(),

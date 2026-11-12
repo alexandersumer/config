@@ -35,11 +35,13 @@ workspace. Prefer `--json` for structured results.
 Profiles: `code` = Bitbucket CLI + TWG OAuth + TWG Bitbucket token; `logs` = production Splunk;
 `risk` = Risk Mitigation (MFA); `checks` = Pollinator (MFA); `config` = MLP Config;
 `metrics` = Phobos; `services` = risk + checks + config + metrics;
-`work` = code + logs + services. `bitbucket`, `twg`, and `twg-bitbucket` select
+`work` = code + logs + services + micros. `bitbucket`, `twg`, and `twg-bitbucket` select
 one credential; `runtime` checks the default-cache Kerberos TGT and principal.
-`micros` is opt-in: production `micros-server` MFA cache checks, plus forced
-issuance and `atlas micros login` on renewal. Add `--include-profile micros`
-when needed. Check/reuse proves cache readiness only, not Micros server access,
+`micros` is included in the default `work` profile: production `micros-server`
+MFA cache checks, plus forced
+issuance and `atlas micros login` on renewal. Bare `workctl auth preflight`
+therefore includes Micros; use `--profile micros` for Micros alone. Check/reuse
+proves cache readiness only, not Micros server access,
 selected identity, or service permissions. Noninteractive mode never starts
 Micros issuance/login. Micros endpoint/perimeter/token/header overrides must be
 unset; `SLAUTH_ENV` must be unset or `prod`.
