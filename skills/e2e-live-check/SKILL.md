@@ -11,31 +11,31 @@ Operate `$ARGUMENTS` or the current effective diff through a real running system
 
 ## Choose the route
 
-Read the effective diff, applicable repo instructions, and the code, scripts, runbooks, or tests that establish the public boundary, startup, dependencies, auth/context, readiness, and cleanup. Tests and CI files may explain the runtime but are not the live-check proof. Verify ambiguous script names or stale docs against their implementation.
+Read the effective diff, applicable repo instructions, and the code, scripts, or runbooks that establish the public boundary, startup, dependencies, auth/context, readiness, and cleanup. Tests and CI files may explain the runtime but are not the live-check proof. Verify ambiguous script names or stale docs against their implementation.
 
-Use the client surface that matches the behavior: browser for UI, CLI for operator commands, protocol client for protocol behavior, or SDK/HTTP for the product API. Prefer repo-owned clients when they handle auth, routing, headers, service proxies, or tenant context. Preserve required values, defaults, and intentional omissions; never invent deployed headers or identifiers.
+Use the client surface that matches the behavior: browser for UI, CLI for operator commands, protocol client for protocol behavior, SDK/HTTP for the product API. Prefer repo-owned clients when they handle auth, routing, headers, service proxies, or tenant context. Preserve required values, defaults, and intentional omissions; never invent deployed headers or identifiers.
 
-Prefer an already-running correct local system, then a repo-supported local real stack. Use dev/staging when local cannot reproduce the relevant deployed behavior, such as auth, networking, image wiring, or scheduling. Production access requires explicit authorization already present in the task or obtained for the exact action. Shared-resource mutations need a bounded target and cleanup or rollback; avoid touching unrelated resources.
+Prefer an already-running correct local system, then a repo-supported local real stack. Use dev/staging only when local cannot reproduce the relevant deployed behavior, such as auth, networking, image wiring, or scheduling. Production access requires explicit authorization already present in the task or obtained for the exact action. Shared-resource mutations need a bounded target and cleanup or rollback; do not touch unrelated resources.
 
-During discovery, use bounded help/version/status calls. Before starting the selected route, briefly state the behavior, public boundary, environment and decisive sources, expected outcome, highest-risk edge probe, and cleanup. Include material unknowns or missing authorization. This is not a second approval step for work already authorized.
+Use bounded help/version/status calls for discovery. Before starting the route, briefly state the behavior, public boundary, environment and decisive sources, expected outcome, highest-risk edge probe, cleanup, and material unknowns or missing authorization. This is not a second approval step for work already authorized.
 
 ## Operate and verify
 
-1. Start or connect using the verified route. Track process IDs, ports, URLs, created resources, and log locations needed for cleanup. Confirm tools, auth, and the intended boundary are reachable.
-2. Prove readiness with a relevant probe. A process start or unrelated healthcheck does not prove the changed path is ready; avoid broad sleeps.
+1. Start or connect using the verified route. Track process IDs, ports, URLs, created resources, and log locations needed for cleanup.
+2. Prove readiness with a probe of the changed path; a process start or unrelated healthcheck is insufficient. Avoid broad sleeps.
 3. Drive the main user/operator scenario through the public boundary and capture its observable outcome: response, file/database/object state, emitted event, UI snapshot, log, or protocol transcript.
-4. Exercise the highest-risk meaningful edge or negative case through that same boundary when safe. Consider changed input validation, not-found behavior, auth/config boundaries, repeated calls, persistence, routing, concurrency, timeout, retries, or partial failures. Explain meaningful omissions rather than claiming exhaustive coverage.
-5. Check post-operation health or invariants when the flow leaves state behind. If the check exposes an in-scope product defect and a fix is authorized, fix it and rerun the affected scenario and edge probe. Otherwise report the defect with evidence.
-6. Clean up resources and processes you created. Preserve useful artifacts and report anything intentionally left running. Do not stop pre-existing user services as cleanup.
+4. When safe, exercise the highest-risk edge or negative case from the changed behavior through the same boundary. Explain meaningful omissions rather than claiming exhaustive coverage.
+5. Check post-operation health or invariants when the flow leaves state behind. If this exposes an in-scope product defect and a fix is authorized, fix it and rerun the affected scenario and edge probe; otherwise report the defect with evidence.
+6. Clean up resources and processes you created, preserve useful artifacts, and report anything intentionally left running. Do not stop pre-existing user services as cleanup.
 
-Reuse evidence only under the proof policy for the same current diff, public boundary, runtime/resource, inputs, state, and expected observations. When liveness matters, run the cheapest current readiness/status probe. Reused full-flow evidence also needs cleanup evidence or an account of remaining state.
+Reuse evidence only for the same current diff, public boundary, runtime/resource, inputs, state, and expected observations. When liveness matters, run the cheapest current readiness/status probe. Reused full-flow evidence also needs cleanup evidence or an account of remaining state.
 
 Do not replace the changed path with mocks, fake adapters, internal helpers, test-only endpoints, bypass flags, unauthenticated shortcuts, or a test-lane run. Do not substitute local-only evidence for a contract requiring deployed behavior.
 
 ## Resolve obstacles
 
-Inspect logs, readiness, and config; repair in-scope setup problems. Use `auth-preflight` for missing or expired access and command approval for sandbox restrictions, then resume the scenario. A timeout or unavailable client does not prove the capability is unavailable; try a supported equivalent route without changing identity or weakening the contract. Request a necessary human action when discovered and continue independent work while waiting. Stop only the affected path when no safe useful next action remains; preserve its failed or unverified status and finish the remaining authorized work.
+Repair in-scope setup problems from logs, readiness, and config. Use `auth-preflight` for missing or expired access and command approval for sandbox restrictions, then resume. A timeout or unavailable client does not prove the capability is unavailable; try a supported equivalent route without changing identity or weakening the contract. Request a necessary human action when discovered and continue independent work while waiting. Stop only the affected path when no safe useful next action remains; keep its failed or unverified status and finish the remaining authorized work.
 
 ## Finish
 
-Completion requires the real boundary and environment, readiness, observed main and selected edge outcomes, applicable post-operation checks, and cleanup. Report the route and decisive sources, commands and outcomes, new or reused evidence, edge omissions, artifacts, fixes, cleanup, and exact remaining blockers. Keep the report proportional to the work and limit claims to the checked behavior.
+Completion requires the real boundary and environment, readiness, observed main and selected edge outcomes, applicable post-operation checks, and cleanup. Report the route and decisive sources, commands and outcomes, new or reused evidence, edge omissions, artifacts, fixes, cleanup, and exact remaining blockers, proportional to the work and limited to the checked behavior.
