@@ -184,8 +184,10 @@ Git directory. It does not change refs, tracked files, or worktree registrations
 Publication checks access the remote and use automatically removed temporary object
 stores. The coordination file remains in place so concurrent callers lock the same inode;
 run while repositories are otherwise idle. Cancellation/deadlines terminate process
-groups before locks are released. Descendants inherit the lock so forced supervisor
-termination cannot release it while they run. Interrupted Git writes may leave native
+groups before locks are released. Workers inherit the lock so forced supervisor
+termination cannot release it while they run. Workers mark the descriptor close-on-exec
+before launching Git; detached hooks and credential helpers cannot keep a completed
+operation busy. Interrupted Git writes may leave native
 locks requiring investigation; workctl never removes those locks.
 
 ### Cleanup concurrency and benchmarks

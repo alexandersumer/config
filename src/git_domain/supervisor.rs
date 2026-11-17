@@ -327,8 +327,18 @@ fn run_inner(options: &Options, selection: Selection, started: Instant) -> Resul
                 } else {
                     execute(options, repo, &log, &mut progress)
                 };
-                let (code, attempts, detail) =
-                    outcome.unwrap_or_else(|e| (1, progress.attempts, e));
+                let (code, attempts, detail) = outcome.unwrap_or_else(|e| {
+                    // execute creates the log before acquiring coordination.
+                    // Preserve supervisor failures even when that file already
+                    // exists (and preserve any earlier attempt diagnostics).
+                    let _ = OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .mode(0o600)
+                        .open(&log)
+                        .and_then(|mut output| writeln!(output, "Outcome: {e}"));
+                    (1, progress.attempts, e)
+                });
                 if !log.exists() {
                     let _ = fs::write(&log, format!("{detail}\n"));
                 }

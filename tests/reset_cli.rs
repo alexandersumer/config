@@ -742,6 +742,132 @@ fn fetch_timeout_cancellation_and_normal_completion_reap_descendants() {
 }
 
 #[test]
+fn detached_checkout_hook_cannot_keep_a_completed_reset_busy() {
+    let f = Fixture::new();
+    let ready = f.temp.path().join("hook-ready");
+    let release = f.temp.path().join("hook-release");
+    let done = f.temp.path().join("hook-done");
+    struct ReleaseHook(PathBuf, PathBuf);
+    impl Drop for ReleaseHook {
+        fn drop(&mut self) {
+            let _ = fs::write(&self.0, "release");
+            let until = Instant::now() + Duration::from_secs(5);
+            while !self.1.exists() && Instant::now() < until {
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
+    }
+    let _cleanup = ReleaseHook(release.clone(), done.clone());
+    let hook = f.repo.join(".git/hooks/post-checkout");
+    fs::write(
+        &hook,
+        r#"#!/usr/bin/env python3
+import os, time
+ready = os.environ['PROBE_READY']
+if not os.path.exists(ready):
+    pid = os.fork()
+    if pid == 0:
+        os.setsid()
+        devnull = os.open('/dev/null', os.O_RDWR)
+        for fd in (0, 1, 2): os.dup2(devnull, fd)
+        with open(ready, 'w') as f: f.write(str(os.getpid()))
+        deadline = time.monotonic() + 30
+        while not os.path.exists(os.environ['PROBE_RELEASE']) and time.monotonic() < deadline:
+            time.sleep(0.01)
+        os.closerange(3, 65536)
+        with open(os.environ['PROBE_DONE'], 'w') as f: f.write('done')
+        os._exit(0)
+    deadline = time.monotonic() + 5
+    while not os.path.exists(ready):
+        if time.monotonic() > deadline: raise RuntimeError('hook did not start')
+        time.sleep(0.01)
+"#,
+    )
+    .unwrap();
+    fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+    let run = || {
+        f.cli(&f.repo, &[])
+            .env("PROBE_READY", &ready)
+            .env("PROBE_RELEASE", &release)
+            .env("PROBE_DONE", &done)
+            .output()
+            .unwrap()
+    };
+    success(&run());
+    wait_marker(&ready);
+    let pid: i32 = fs::read_to_string(&ready).unwrap().parse().unwrap();
+    assert_eq!(unsafe { libc::kill(pid, 0) }, 0, "hook must still be alive");
+    assert!(!done.exists());
+    assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.new);
+    // Repeat while the detached helper remains alive: success must release
+    // coordination without unlinking the lock or terminating unrelated helpers.
+    success(&run());
+    assert_eq!(unsafe { libc::kill(pid, 0) }, 0);
+    assert!(!done.exists());
+    assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.new);
+}
+
+#[test]
+fn killed_supervisor_leaves_active_worker_holding_repository_lock() {
+    use std::os::fd::AsRawFd;
+    let f = Fixture::new();
+    let marker = f.temp.path().join("fetch-started");
+    let release = f.temp.path().join("fetch-release");
+    let dir = f.shim(&format!(
+        "for arg in \"$@\"; do if [ \"$arg\" = fetch ]; then echo $$ > '{}'; n=0; while [ ! -e '{}' ] && [ \"$n\" -lt 600 ]; do sleep 0.05; n=$((n+1)); done; fi; done",
+        marker.display(), release.display()
+    ));
+    struct ReleaseFetch(PathBuf);
+    impl Drop for ReleaseFetch {
+        fn drop(&mut self) {
+            let _ = fs::write(&self.0, "release");
+        }
+    }
+    let _cleanup = ReleaseFetch(release.clone());
+    let mut cmd = f.cli(&f.repo, &[]);
+    f.with_shim(&mut cmd, &dir);
+    let mut child = cmd
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    wait_marker(&marker);
+    child.kill().unwrap();
+    assert!(!child.wait().unwrap().success());
+    // The worker must retain the supervisor's lock even though Git no longer
+    // inherits it. A second reset must not mutate this repository concurrently.
+    let blocked = f.run(&f.repo, &[]);
+    failure(&blocked, "busy");
+    let blocked_records = records(&blocked);
+    let diagnostic = fs::read_to_string(blocked_records[0]["log"].as_str().unwrap()).unwrap();
+    assert!(
+        diagnostic.contains("Repository is busy"),
+        "the advertised failure log must explain the failure: {diagnostic:?}"
+    );
+    assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.old);
+    fs::write(&release, "release").unwrap();
+    let lock = fs::File::open(f.repo.join(".git/repo-batch.lock")).unwrap();
+    let until = Instant::now() + Duration::from_secs(10);
+    loop {
+        if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+            break;
+        }
+        assert_eq!(
+            std::io::Error::last_os_error().raw_os_error(),
+            Some(libc::EWOULDBLOCK)
+        );
+        assert!(
+            Instant::now() < until,
+            "worker did not release coordination"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+    drop(lock);
+    assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.new);
+    success(&f.run(&f.repo, &[]));
+}
+
+#[test]
 fn overlapping_invocations_refuse_busy_repository() {
     let f = Fixture::new();
     let marker = f.temp.path().join("started");

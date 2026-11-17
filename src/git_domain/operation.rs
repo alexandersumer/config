@@ -499,6 +499,17 @@ pub(super) fn worker(args: &[OsString]) -> u8 {
     // Adopt the inherited descriptor for the worker lifetime and validate that
     // it protects this primary checkout, not a caller-supplied arbitrary file.
     let lock = unsafe { fs::File::from_raw_fd(inherited_lock.unwrap()) };
+    // Only this worker inherits coordination from the supervisor. Git hooks,
+    // credential helpers and other detached descendants can outlive a reset;
+    // letting them inherit it makes later operations spuriously report busy.
+    // Set this before Git::new, which already launches a Git subprocess.
+    if unsafe { libc::fcntl(inherited_lock.unwrap(), libc::F_SETFD, libc::FD_CLOEXEC) } == -1 {
+        eprintln!(
+            "Cannot isolate repository coordination lock: {}",
+            std::io::Error::last_os_error()
+        );
+        return 1;
+    }
     let git = match Git::new(cwd) {
         Ok(git) => git,
         Err(e) => {
