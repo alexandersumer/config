@@ -158,7 +158,7 @@ fn group_is_inert(group: u32) -> Result<bool, String> {
         if entry.file_name().to_string_lossy().parse::<u32>().is_err() {
             continue;
         }
-        let stat = match std::fs::read_to_string(entry.path().join("stat")) {
+        let stat = match std::fs::read(entry.path().join("stat")) {
             Ok(stat) => stat,
             Err(e)
                 if e.kind() == io::ErrorKind::NotFound || e.raw_os_error() == Some(libc::ESRCH) =>
@@ -167,25 +167,40 @@ fn group_is_inert(group: u32) -> Result<bool, String> {
             }
             Err(e) => return Err(format!("cannot inspect worker group member: {e}")),
         };
-        // comm may contain spaces or parentheses; the fields follow its last ')'.
-        let fields = stat
-            .rsplit_once(") ")
-            .ok_or("invalid process table record")?
-            .1
-            .split_whitespace()
-            .take(3)
-            .collect::<Vec<_>>();
-        if fields.len() != 3 {
-            return Err("incomplete process table record".into());
-        }
-        let pgrp = fields[2]
-            .parse::<u32>()
-            .map_err(|_| "invalid process group")?;
-        if pgrp == group && !matches!(fields[0], "Z" | "X") {
+        if stat_has_live_group_member(&stat, group)? {
             return Ok(false);
         }
     }
     Ok(true)
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn stat_has_live_group_member(stat: &[u8], group: u32) -> Result<bool, String> {
+    // comm is arbitrary bytes and may contain spaces, newlines or parentheses.
+    // Only the numeric fields after its final delimiter have a text encoding.
+    let delimiter = stat
+        .windows(2)
+        .rposition(|bytes| bytes == b") ")
+        .ok_or("invalid process table record")?
+        + 2;
+    let mut fields = stat[delimiter..]
+        .split(|byte| byte.is_ascii_whitespace())
+        .filter(|field| !field.is_empty());
+    let (Some(state), Some(_ppid), Some(pgrp)) = (fields.next(), fields.next(), fields.next())
+    else {
+        return Err("incomplete process table record".into());
+    };
+    let pgrp = std::str::from_utf8(pgrp)
+        .map_err(|_| "invalid process group")?
+        .parse::<i32>()
+        .map_err(|_| "invalid process group")?;
+    // do_task_stat leaves pgid=-1 when lock_task_sighand fails for an exiting
+    // task. Its state was sampled earlier, so it need not yet say Z or X.
+    match pgrp {
+        -1 => Ok(false),
+        0.. => Ok(pgrp as u32 == group && !matches!(state, b"Z" | b"X")),
+        _ => Err("invalid process group".into()),
+    }
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
@@ -317,6 +332,44 @@ fn capture_inner(
 mod group_tests {
     use super::*;
     use std::os::unix::process::CommandExt;
+
+    #[test]
+    fn proc_stat_accepts_exiting_tasks() {
+        // Linux initializes pgid to -1 and leaves it there when an exiting
+        // task no longer has a sighand. Its earlier state sample may be live.
+        assert_eq!(
+            stat_has_live_group_member(b"42 (sh) R 1 -1 -1 0", 42),
+            Ok(false)
+        );
+    }
+
+    #[test]
+    fn proc_stat_accepts_arbitrary_command_bytes_and_rejects_invalid_fields() {
+        assert_eq!(
+            stat_has_live_group_member(b"42 (\xff ) name) S 1 42 42 0", 42),
+            Ok(true)
+        );
+        assert_eq!(
+            stat_has_live_group_member(b"42 (sh) Z 1 42 42 0", 42),
+            Ok(false)
+        );
+        assert_eq!(
+            stat_has_live_group_member(b"42 (sh) X 1 42 42 0", 42),
+            Ok(false)
+        );
+        assert_eq!(
+            stat_has_live_group_member(b"42 (sh) S 1 43 43 0", 42),
+            Ok(false)
+        );
+        for invalid in [
+            b"broken".as_slice(),
+            b"42 (sh) S 1",
+            b"42 (sh) S 1 nope",
+            b"42 (sh) S 1 -2",
+        ] {
+            assert!(stat_has_live_group_member(invalid, 42).is_err());
+        }
+    }
 
     #[test]
     fn stop_group_stops_members_forked_while_the_group_is_signalled() {
