@@ -579,6 +579,7 @@ mod tests {
         for text in [
             "HTTP/2 401",
             "Authentication failed: Connection reset",
+            "could not read Password: Connection reset",
             "cannot lock ref",
             "refusing reset; Connection reset",
         ] {

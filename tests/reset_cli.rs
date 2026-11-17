@@ -982,8 +982,14 @@ fn remote_access_diagnostics_redact_credentials_at_resolution_and_fetch() {
         let f = Fixture::new();
         let url = "https://test-user:private-password@bitbucket.org/workspace/repository.git?token=private-token";
         let count = f.temp.path().join("denials");
+        let denial = if stage == "ls-remote" {
+            format!("fatal: could not read Password for '{url}': terminal prompts disabled")
+        } else {
+            "You may not have access to this repository or it no longer exists in this workspace."
+                .to_owned()
+        };
         let script = format!(
-            "for arg in \"$@\"; do\nif [ \"$arg\" = get-url ]; then echo '{url}'; exit 0; fi\nif [ \"$arg\" = {stage} ]; then echo denied >> '{}'; echo 'You may not have access to this repository or it no longer exists in this workspace.' >&2; echo 'fatal: Could not read from remote repository.' >&2; exit 128; fi\ndone",
+            "for arg in \"$@\"; do\nif [ \"$arg\" = get-url ]; then echo '{url}'; exit 0; fi\nif [ \"$arg\" = {stage} ]; then echo denied >> '{}'; echo \"{denial}\" >&2; echo 'fatal: Could not read from remote repository.' >&2; exit 128; fi\ndone",
             count.display()
         );
         let dir = f.shim(&script);
@@ -994,6 +1000,7 @@ fn remote_access_diagnostics_redact_credentials_at_resolution_and_fetch() {
         let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
         let row = &result["results"][0];
         assert_eq!(row["failure_kind"], "remote_unavailable");
+        assert_eq!(row["next_step"]["action"], "verify_remote_access");
         assert_eq!(row["attempts"], 1);
         assert_eq!(fs::read_to_string(count).unwrap().lines().count(), 1);
         let log = fs::read_to_string(row["log"].as_str().unwrap()).unwrap();
