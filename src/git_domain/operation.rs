@@ -1,11 +1,14 @@
 //! One operation, used by every selected primary checkout.
 use super::git::{self, Git};
-use super::status::Status;
+use super::status::{Checkout, Status};
 use std::collections::BTreeSet;
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::os::fd::FromRawFd;
-use std::os::unix::{ffi::OsStringExt, fs::MetadataExt};
+use std::os::unix::{
+    ffi::{OsStrExt, OsStringExt},
+    fs::MetadataExt,
+};
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -40,17 +43,43 @@ impl Operation {
         Ok(())
     }
     fn clean(&self) -> Result<(), String> {
-        for entry in self
-            .git
-            .call(&["ls-files", "-v", "-z"])?
-            .split(|b| *b == 0)
-            .filter(|entry| !entry.is_empty())
-        {
-            if entry[0].is_ascii_lowercase() || entry[0] == b'S' {
-                return Err(format!(
-                    "Tracked path has assume-unchanged or skip-worktree set: {}; refusing reset",
-                    super::display(OsString::from_vec(entry[2..].to_vec()))
-                ));
+        let mut sparse_paths = Vec::new();
+        let masked = |path: &[u8]| {
+            format!(
+                "Tracked path has assume-unchanged or skip-worktree set: {}; refusing reset",
+                super::display(OsString::from_vec(path.to_vec()))
+            )
+        };
+        let entries = self.git.call(&["ls-files", "-v", "-z"])?;
+        for entry in entries.split(|b| *b == 0).filter(|entry| !entry.is_empty()) {
+            let path = entry
+                .get(2..)
+                .filter(|path| !path.is_empty())
+                .ok_or("Invalid Git index listing; refusing reset")?;
+            if entry[0].is_ascii_lowercase() {
+                return Err(masked(path));
+            }
+            if entry[0] == b'S' {
+                let full = self.git.cwd.join(OsStr::from_bytes(path));
+                if git::exists(&full)? {
+                    return Err(masked(path));
+                }
+                sparse_paths.extend_from_slice(path);
+                sparse_paths.push(0);
+            }
+        }
+        if !sparse_paths.is_empty() {
+            if self
+                .git
+                .optional(&["config", "--type=bool", "--get", "core.sparseCheckout"])?
+                .as_deref()
+                != Some(b"true\n")
+            {
+                return Err(masked(sparse_paths.split(|b| *b == 0).next().unwrap()));
+            }
+            let included = self.git.sparse_included(&sparse_paths)?;
+            if !included.is_empty() {
+                return Err(masked(included.split(|b| *b == 0).next().unwrap()));
             }
         }
         if !self
@@ -181,13 +210,21 @@ impl Operation {
         }
         Ok(())
     }
+    fn clear_fetch_head(&self) -> Result<(), String> {
+        match fs::remove_file(self.git.metadata("FETCH_HEAD")) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(format!("Cannot clear previous FETCH_HEAD: {e}")),
+        }
+    }
     fn reset(&mut self, remote: &str, explicit: Option<&str>) -> Result<(), String> {
         self.stage("preflight")?;
         self.clean()?;
         let url = self.git.call(&["remote", "get-url", remote])?;
-        let remote_url = git::redact(OsString::from_vec(
-            url.strip_suffix(b"\n").unwrap_or(&url).to_vec(),
-        ));
+        let url = OsString::from_vec(url.strip_suffix(b"\n").unwrap_or(&url).to_vec());
+        let effective_url = url.to_str().unwrap_or_default();
+        let remote_url = git::redact(&url);
+        let mut redirect = None;
         println!("Remote: {}", super::display(&remote_url));
         let remote_error = |error: String| {
             if git::remote_access_error(&error) {
@@ -206,7 +243,11 @@ impl Operation {
         if let Some(ref wanted) = wanted {
             args.push(wanted);
         }
-        let advertised = self.git.text(&args).map_err(remote_error)?;
+        let advertised = git::reference_text(
+            self.git
+                .remote_call(remote, effective_url, &mut redirect, &args, || Ok(()))
+                .map_err(remote_error)?,
+        )?;
         let branch = match explicit {
             Some(branch) => branch.to_owned(),
             None => {
@@ -252,30 +293,32 @@ impl Operation {
         self.stage("fetch")?;
         // A prior fetch is not evidence for this attempt, even if Git exits zero
         // without writing FETCH_HEAD (for example through a wrapper).
-        match fs::remove_file(self.git.metadata("FETCH_HEAD")) {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(format!("Cannot clear previous FETCH_HEAD: {e}")),
-        }
+        self.clear_fetch_head()?;
         let refspec = format!("+{full}:{destination}");
         let output = self
             .git
-            .call(&[
-                "-c",
-                "maintenance.auto=false",
-                "-c",
-                "gc.auto=0",
-                "fetch",
-                "--atomic",
-                "--write-fetch-head",
-                "--no-tags",
-                "--no-prune",
-                "--no-prune-tags",
-                "--no-recurse-submodules",
-                "--refmap=",
+            .remote_call(
                 remote,
-                &refspec,
-            ])
+                effective_url,
+                &mut redirect,
+                &[
+                    "-c",
+                    "maintenance.auto=false",
+                    "-c",
+                    "gc.auto=0",
+                    "fetch",
+                    "--atomic",
+                    "--write-fetch-head",
+                    "--no-tags",
+                    "--no-prune",
+                    "--no-prune-tags",
+                    "--no-recurse-submodules",
+                    "--refmap=",
+                    remote,
+                    &refspec,
+                ],
+                || self.clear_fetch_head(),
+            )
             .map_err(remote_error)?;
         print!("{}", git::redact(OsString::from_vec(output)));
         // A stale preexisting tracking ref is not proof that this fetch included it.
@@ -324,6 +367,11 @@ impl Operation {
                 );
             }
         }
+        self.status.checkout = Some(Checkout {
+            local_ref: local_ref.clone(),
+            oid: oid.clone(),
+            upstream: destination.clone(),
+        });
         self.stage("switch")?;
         if old.is_some() {
             self.git.action(&[
@@ -366,6 +414,40 @@ impl Operation {
         println!("State: reset completed at {oid}");
         Ok(())
     }
+}
+
+pub(super) fn verify_checkout(
+    path: &std::path::Path,
+    common: &std::path::Path,
+    expected: &Checkout,
+) -> Result<(), String> {
+    let git = Git::for_verification(path.to_path_buf())?;
+    let actual_common = git
+        .cwd
+        .join(git::path_output(&git.call(&[
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir",
+        ])?))
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    if actual_common != common {
+        return Err("Git directory changed during reset".into());
+    }
+    let op = Operation {
+        git,
+        status: Status::default(),
+        status_path: PathBuf::new(),
+    };
+    op.clean()?;
+    op.verify_head(&expected.local_ref, &expected.oid)?;
+    let upstream = op
+        .git
+        .text(&["rev-parse", "--symbolic-full-name", "@{upstream}"])?;
+    if upstream != expected.upstream {
+        return Err("Target upstream has not been verified".into());
+    }
+    op.verify_head(&expected.local_ref, &expected.oid)
 }
 
 fn filesystem_ignores_case(directory: &std::path::Path) -> Result<bool, String> {

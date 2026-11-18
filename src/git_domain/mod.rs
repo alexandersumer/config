@@ -26,6 +26,7 @@ pub(super) struct Options {
     pub keep_logs: bool,
     pub json: bool,
     pub selection: serde_json::Value,
+    pub retry_blocked: Vec<serde_json::Value>,
 }
 
 /// Clap owns syntax, help, version, suggestions, and typed value validation.
@@ -45,15 +46,15 @@ pub(crate) struct ResetArgs {
     /// Branch to reset to (default: remote's advertised HEAD)
     #[arg(long, value_name = "NAME", value_parser = git_name)]
     pub branch: Option<String>,
-    /// Concurrent repositories (1-32)
-    #[arg(short = 'j', long, default_value_t = 32, value_name = "N", value_parser = clap::value_parser!(u32).range(1..=32))]
-    pub jobs: u32,
-    /// Total attempts per repository (1-10)
-    #[arg(long, default_value_t = 3, value_name = "N", value_parser = clap::value_parser!(u32).range(1..=10))]
-    pub attempts: u32,
-    /// Deadline for the entire attempt (1-86400 seconds)
-    #[arg(long, default_value_t = 300, value_name = "SECONDS", value_parser = clap::value_parser!(u32).range(1..=86_400))]
-    pub timeout: u32,
+    /// Concurrent repositories (1-32, default 32)
+    #[arg(short = 'j', long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..=32))]
+    pub jobs: Option<u32>,
+    /// Total attempts per repository (1-10, default 3)
+    #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..=10))]
+    pub attempts: Option<u32>,
+    /// Deadline for the entire attempt (1-86400 seconds, default 300)
+    #[arg(long, value_name = "SECONDS", value_parser = clap::value_parser!(u32).range(1..=86_400))]
+    pub timeout: Option<u32>,
     /// Discover and list targets without modifying repositories
     #[arg(long)]
     pub list: bool,
@@ -77,11 +78,23 @@ pub(crate) fn worker(args: &[OsString]) -> u8 {
     operation::worker(args)
 }
 pub(crate) fn run(mut cli: ResetArgs, json: bool) -> u8 {
+    let mut retry_blocked = Vec::new();
     let resolve = (|| -> Result<_, String> {
         if let Some(id) = &cli.retry {
-            let prior = crate::history::read(id)?;
+            let mut prior = crate::history::read(id)?;
             if prior["operation"] != "git.reset" {
                 return Err("--retry requires a reset run".into());
+            }
+            if prior["status"] == "in_progress" && prior["options"]["tracks_active_targets"] == true
+            {
+                if crate::history::active(id)? {
+                    return Err(
+                        "Reset run is still active; wait for it to finish before retrying".into(),
+                    );
+                }
+                // The writer may have published more outcomes between the first
+                // read and releasing its lock.
+                prior = crate::history::read(id)?;
             }
             let mut paths = Vec::new();
             for target in prior["targets"]
@@ -90,17 +103,39 @@ pub(crate) fn run(mut cli: ResetArgs, json: bool) -> u8 {
                 .iter()
                 .filter(|t| crate::history::unsuccessful(t))
             {
-                let path = crate::history::verify_identity(target)?;
-                let expected = crate::history::path(target, "common_bytes")?;
-                let (repo, linked) =
-                    discover::repository(&path)?.ok_or("retry target is no longer a repository")?;
-                if linked || repo.path != path || repo.common != expected {
-                    return Err("retry target repository ownership changed".into());
+                let verified = (|| {
+                    if matches!(
+                        target["status"].as_str(),
+                        Some("running" | "needs_verification")
+                    ) || (target["status"] == "pending"
+                        && prior["status"] == "in_progress"
+                        && prior["options"]["tracks_active_targets"] != true)
+                    {
+                        return Err("Previous reset may have changed the checkout. Inspect it and its recovery refs before starting a new reset.".to_owned());
+                    }
+                    let path = crate::history::verify_identity(target)?;
+                    let expected = crate::history::path(target, "common_bytes")?;
+                    let (repo, linked) = discover::repository(&path)?
+                        .ok_or("retry target is no longer a repository")?;
+                    if linked || repo.path != path || repo.common != expected {
+                        return Err("retry target repository ownership changed".into());
+                    }
+                    Ok(path)
+                })();
+                match verified {
+                    Ok(path) => paths.push(path),
+                    Err(reason) => retry_blocked.push(serde_json::json!({
+                        "path": target["path"], "path_bytes": target["path_bytes"],
+                        "reason": reason,
+                    })),
                 }
-                paths.push(path);
             }
             if paths.is_empty() {
-                return Err("run has no unsuccessful reset targets".into());
+                return Err(if retry_blocked.is_empty() {
+                    "run has no unsuccessful reset targets".into()
+                } else {
+                    "No retry targets passed safety checks".into()
+                });
             }
             if prior["options"]["retry_options_available"] != true {
                 return Err("run options could not be recorded for safe retry; select explicit paths and options".into());
@@ -111,16 +146,34 @@ pub(crate) fn run(mut cli: ResetArgs, json: bool) -> u8 {
                 .ok_or("run has no reusable remote name")?
                 .to_owned();
             cli.branch = prior["options"]["branch"].as_str().map(str::to_owned);
+            let saved_limit = |key: &str, max: u32| {
+                prior["options"][key]
+                    .as_u64()
+                    .and_then(|value| u32::try_from(value).ok())
+                    .filter(|value| (1..=max).contains(value))
+            };
+            cli.jobs = cli.jobs.or_else(|| saved_limit("jobs", 32));
+            cli.attempts = cli.attempts.or_else(|| saved_limit("attempts", 10));
+            cli.timeout = cli
+                .timeout
+                .or_else(|| saved_limit("timeout_seconds", 86_400));
         }
         cli.scope.resolve(&cli.paths)
     })();
+    for target in &retry_blocked {
+        report(&format!(
+            "Retry blocked for {}: {}",
+            target["path"].as_str().unwrap_or("unknown path"),
+            target["reason"].as_str().unwrap_or("unknown reason")
+        ));
+    }
     let resolved = match resolve {
         Ok(scope) => scope,
         Err(e) => {
             report(&e);
             if json {
                 let _ = crate::presentation::json(
-                    &serde_json::json!({"schema_version":1,"operation":"git.reset","status":"failed","error":e}),
+                    &serde_json::json!({"schema_version":1,"operation":"git.reset","status":"failed","error":e,"retry_blocked":retry_blocked}),
                 );
             }
             return 1;
@@ -136,13 +189,14 @@ pub(crate) fn run(mut cli: ResetArgs, json: bool) -> u8 {
         paths: cli.paths,
         remote: cli.remote,
         branch: cli.branch,
-        jobs: cli.jobs as usize,
-        attempts: cli.attempts as usize,
-        timeout: Duration::from_secs(cli.timeout.into()),
+        jobs: cli.jobs.unwrap_or(32) as usize,
+        attempts: cli.attempts.unwrap_or(3) as usize,
+        timeout: Duration::from_secs(cli.timeout.unwrap_or(300).into()),
         list: cli.list,
         verbose: cli.verbose,
         keep_logs: cli.keep_logs,
         json,
+        retry_blocked,
     };
     let _signals = match crate::runtime::Signals::install() {
         Ok(s) => s,

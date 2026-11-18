@@ -4,11 +4,19 @@ use std::fs;
 use std::io::Write;
 use std::path::Path;
 
+#[derive(Default, serde::Deserialize, serde::Serialize)]
+pub(super) struct Checkout {
+    pub local_ref: String,
+    pub oid: String,
+    pub upstream: String,
+}
+
 #[derive(Default)]
 pub(super) struct Status {
     pub stage: String,
     pub state: Option<String>,
     pub target: Option<String>,
+    pub checkout: Option<Checkout>,
     pub backups: Vec<String>,
     pub complete: bool,
     pub error: Option<String>,
@@ -21,7 +29,7 @@ impl Status {
         )
         .map_err(|e| format!("Cannot create worker status: {e}"))?;
         let value = json!({"stage": self.stage, "state": self.state, "target": self.target,
-            "backups": self.backups, "complete": self.complete, "error": self.error});
+            "checkout": self.checkout, "backups": self.backups, "complete": self.complete, "error": self.error});
         file.write_all(value.to_string().as_bytes())
             .map_err(|e| format!("Cannot write worker status: {e}"))?;
         file.persist(path)
@@ -43,6 +51,7 @@ impl Status {
             stage: value["stage"].as_str().ok_or_else(invalid)?.into(),
             state: optional("state")?,
             target: optional("target")?,
+            checkout: serde_json::from_value(value["checkout"].clone()).map_err(|_| invalid())?,
             backups: value["backups"]
                 .as_array()
                 .ok_or_else(invalid)?

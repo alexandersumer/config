@@ -5,7 +5,7 @@ use std::fs;
 use std::os::unix::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub(super) fn redact(value: impl AsRef<OsStr>) -> String {
     static URL: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
@@ -50,6 +50,17 @@ pub(super) fn diagnostic(value: impl AsRef<OsStr>) -> String {
     display(redact(value))
 }
 
+pub(super) fn bitbucket_ssh_moved(error: &str) -> bool {
+    error.contains("We have moved our SSH host to")
+        && error.contains("ssh.bitbucket.org")
+        && error.contains("The old host bitbucket.org")
+}
+
+fn bitbucket_ssh_path(url: &str) -> Option<&str> {
+    url.strip_prefix("git@bitbucket.org:")
+        .or_else(|| url.strip_prefix("ssh://git@bitbucket.org/"))
+}
+
 pub(super) fn remote_access_error(error: &str) -> bool {
     static ACCESS: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     ACCESS.get_or_init(|| regex::Regex::new(r"(?i)You may not have access to this repository|repository[^\r\n]*not found|does not appear to be a git repository|Authentication failed|Permission denied \((?:publickey|keyboard-interactive|password)|could not read (?:Username|Password)|(?:returned error:|HTTP/[\d.]+)\s*(?:401|403)\b").unwrap()).is_match(error)
@@ -87,9 +98,28 @@ pub(super) fn capture(
     args: &[&OsStr],
     probe: bool,
 ) -> Result<(i32, Vec<u8>, Vec<u8>), String> {
+    capture_with_deadline(
+        path,
+        args,
+        probe.then(|| Instant::now() + Duration::from_secs(15)),
+    )
+}
+
+fn remaining(deadline: Option<Instant>) -> Result<Duration, String> {
+    deadline.map_or(Ok(Duration::from_secs(15)), |end| {
+        end.checked_duration_since(Instant::now())
+            .ok_or_else(|| "Checkout verification deadline expired".into())
+    })
+}
+
+fn capture_with_deadline(
+    path: &Path,
+    args: &[&OsStr],
+    deadline: Option<Instant>,
+) -> Result<(i32, Vec<u8>, Vec<u8>), String> {
     let mut cmd = command(path);
     cmd.args(args).stdin(Stdio::null());
-    crate::runtime::capture(cmd, Duration::from_secs(15), probe)
+    crate::runtime::capture(cmd, remaining(deadline)?, deadline.is_some())
 }
 
 pub(super) fn probe(path: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
@@ -114,13 +144,20 @@ pub(super) fn path_output(bytes: &[u8]) -> PathBuf {
 pub(super) struct Git {
     pub cwd: PathBuf,
     pub directory: PathBuf,
+    deadline: Option<Instant>,
 }
 impl Git {
     pub fn new(cwd: PathBuf) -> Result<Self, String> {
-        let (code, out, err) = capture(
+        Self::open(cwd, None)
+    }
+    pub fn for_verification(cwd: PathBuf) -> Result<Self, String> {
+        Self::open(cwd, Some(Instant::now() + Duration::from_secs(5)))
+    }
+    fn open(cwd: PathBuf, deadline: Option<Instant>) -> Result<Self, String> {
+        let (code, out, err) = capture_with_deadline(
             &cwd,
             &[OsStr::new("rev-parse"), OsStr::new("--absolute-git-dir")],
-            false,
+            deadline,
         )?;
         if code != 0 {
             return Err(redact(OsString::from_vec(err)));
@@ -128,14 +165,18 @@ impl Git {
         let directory = path_output(&out)
             .canonicalize()
             .map_err(|e| e.to_string())?;
-        Ok(Self { cwd, directory })
+        Ok(Self {
+            cwd,
+            directory,
+            deadline,
+        })
     }
     pub fn call(&self, args: &[&str]) -> Result<Vec<u8>, String> {
         let args: Vec<_> = args.iter().map(OsStr::new).collect();
         self.call_os(&args)
     }
     pub fn call_os(&self, args: &[&OsStr]) -> Result<Vec<u8>, String> {
-        let (code, out, err) = capture(&self.cwd, args, false)?;
+        let (code, out, err) = capture_with_deadline(&self.cwd, args, self.deadline)?;
         // Logs contain stderr from successful hooks as well as failed commands.
         if !err.is_empty() {
             eprint!("{}", redact(OsString::from_vec(err.clone())));
@@ -149,6 +190,111 @@ impl Git {
         }
         Ok(out)
     }
+    pub fn sparse_included(&self, paths: &[u8]) -> Result<Vec<u8>, String> {
+        use std::io::{Seek, Write};
+        let mut input = tempfile::tempfile().map_err(|e| e.to_string())?;
+        input
+            .write_all(paths)
+            .and_then(|_| input.rewind())
+            .map_err(|e| e.to_string())?;
+        let mut command = command(&self.cwd);
+        command.args(["sparse-checkout", "check-rules", "-z"]);
+        let (code, included, error) = crate::runtime::capture_with_input(
+            command,
+            remaining(self.deadline)?,
+            self.deadline.is_some(),
+            input,
+        )?;
+        if code != 0 {
+            return Err(format!(
+                "Cannot verify sparse checkout rules: {}",
+                diagnostic(OsString::from_vec(error))
+            ));
+        }
+        Ok(included)
+    }
+    pub fn remote_call(
+        &self,
+        remote: &str,
+        effective_url: &str,
+        redirect: &mut Option<String>,
+        args: &[&str],
+        before_retry: impl FnOnce() -> Result<(), String>,
+    ) -> Result<Vec<u8>, String> {
+        let redirected = |rewrite: &str| {
+            let args: Vec<_> = ["-c", rewrite]
+                .into_iter()
+                .chain(args.iter().copied())
+                .collect();
+            self.call(&args)
+        };
+        if let Some(rewrite) = redirect {
+            return redirected(rewrite);
+        }
+        let error = match self.call(args) {
+            Ok(output) => return Ok(output),
+            Err(error) if bitbucket_ssh_moved(&error) => error,
+            Err(error) => return Err(error),
+        };
+
+        // Git applies insteadOf once. Match the stored URL (including HTTPS
+        // when it was rewritten to legacy SSH) and confirm our rule won.
+        let Some(path) = bitbucket_ssh_path(effective_url) else {
+            return Err(error);
+        };
+        let Some((workspace, repository)) = path.split_once('/') else {
+            return Err(error);
+        };
+        let plain_component = |component: &str| {
+            !component.is_empty()
+                && component != "."
+                && component != ".."
+                && component
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || b"_.-".contains(&byte))
+        };
+        if !plain_component(workspace) || !plain_component(repository) {
+            return Err(error);
+        }
+        let Ok(Some(urls)) = self.optional(&[
+            "config",
+            "--null",
+            "--get-all",
+            &format!("remote.{remote}.url"),
+        ]) else {
+            return Err(error);
+        };
+        let Some(raw) = urls
+            .split(|byte| *byte == 0)
+            .next()
+            .and_then(|raw| std::str::from_utf8(raw).ok())
+        else {
+            return Err(error);
+        };
+        let raw_path =
+            bitbucket_ssh_path(raw).or_else(|| raw.strip_prefix("https://bitbucket.org/"));
+        if raw_path != Some(path) {
+            return Err(error);
+        }
+        let migrated = format!("git@ssh.bitbucket.org:{path}");
+        let rewrite = format!("url.{migrated}.insteadOf={raw}");
+        if self
+            .text(&["-c", &rewrite, "remote", "get-url", remote])
+            .ok()
+            .as_deref()
+            != Some(migrated.as_str())
+        {
+            return Err(error);
+        }
+        eprintln!(
+            "Bitbucket retired the old SSH endpoint; retrying this remote at ssh.bitbucket.org."
+        );
+        before_retry()?;
+        *redirect = Some(rewrite);
+        redirected(redirect.as_deref().unwrap()).map_err(|error| {
+            format!("{error}\nBitbucket SSH migration redirected this request to ssh.bitbucket.org; verify access and the SSH host key for that endpoint.")
+        })
+    }
     pub fn action(&self, args: &[&str]) -> Result<(), String> {
         let output = self.call(args)?;
         print!("{}", redact(OsString::from_vec(output)));
@@ -156,7 +302,7 @@ impl Git {
     }
     pub fn optional(&self, args: &[&str]) -> Result<Option<Vec<u8>>, String> {
         let args: Vec<_> = args.iter().map(OsStr::new).collect();
-        let (code, out, err) = capture(&self.cwd, &args, false)?;
+        let (code, out, err) = capture_with_deadline(&self.cwd, &args, self.deadline)?;
         match code {
             0 => Ok(Some(out)),
             1 => Ok(None),
@@ -167,15 +313,19 @@ impl Git {
         }
     }
     pub fn text(&self, args: &[&str]) -> Result<String, String> {
-        String::from_utf8(self.call(args)?)
-            .map(|s| s.trim_end_matches('\n').to_owned())
-            .map_err(|_| "Git returned non-UTF-8 reference text".into())
+        reference_text(self.call(args)?)
     }
     pub fn metadata(&self, name: &str) -> PathBuf {
         // All worker targets are primary checkouts. These operation markers and
         // FETCH_HEAD belong to their Git directory, resolved once per attempt.
         self.directory.join(name)
     }
+}
+
+pub(super) fn reference_text(bytes: Vec<u8>) -> Result<String, String> {
+    String::from_utf8(bytes)
+        .map(|s| s.trim_end_matches('\n').to_owned())
+        .map_err(|_| "Git returned non-UTF-8 reference text".into())
 }
 
 pub(super) fn exists(path: &Path) -> Result<bool, String> {

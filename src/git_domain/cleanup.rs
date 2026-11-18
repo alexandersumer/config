@@ -1570,6 +1570,18 @@ pub(crate) fn run(mut args: Args, json: bool) -> u8 {
         }
     }
 }
+fn blocker_kind(status: &str, reason: &str) -> &'static str {
+    match reason {
+        _ if status == "protected" => "local_work",
+        "worktree is locked; investigate and unlock explicitly" => "worktree_locked",
+        _ if reason.starts_with("unsupported nested") => "nested_repository",
+        _ if reason.starts_with("Git lock or operation in progress:") => "git_operation",
+        _ if reason.contains("submodule") => "submodule",
+        _ if reason.contains("timed out") => "timeout",
+        _ => "inspection_or_removal",
+    }
+}
+
 fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
     use std::io::Write;
     let started = Instant::now();
@@ -1788,6 +1800,7 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
                 &orphan.path,
                 result["status"].as_str().unwrap_or("unverified"),
                 vec![],
+                serde_json::Value::Null,
             )?;
         }
         writeln!(
@@ -1927,7 +1940,11 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
                                 .collect()
                         })
                         .unwrap_or_default();
-                    run.outcome(path, status, refs)?;
+                    let outcome = reason
+                        .as_deref()
+                        .map(|reason| serde_json::json!({"kind": blocker_kind(status, reason)}))
+                        .unwrap_or(serde_json::Value::Null);
+                    run.outcome(path, status, refs, outcome)?;
                 }
                 let next = next_step(
                     args,

@@ -2,6 +2,7 @@
 use serde_json::{json, Value};
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
+use std::os::fd::AsRawFd;
 use std::os::unix::{
     ffi::OsStringExt,
     fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
@@ -50,6 +51,7 @@ pub(crate) fn target_with_identity(
     json!({"path":path.to_string_lossy(),"path_bytes":crate::presentation::path_bytes(path),"common_bytes":crate::presentation::path_bytes(common),"common_device":common_metadata.as_ref().map(|m|m.dev()),"common_inode":common_metadata.as_ref().map(|m|m.ino()),"device":identity.map(|(device,_)|device),"inode":identity.map(|(_,inode)|inode),"status":"pending","recovery_refs":[]})
 }
 pub(crate) struct Run {
+    _active: fs::File,
     directory: PathBuf,
     pub id: String,
     value: Value,
@@ -74,8 +76,21 @@ impl Run {
             .ok_or("invalid run directory")?
             .to_string_lossy()
             .into_owned();
+        let active = OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .mode(0o600)
+            .open(directory.join("active.lock"))
+            .map_err(|e| format!("Cannot create run lock: {e}"))?;
+        if unsafe { libc::flock(active.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+            return Err(format!(
+                "Cannot acquire run lock: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
         let value = json!({"schema_version":1,"run_id":id,"operation":operation,"status":"in_progress","started_unix_seconds":std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e|e.to_string())?.as_secs_f64(),"selection":selection,"options":options,"targets":targets});
         let run = Self {
+            _active: active,
             directory,
             id,
             value,
@@ -111,7 +126,13 @@ impl Run {
             .and_then(|f| f.sync_all())
             .map_err(|e| format!("history directory sync failed; evidence incomplete: {e}"))
     }
-    pub fn outcome(&mut self, path: &Path, status: &str, refs: Vec<String>) -> Result<(), String> {
+    pub fn outcome(
+        &mut self,
+        path: &Path,
+        status: &str,
+        refs: Vec<String>,
+        outcome: Value,
+    ) -> Result<(), String> {
         let target = self.value["targets"]
             .as_array_mut()
             .ok_or("invalid history intent")?
@@ -120,6 +141,9 @@ impl Run {
             .ok_or("outcome outside recorded selection")?;
         target["status"] = json!(status);
         target["recovery_refs"] = json!(refs);
+        if !outcome.is_null() {
+            target["outcome"] = outcome;
+        }
         self.publish()
     }
     pub fn evidence(&mut self, path: &Path, evidence: Value) -> Result<(), String> {
@@ -177,6 +201,28 @@ pub(crate) fn read(id: &str) -> Result<Value, String> {
         return Err("unsupported or invalid run summary".into());
     }
     Ok(value)
+}
+pub(crate) fn active(id: &str) -> Result<bool, String> {
+    validate_id(id)?;
+    let lock = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(root()?.join(id).join("active.lock"))
+        .map_err(|e| format!("Cannot verify run lock: {e}"))?;
+    if !lock.metadata().is_ok_and(|m| {
+        m.is_file() && m.uid() == unsafe { libc::geteuid() } && m.mode() & 0o077 == 0
+    }) {
+        return Err("Run lock is not a private owned regular file".into());
+    }
+    if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_SH | libc::LOCK_NB) } == 0 {
+        return Ok(false);
+    }
+    let error = std::io::Error::last_os_error();
+    if error.raw_os_error() == Some(libc::EWOULDBLOCK) {
+        Ok(true)
+    } else {
+        Err(format!("Cannot check run activity: {error}"))
+    }
 }
 pub(crate) fn unsuccessful(target: &Value) -> bool {
     !matches!(

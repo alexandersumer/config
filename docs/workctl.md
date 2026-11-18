@@ -281,9 +281,15 @@ workctl git worktree clean --reconcile RUN_ID --json
 workctl git worktree clean --reconcile RUN_ID --apply --json
 ```
 
-Reset retry selects only unsuccessful targets, verifies directory/repository identity,
-and performs fresh discovery and normal safety checks. It preserves the original remote
-and branch; unsupported option encodings require explicit selection rather than guessing.
+Reset publishes each target's start and outcome as it happens. Finished targets
+record their final phase, attempt count, recovery refs, and failure category.
+Retry runs eligible unfinished targets and performs fresh discovery and normal
+safety checks. An active run must finish first. Changed identities and targets
+that may have already changed the checkout are reported individually and require
+inspection. Retry preserves the original remote, branch, and available execution
+limits. Pass `--jobs`, `--attempts`, or `--timeout` to override those limits.
+Cleanup records stable blocker categories so later inspection can distinguish
+known protections from a different current result.
 Cleanup reconciliation verifies filesystem and registration state first, refuses reused
 paths or retained quarantines, and previews remaining work. Deleting remaining work
 requires a **new** `--apply` and fresh discard options. Pending, interrupted, malformed,

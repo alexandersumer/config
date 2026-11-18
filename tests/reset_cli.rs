@@ -1147,9 +1147,21 @@ fn failure_is_reported_before_a_slower_earlier_repository_finishes() {
     let f = Fixture::new();
     let dirty = f.clone("zz-dirty");
     fs::write(dirty.join("file"), "precious").unwrap();
-    let started = f.temp.path().join("started");
     let done = f.temp.path().join("done");
-    let dir = f.shim(&format!("for arg in \"$@\"; do if [ \"$arg\" = fetch ]; then touch '{}'; sleep 3; touch '{}'; fi; done", started.display(), done.display()));
+    let release = f.temp.path().join("fetch-release");
+    let dir = f.shim(&format!(
+        r#"for arg do
+            if [ "$arg" = fetch ]; then
+                n=0
+                while [ ! -e '{}' ] && [ "$n" -lt 1000 ]; do
+                    sleep 0.05; n=$((n + 1))
+                done
+                touch '{}'
+            fi
+        done"#,
+        release.display(),
+        done.display()
+    ));
     let output = f.temp.path().join("output");
     let mut cmd = f.cli(&f.workspace, &[]);
     f.with_shim(&mut cmd, &dir);
@@ -1158,7 +1170,7 @@ fn failure_is_reported_before_a_slower_earlier_repository_finishes() {
         .stderr(fs::File::create(&output).unwrap())
         .spawn()
         .unwrap();
-    let until = Instant::now() + Duration::from_secs(10);
+    let until = Instant::now() + Duration::from_secs(30);
     loop {
         let text = fs::read_to_string(&output).unwrap();
         if text.contains("Failed:") && text.contains("zz-dirty") {
@@ -1171,6 +1183,7 @@ fn failure_is_reported_before_a_slower_earlier_repository_finishes() {
         !done.exists(),
         "failure was withheld until the slow job completed"
     );
+    fs::write(&release, "release").unwrap();
     assert_eq!(wait_child(child).status.code(), Some(1));
 }
 
@@ -1668,45 +1681,300 @@ fn worker_crash_reports_incomplete_status_without_fabricating_success() {
 }
 
 #[test]
-fn timeout_retries_retain_recovery_refs_from_each_attempt() {
+fn late_timeout_verifies_applied_reset_without_following_a_new_remote_tip() {
     let f = Fixture::new();
     let count = f.temp.path().join("count");
     let dir = f.shim(&format!(
         r#"
 for arg in "$@"; do
-    if [ "$arg" = switch ]; then
-        n=$(cat '{}' 2>/dev/null || echo 0); n=$((n+1)); echo $n > '{}'
-        if [ "$n" -eq 1 ]; then sleep 20; fi
+    if [ "$arg" = --hard ]; then
+        if [ ! -e '{}' ]; then
+            PATH="$FIXTURE_REAL_PATH" git "$@" || exit $?
+            PATH="$FIXTURE_REAL_PATH" git -C '{}' update-ref refs/heads/main '{}' || exit $?
+            touch '{}'
+            sleep 45
+            exit 0
+        fi
     fi
 done"#,
         count.display(),
+        f.origin.display(),
+        f.old,
         count.display()
     ));
-    // Leave room for real Git preflight under the 32-worker fixture load;
-    // the injected 20-second switch hang still necessarily hits this deadline.
     let mut cmd = f.cli(
         &f.repo,
-        &[OsStr::new("--attempts=2"), OsStr::new("--timeout=5")],
+        &[
+            OsStr::new("--attempts=2"),
+            OsStr::new("--timeout=15"),
+            OsStr::new("--json"),
+        ],
     );
     f.with_shim(&mut cmd, &dir);
+    cmd.env("FIXTURE_REAL_PATH", std::env::var_os("PATH").unwrap());
     let out = cmd.output().unwrap();
     success(&out);
-    let log_dir = logs(&out);
-    let results: serde_json::Value =
-        serde_json::from_slice(&fs::read(log_dir.join("results.json")).unwrap()).unwrap();
-    assert_eq!(results[0]["attempts"], 2);
-    let backups = results[0]["backups"].as_array().unwrap();
-    assert_eq!(backups.len(), 2);
-    for backup in backups {
-        assert_eq!(
-            git(&f.repo, &["rev-parse", backup.as_str().unwrap()]),
-            f.old
-        );
-    }
-    assert!(fs::read_to_string(log_dir.join("0001.log"))
+    let result = records(&out);
+    assert_eq!(result[0]["attempts"], 1);
+    assert!(result[0]["detail"]
+        .as_str()
         .unwrap()
-        .contains("Timed out during switch"));
+        .contains("verified after timeout"));
     assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.new);
+    assert_eq!(git(&f.origin, &["rev-parse", "HEAD"]), f.old);
+    let backups = result[0]["backups"].as_array().unwrap();
+    assert_eq!(backups.len(), 1);
+    assert_eq!(
+        git(&f.repo, &["rev-parse", backups[0].as_str().unwrap()]),
+        f.old
+    );
+}
+
+#[test]
+fn late_timeout_preserves_local_edits_and_marks_the_checkout_unverified() {
+    let f = Fixture::new();
+    let dir = f.shim(
+        r#"for arg do
+            if [ "$arg" = --hard ]; then
+                PATH="$FIXTURE_REAL_PATH" git "$@" || exit $?
+                printf 'precious local edit' > file
+                sleep 45
+                exit 0
+            fi
+        done"#,
+    );
+    let mut cmd = f.cli(
+        &f.repo,
+        &[
+            OsStr::new("--attempts=2"),
+            OsStr::new("--timeout=15"),
+            OsStr::new("--json"),
+        ],
+    );
+    f.with_shim(&mut cmd, &dir);
+    cmd.env("FIXTURE_REAL_PATH", std::env::var_os("PATH").unwrap());
+    let out = cmd.output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(result["results"][0]["attempts"], 1);
+    assert_eq!(result["results"][0]["failure_kind"], "checkout_unverified");
+    assert_eq!(
+        fs::read_to_string(f.repo.join("file")).unwrap(),
+        "precious local edit"
+    );
+    let (_, history) = workctl_json(
+        &f,
+        &["history", result["run_id"].as_str().unwrap(), "--json"],
+    );
+    assert_eq!(history["targets"][0]["status"], "needs_verification");
+}
+
+fn workctl_json(f: &Fixture, args: &[&str]) -> (Output, serde_json::Value) {
+    let out = env(&mut Command::new(BIN))
+        .env("TMPDIR", f.temp.path().join("runtime"))
+        .args(args)
+        .output()
+        .unwrap();
+    let json = serde_json::from_slice(&out.stdout).unwrap();
+    (out, json)
+}
+
+#[test]
+fn recovery_keeps_a_completed_member_and_blocks_replay_of_the_running_member() {
+    let f = Fixture::new();
+    let second = f.clone("b-slow");
+    git(&second, &["reset", "--hard", &f.old]);
+    let marker = f.temp.path().join("slow-started");
+    let release = f.temp.path().join("slow-release");
+    let dir = f.shim(&format!(
+        r#"if [ "${{PWD##*/}}" = b-slow ]; then
+            for arg do
+                if [ "$arg" = ls-remote ]; then
+                    touch '{}'
+                    n=0
+                    while [ ! -e '{}' ] && [ "$n" -lt 120 ]; do
+                        sleep 0.05; n=$((n + 1))
+                    done
+                    exit 1
+                fi
+            done
+        fi"#,
+        marker.display(),
+        release.display()
+    ));
+    let mut cmd = f.cli(&f.workspace, &[OsStr::new("--jobs=1")]);
+    f.with_shim(&mut cmd, &dir);
+    let mut child = cmd
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    wait_marker(&marker);
+    let id = fs::read_dir(common::state_dir())
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let value: serde_json::Value =
+                serde_json::from_slice(&fs::read(entry.path().join("summary.json")).ok()?).ok()?;
+            value["targets"]
+                .as_array()?
+                .iter()
+                .any(|target| {
+                    target["path"] == second.canonicalize().unwrap().to_string_lossy().as_ref()
+                })
+                .then(|| value["run_id"].as_str().unwrap().to_owned())
+        })
+        .next()
+        .unwrap();
+    let (_, live) = workctl_json(&f, &["git", "reset", "--retry", &id, "--json"]);
+    assert!(
+        live["error"].as_str().unwrap().contains("still active"),
+        "{live}"
+    );
+    child.kill().unwrap();
+    child.wait().unwrap();
+    fs::write(&release, "release").unwrap();
+
+    let (_, history) = workctl_json(&f, &["history", &id, "--json"]);
+    assert_eq!(history["targets"][0]["status"], "succeeded");
+    assert_eq!(history["targets"][1]["status"], "running");
+    let (out, retry) = workctl_json(&f, &["git", "reset", "--retry", &id, "--json"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(retry["retry_blocked"].as_array().unwrap().len(), 1);
+    assert_eq!(git(&second, &["rev-parse", "HEAD"]), f.old);
+}
+
+#[test]
+fn retry_continues_past_a_replaced_checkout_with_the_original_limits() {
+    let f = Fixture::new();
+    let second = f.clone("b-retry");
+    let missing = f.temp.path().join("missing");
+    for repo in [&f.repo, &second] {
+        git(repo, &["remote", "set-url", "origin", origin_arg(&missing)]);
+    }
+    let failed = f.run(&f.workspace, &["--json", "--timeout=17", "--jobs=1"]);
+    let first: serde_json::Value = serde_json::from_slice(&failed.stdout).unwrap();
+    let id = first["run_id"].as_str().unwrap();
+    fs::rename(&f.repo, f.temp.path().join("original")).unwrap();
+    let replacement = f.clone("a repo");
+    fs::write(replacement.join("untouched"), "local work").unwrap();
+    git(
+        &second,
+        &["remote", "set-url", "origin", origin_arg(&f.origin)],
+    );
+    let (out, retry) = workctl_json(&f, &["git", "reset", "--retry", id, "--json"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(retry["summary"]["succeeded"], 1, "{retry}");
+    assert_eq!(retry["summary"]["retry_blocked"], 1);
+    assert_eq!(
+        fs::read_to_string(replacement.join("untouched")).unwrap(),
+        "local work"
+    );
+    let (_, history) = workctl_json(
+        &f,
+        &["history", retry["run_id"].as_str().unwrap(), "--json"],
+    );
+    assert_eq!(history["options"]["attempts"], 1);
+    assert_eq!(history["options"]["timeout_seconds"], 17);
+    assert_eq!(history["options"]["jobs"], 1);
+}
+
+#[test]
+fn sparse_reset_preserves_exclusions_and_refuses_unexpected_masked_paths() {
+    let f = Fixture::new();
+    for directory in ["included", "omitted"] {
+        fs::create_dir(f.seed.join(directory)).unwrap();
+        fs::write(f.seed.join(directory).join("file"), "initial").unwrap();
+    }
+    git(&f.seed, &["add", "."]);
+    git(&f.seed, &["commit", "-m", "add sparse paths"]);
+    git(&f.seed, &["push", "origin", "main"]);
+    git(&f.repo, &["pull", "--ff-only"]);
+    git(
+        &f.repo,
+        &[
+            "sparse-checkout",
+            "set",
+            "--cone",
+            "--sparse-index",
+            "included",
+        ],
+    );
+    fs::write(f.seed.join("included/file"), "updated").unwrap();
+    git(&f.seed, &["commit", "-am", "update included file"]);
+    git(&f.seed, &["push", "origin", "main"]);
+
+    success(&f.run(&f.repo, &[]));
+    assert!(!f.repo.join("omitted/file").exists());
+    assert_eq!(
+        fs::read_to_string(f.repo.join("included/file")).unwrap(),
+        "updated"
+    );
+    assert_eq!(
+        git(&f.repo, &["ls-files", "-v", "omitted/file"]),
+        "S omitted/file"
+    );
+    git(
+        &f.repo,
+        &["update-index", "--skip-worktree", "included/file"],
+    );
+    fs::remove_file(f.repo.join("included/file")).unwrap();
+    failure(&f.run(&f.repo, &[]), "assume-unchanged or skip-worktree");
+    assert!(!f.repo.join("included/file").exists());
+}
+
+#[test]
+fn bitbucket_ssh_migration_retries_exact_remote_and_retains_git_configuration() {
+    let f = Fixture::new();
+    let rewritten = f.clone("b-https");
+    let legacy = "git@bitbucket.org:workspace/repository.git";
+    let https = "https://bitbucket.org/workspace/repository.git";
+    git(&f.repo, &["remote", "set-url", "origin", legacy]);
+    git(&rewritten, &["remote", "set-url", "origin", https]);
+    git(
+        &rewritten,
+        &[
+            "config",
+            "url.git@bitbucket.org:.insteadOf",
+            "https://bitbucket.org/",
+        ],
+    );
+    let ssh = f.temp.path().join("ssh");
+    let trace = f.temp.path().join("ssh-trace");
+    fs::write(&ssh, r#"#!/bin/sh
+    for arg do
+        case "$arg" in
+            git@bitbucket.org)
+                echo old >> "$FIXTURE_TRACE"
+                echo "We have moved our SSH host to ssh.bitbucket.org. The old host bitbucket.org doesn't accept SSH connections." >&2
+                exit 1 ;;
+            git@ssh.bitbucket.org)
+                echo new >> "$FIXTURE_TRACE"
+                exec git upload-pack "$FIXTURE_REMOTE" ;;
+        esac
+    done
+    exit 99
+    "#).unwrap();
+    fs::set_permissions(&ssh, fs::Permissions::from_mode(0o755)).unwrap();
+    let out = f
+        .cli(
+            &f.workspace,
+            &[OsStr::new("--jobs=1"), OsStr::new("--json")],
+        )
+        .env("GIT_SSH_COMMAND", &ssh)
+        .env("GIT_SSH_VARIANT", "ssh")
+        .env("FIXTURE_REMOTE", &f.origin)
+        .env("FIXTURE_TRACE", &trace)
+        .output()
+        .unwrap();
+    success(&out);
+    assert_eq!(
+        fs::read_to_string(trace).unwrap(),
+        "old\nnew\nnew\nold\nnew\nnew\n"
+    );
+    assert_eq!(git(&f.repo, &["config", "remote.origin.url"]), legacy);
+    assert_eq!(git(&rewritten, &["config", "remote.origin.url"]), https);
+    assert_eq!(git(&rewritten, &["rev-parse", "HEAD"]), f.new);
 }
 
 #[test]

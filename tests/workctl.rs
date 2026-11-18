@@ -4647,6 +4647,7 @@ fn cleanup_history_reconciliation_requires_new_apply_and_rejects_reused_paths() 
     assert!(inspect.status.success(), "{}", text(&inspect));
     let history: serde_json::Value = serde_json::from_slice(&inspect.stdout).unwrap();
     assert_eq!(history["targets"].as_array().unwrap().len(), 1);
+    assert_eq!(history["targets"][0]["outcome"]["kind"], "git_operation");
     fs::remove_file(own.join("index.lock")).unwrap();
     let preview = env(&mut Command::new(BIN))
         .args(["git", "worktree", "clean", "--reconcile", id, "--json"])

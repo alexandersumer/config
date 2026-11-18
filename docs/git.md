@@ -47,8 +47,11 @@ reconstruct its worktree or remove the leftover directory; a missing registratio
 can prevent `git worktree repair` from recovering it.
 
 The existing reset policy is preserved: tracked/index changes, dirty submodules,
-unfinished Git operations, masked tracked paths, and untracked/ignored paths that
-collide with either the fetched target or local target branch cause refusal.
+unfinished Git operations, unexpected masked tracked paths, and untracked or ignored
+paths that collide with either target tree cause refusal. In a sparse checkout,
+Git's active rules must exclude every absent skip-worktree path. This requires
+a Git version with `sparse-checkout check-rules` (2.42 or later). Assume-unchanged
+paths and unexpected skip-worktree paths still cause refusal.
 The remote's advertised HEAD determines the default branch. Reset fetches only
 that branch into its configured tracking ref, without pruning or updating unrelated
 branches or tags. Fetch mappings must resolve it unambiguously and never replace
@@ -68,8 +71,12 @@ commands by default, and JSON always includes the exact backup refs.
 
 Reset uses up to 32 workers by default, bounded by checkout count. `--jobs` accepts 1–32,
 `--attempts` accepts 1–10 total attempts, and `--timeout` accepts 1–86400 seconds
-per attempt. Transient failures use bounded backoff. Authentication, locks, and
-safety refusals are not retried. Failures show the number of attempts and a bounded,
+per attempt. Before switching the checkout, transient failures use bounded
+backoff. Authentication, locks, and safety refusals are not retried. For a
+timeout during or just after the hard reset, a separate five-second read-only
+check can confirm the exact branch, commit, upstream, and clean checkout. If
+the checkout may have changed and that result cannot be verified, the target
+requires inspection before another reset. Failures show the number of attempts and a bounded,
 readable error summary; retained logs and JSON contain the complete diagnostic.
 Missing or inaccessible remotes remain failures while other checkouts continue.
 Logs record the selected remote URL with credentials redacted. The final report
@@ -79,6 +86,11 @@ after fixing access; it performs the normal reset. JSON marks these failures wit
 `failure_kind: "remote_unavailable"` and `next_step`; `destructive: false` applies
 to the access-check `command`, while `retry_command` performs the reset. Providers
 may deliberately report missing repositories and denied access identically.
+When a legacy Bitbucket SSH endpoint explicitly reports its retirement, reset
+can redirect a standard Bitbucket remote to `ssh.bitbucket.org` for that
+attempt. The rule is scoped to the exact stored URL and applies to both discovery
+and fetch. Git still uses the remote's settings and SSH's configured host-key
+verification. The rule leaves the remote URL and Git configuration on disk intact.
 Persistent connection failures remain failures after the retry limit. Use fewer
 workers with `--jobs N` on constrained networks. There is no transaction or rollback across checkouts:
 fetches, backups, switches, and upstream changes may persist after later failure.

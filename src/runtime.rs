@@ -222,7 +222,16 @@ pub(crate) fn capture(
     timeout: std::time::Duration,
     own_group: bool,
 ) -> Result<(i32, Vec<u8>, Vec<u8>), String> {
-    capture_inner(cmd, timeout, own_group, false)
+    capture_inner(cmd, timeout, own_group, false, std::process::Stdio::null())
+}
+
+pub(crate) fn capture_with_input(
+    cmd: std::process::Command,
+    timeout: std::time::Duration,
+    own_group: bool,
+    input: std::fs::File,
+) -> Result<(i32, Vec<u8>, Vec<u8>), String> {
+    capture_inner(cmd, timeout, own_group, false, input.into())
 }
 
 /// A lock-owning supervisor must survive cancellation until its Git group is
@@ -231,7 +240,7 @@ pub(crate) fn capture_guarded(
     cmd: std::process::Command,
     timeout: std::time::Duration,
 ) -> Result<(i32, Vec<u8>, Vec<u8>), String> {
-    capture_inner(cmd, timeout, true, true)
+    capture_inner(cmd, timeout, true, true, std::process::Stdio::null())
 }
 
 fn stop_guarded(child: &mut Child) -> Result<bool, String> {
@@ -258,15 +267,15 @@ fn capture_inner(
     timeout: std::time::Duration,
     own_group: bool,
     guarded: bool,
+    stdin: std::process::Stdio,
 ) -> Result<(i32, Vec<u8>, Vec<u8>), String> {
     use std::io::{Read, Seek};
     use std::os::unix::process::CommandExt;
-    use std::process::Stdio;
     let mut out = tempfile::tempfile().map_err(|e| e.to_string())?;
     let mut err = tempfile::tempfile().map_err(|e| e.to_string())?;
     cmd.stdout(out.try_clone().map_err(|e| e.to_string())?)
         .stderr(err.try_clone().map_err(|e| e.to_string())?)
-        .stdin(Stdio::null());
+        .stdin(stdin);
     if own_group {
         cmd.process_group(0);
     }

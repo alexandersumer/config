@@ -10,7 +10,10 @@ use std::collections::{HashMap, HashSet};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::os::fd::AsRawFd;
-use std::os::unix::{fs::OpenOptionsExt, process::CommandExt};
+use std::os::unix::{
+    fs::{MetadataExt, OpenOptionsExt},
+    process::CommandExt,
+};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::{
@@ -56,7 +59,7 @@ impl Drop for Diagnostics {
 }
 
 enum Event {
-    Started(usize),
+    Started(usize, mpsc::SyncSender<()>),
     Finished(usize, ResultRecord),
 }
 
@@ -69,6 +72,36 @@ struct ResultRecord {
     detail: String,
     target: Option<String>,
     backups: Vec<String>,
+    stage: Option<String>,
+    needs_verification: bool,
+}
+impl ResultRecord {
+    fn status(&self) -> &'static str {
+        match self.code {
+            0 => "succeeded",
+            _ if self.needs_verification => "needs_verification",
+            130 => "cancelled",
+            _ => "failed",
+        }
+    }
+
+    fn failure_kind(&self) -> Option<&'static str> {
+        match self.code {
+            0 => None,
+            _ if self.needs_verification => Some("checkout_unverified"),
+            124 => Some("timeout"),
+            130 => Some("cancelled"),
+            _ if super::git::bitbucket_ssh_moved(&self.detail) => Some("bitbucket_ssh_moved"),
+            _ if super::git::remote_access_error(&self.detail) => Some("remote_unavailable"),
+            _ if self
+                .detail
+                .starts_with("Repository is busy or cannot be locked") =>
+            {
+                Some("repository_busy")
+            }
+            _ => Some("reset_failed"),
+        }
+    }
 }
 
 fn retryable(text: &str) -> bool {
@@ -76,7 +109,10 @@ fn retryable(text: &str) -> bool {
     static TRANSIENT: OnceLock<Regex> = OnceLock::new();
     let permanent = PERMANENT.get_or_init(|| Regex::new(r"(?i)Permission denied|Access denied|Forbidden|Authentication failed|could not read Username|Host key verification failed|You may not have access to this repository|refusing|would be overwritten|Git operation in progress|cannot lock|Repository is busy").unwrap());
     let transient = TRANSIENT.get_or_init(|| Regex::new(r"(?i)Could not resolve|Connection (?:timed out|reset|refused|closed)|Operation timed out|early EOF|unexpected disconnect|remote end hung up|TLS connection was non-properly terminated|(?:HTTP/[\d.]+\s+|returned error:?\s*)(?:5\d\d|429)\b|Failed to connect|Couldn't connect|kex_exchange_identification").unwrap());
-    !super::git::remote_access_error(text) && !permanent.is_match(text) && transient.is_match(text)
+    !super::git::remote_access_error(text)
+        && !super::git::bitbucket_ssh_moved(text)
+        && !permanent.is_match(text)
+        && transient.is_match(text)
 }
 
 #[derive(Default)]
@@ -84,6 +120,8 @@ struct Progress {
     attempts: usize,
     target: Option<String>,
     backups: Vec<String>,
+    stage: Option<String>,
+    needs_verification: bool,
 }
 fn execute(
     options: &Options,
@@ -99,6 +137,13 @@ fn execute(
         .open(log)
         .map_err(|e| e.to_string())?;
     let lock = super::lock::acquire(&repo.common)?;
+    let identity = || {
+        let checkout = fs::symlink_metadata(&repo.path)?;
+        let common = fs::symlink_metadata(&repo.common)?;
+        Ok::<_, io::Error>((checkout.dev(), checkout.ino(), common.dev(), common.ino()))
+    };
+    let original_identity =
+        identity().map_err(|error| format!("Cannot verify repository identity: {error}"))?;
     let status_path = log.with_extension("status.json");
     let mut attempts = 0;
     let mut code = 130;
@@ -145,6 +190,7 @@ fn execute(
                 .map_err(|e| format!("cannot launch worker: {e}"))?,
             false,
         );
+        progress.needs_verification = true;
         let deadline = Instant::now() + options.timeout;
         code = loop {
             if cancelled() {
@@ -174,6 +220,8 @@ fn execute(
             }
         }
         let last_stage = &status.stage;
+        progress.stage = Some(last_stage.clone());
+        progress.needs_verification = status.checkout.is_some();
         let last_state = status.state.as_deref();
         // A successful process exit alone is insufficient: it must publish a
         // terminal record. Timeouts and cancellation are owned by this process.
@@ -196,9 +244,37 @@ fn execute(
             0 => "Reset completed".into(),
             _ => status.error.clone().unwrap(),
         };
+        if let Some(checkout) = status.checkout.as_ref().filter(|_| {
+            code == 124 && matches!(last_stage.as_str(), "reset" | "post-reset verification")
+        }) {
+            let verified = || -> Result<(), String> {
+                if identity().ok() != Some(original_identity) {
+                    return Err("Repository identity changed during reset".into());
+                }
+                super::operation::verify_checkout(&repo.path, &repo.common, checkout)?;
+                if identity().ok() != Some(original_identity) {
+                    return Err("Repository identity changed during verification".into());
+                }
+                Ok(())
+            };
+            match verified() {
+                Ok(()) => {
+                    code = 0;
+                    detail =
+                        format!("Reset completed and verified after timeout during {last_stage}");
+                }
+                Err(error) => detail.push_str(&format!("\nCould not verify the checkout: {error}")),
+            }
+        }
+        if code == 0 {
+            progress.needs_verification = false;
+        } else if progress.needs_verification {
+            detail.push_str("\nCheckout may have changed. Inspect the checkout and recovery refs before starting a new reset.");
+        }
         writeln!(output, "Outcome: {detail}").map_err(|e| e.to_string())?;
         if code == 0
             || code == 130
+            || progress.needs_verification
             || attempts == options.attempts
             || (code != 124 && !status.error.as_deref().is_some_and(retryable))
         {
@@ -272,7 +348,7 @@ fn run_inner(options: &Options, selection: Selection, started: Instant) -> Resul
     let mut history = crate::history::Run::begin(
         "git.reset",
         options.selection.clone(),
-        serde_json::json!({"remote":crate::history::safe_name(&options.remote),"branch":options.branch.as_deref().and_then(crate::history::safe_name),"retry_options_available":crate::history::safe_name(&options.remote).is_some() && options.branch.as_deref().is_none_or(|b|crate::history::safe_name(b).is_some()),"attempts":options.attempts,"timeout_seconds":options.timeout.as_secs()}),
+        serde_json::json!({"remote":crate::history::safe_name(&options.remote),"branch":options.branch.as_deref().and_then(crate::history::safe_name),"retry_options_available":crate::history::safe_name(&options.remote).is_some() && options.branch.as_deref().is_none_or(|b|crate::history::safe_name(b).is_some()),"attempts":options.attempts,"jobs":options.jobs,"timeout_seconds":options.timeout.as_secs(),"tracks_active_targets":true}),
         selection
             .repos
             .iter()
@@ -302,6 +378,7 @@ fn run_inner(options: &Options, selection: Selection, started: Instant) -> Resul
     let (tx, rx) = mpsc::channel();
     let mut rendering = crate::presentation::Progress::new(total);
     let records = thread::scope(|scope| -> Result<Vec<ResultRecord>, String> {
+        let rx = rx;
         let mut cancel_guard = CancelOnDrop(true);
         for _ in 0..options.jobs.min(total) {
             let tx = tx.clone();
@@ -317,7 +394,8 @@ fn run_inner(options: &Options, selection: Selection, started: Instant) -> Resul
                 let log = logs.join(format!("{:04}.log", index + 1));
                 let started = Instant::now();
                 let _guard = resources[&repo.common].lock().unwrap();
-                if tx.send(Event::Started(index)).is_err() {
+                let (admit, admitted) = mpsc::sync_channel(0);
+                if tx.send(Event::Started(index, admit)).is_err() || admitted.recv().is_err() {
                     cancel();
                     break;
                 }
@@ -351,6 +429,8 @@ fn run_inner(options: &Options, selection: Selection, started: Instant) -> Resul
                     detail,
                     target: progress.target,
                     backups: progress.backups,
+                    stage: progress.stage,
+                    needs_verification: progress.needs_verification,
                 };
                 if tx.send(Event::Finished(index, record)).is_err() {
                     cancel();
@@ -361,14 +441,33 @@ fn run_inner(options: &Options, selection: Selection, started: Instant) -> Resul
         drop(tx);
         let mut records = Vec::with_capacity(total);
         let mut active = HashSet::new();
+        let mut reported_migration = false;
         while records.len() < total {
             match rx.recv_timeout(Duration::from_millis(100)) {
-                Ok(Event::Started(index)) => {
+                Ok(Event::Started(index, admit)) => {
+                    // A worker may only start after its in-flight status is durable.
+                    history.outcome(
+                        &selection.repos[index].path,
+                        "running",
+                        vec![],
+                        serde_json::Value::Null,
+                    )?;
                     active.insert(index);
+                    admit
+                        .send(())
+                        .map_err(|_| "Reset worker left before admission")?;
                 }
                 Ok(Event::Finished(index, record)) => {
                     active.remove(&index);
-                    if record.code != 0 {
+                    history.outcome(
+                        &record.path,
+                        record.status(),
+                        record.backups.clone(),
+                        serde_json::json!({"kind": record.failure_kind(), "stage": record.stage, "attempts": record.attempts}),
+                    )?;
+                    let migration = record.failure_kind() == Some("bitbucket_ssh_moved");
+                    if record.code != 0 && !(migration && reported_migration) {
+                        reported_migration |= migration;
                         rendering.message(&format!(
                             "\n  {} {} ({} {})\n{}\n    Log: {}",
                             crate::presentation::status(
@@ -422,30 +521,21 @@ fn run_inner(options: &Options, selection: Selection, started: Instant) -> Resul
     }
     let ok = records.iter().filter(|r| r.code == 0).count();
     let stopped = records.iter().filter(|r| r.code == 130).count();
+    let migration_failures = records
+        .iter()
+        .filter(|r| r.failure_kind() == Some("bitbucket_ssh_moved"))
+        .count();
     let code = if cancelled() || stopped > 0 {
         130
     } else {
-        u8::from(ok != total)
+        u8::from(ok != total || !options.retry_blocked.is_empty())
     };
     let retain = code != 0 || options.keep_logs;
     // Successful-run results never refer to diagnostics that have been deleted.
     let result:Vec<_>=records.iter().map(|r| {
         let next_step = if r.code != 0 { output::remote_access_guidance(&r.path,&r.detail,&options.remote,options.branch.as_deref()) } else { None };
-        serde_json::json!({"path":r.path.to_string_lossy(),"path_bytes":crate::presentation::path_bytes(&r.path),"code":r.code,"status":if r.code==0 {"succeeded"}else if r.code==130 {"cancelled"}else{"failed"},"attempts":r.attempts,"seconds":r.seconds,"log":if retain {Some(r.log.to_string_lossy())}else{None},"detail":r.detail,"target":r.target,"backups":r.backups,"failure_kind":if next_step.is_some(){Some("remote_unavailable")}else{None},"next_step":next_step})
+        serde_json::json!({"path":r.path.to_string_lossy(),"path_bytes":crate::presentation::path_bytes(&r.path),"code":r.code,"status":if r.code==0 {"succeeded"}else if r.code==130 {"cancelled"}else{"failed"},"attempts":r.attempts,"seconds":r.seconds,"log":if retain {Some(r.log.to_string_lossy())}else{None},"detail":r.detail,"target":r.target,"backups":r.backups,"failure_kind":r.failure_kind(),"stage":r.stage,"needs_verification":r.needs_verification,"next_step":next_step})
     }).collect();
-    for record in &records {
-        history.outcome(
-            &record.path,
-            if record.code == 0 {
-                "succeeded"
-            } else if record.code == 130 {
-                "cancelled"
-            } else {
-                "failed"
-            },
-            record.backups.clone(),
-        )?;
-    }
     history.finish(if code == 0 {
         "completed"
     } else if code == 130 {
@@ -489,7 +579,7 @@ fn run_inner(options: &Options, selection: Selection, started: Instant) -> Resul
     };
     if options.json {
         if crate::presentation::json(
-            &serde_json::json!({"schema_version":1,"operation":"git.reset","run_id":history.id,"status":if code==0 {"completed"}else if code==130 {"interrupted"}else{"failed"},"scope":crate::presentation::paths(&options.paths),"selection":options.selection,"excluded":crate::presentation::paths(&selection.excluded),"skipped":super::discover::skipped_json(&selection.skipped),"results":result,"diagnostics":if retain {Some(logs.to_string_lossy())}else{None},"summary":{"skipped":selection.skipped.len(),"succeeded":ok,"failed":total-ok-stopped,"cancelled":stopped,"elapsed_seconds":started.elapsed().as_secs_f64()}}),
+            &serde_json::json!({"schema_version":1,"operation":"git.reset","run_id":history.id,"status":if code==0 {"completed"}else if code==130 {"interrupted"}else{"failed"},"scope":crate::presentation::paths(&options.paths),"selection":options.selection,"excluded":crate::presentation::paths(&selection.excluded),"skipped":super::discover::skipped_json(&selection.skipped),"results":result,"retry_blocked": options.retry_blocked,"diagnostics":if retain {Some(logs.to_string_lossy())}else{None},"summary":{"skipped":selection.skipped.len(),"succeeded":ok,"failed":total-ok-stopped,"retry_blocked":options.retry_blocked.len(),"cancelled":stopped,"elapsed_seconds":started.elapsed().as_secs_f64()}}),
         ) != 0
         {
             return Ok(1);
@@ -512,6 +602,18 @@ fn run_inner(options: &Options, selection: Selection, started: Instant) -> Resul
             crate::presentation::duration(started.elapsed())
         )
         .map_err(|e| e.to_string())?;
+        if migration_failures > 0 {
+            writeln!(out, "  {migration_failures} checkout(s) still use the retired Bitbucket SSH endpoint. Verify the route and host key for ssh.bitbucket.org, then retry run {}.", history.id)
+                .map_err(|e| e.to_string())?;
+        }
+        if !options.retry_blocked.is_empty() {
+            writeln!(
+                out,
+                "  {} retry target(s) blocked by safety checks",
+                options.retry_blocked.len()
+            )
+            .map_err(|e| e.to_string())?;
+        }
         let backups: usize = records.iter().map(|record| record.backups.len()).sum();
         if backups > 0 {
             writeln!(
