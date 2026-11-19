@@ -1,6 +1,6 @@
 ---
 name: one-clear-sentence
-description: Rewrite a source or relevant takeaway as exactly one useful, self-contained, plain sentence. Use when the user explicitly asks for one sentence, a single-sentence rewrite, or compression to one concise takeaway. Use one-clear-paragraph for a single-paragraph synthesis and plain-edit for style cleanup that preserves the source structure.
+description: Rewrite a source or relevant takeaway as exactly one useful, self-contained, plain sentence. Use when the user explicitly asks for one sentence, a single-sentence rewrite, or compression to one concise takeaway. Use plain-edit for style cleanup that preserves the source structure.
 ---
 
 Write exactly one self-contained sentence and nothing else.

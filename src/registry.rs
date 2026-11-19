@@ -48,7 +48,6 @@ const REQUIRED_CUSTOM_SKILL_NAMES: &[&str] = &[
     "git-publish",
     "git-publish-to-origin",
     "grill-me",
-    "one-clear-paragraph",
     "one-clear-sentence",
     "plain-edit",
     "prove-check",
@@ -56,7 +55,6 @@ const REQUIRED_CUSTOM_SKILL_NAMES: &[&str] = &[
     "e2e-live-check",
     "reconcile-plan",
     "resolve-conflict",
-    "resume-branch-work",
     "review-deep",
     "review-solo",
     "strengthen-tests",
@@ -81,7 +79,6 @@ const REQUIRED_CUSTOM_SKILL_NAMES: &[&str] = &[
     "update-agi-essay",
     "workctl",
     "write-review-request",
-    "write-up",
 ];
 
 fn parse_front_matter(path: &Path) -> Result<Mapping> {

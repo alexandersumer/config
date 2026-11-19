@@ -1,6 +1,6 @@
 ---
 name: plain-edit
-description: Tighten existing writing while preserving meaning, structure, and voice. Use for plain-language cleanup or removing AI-style phrasing. Use write-up for drafting or restructuring, and one-clear-sentence or one-clear-paragraph for compression.
+description: Tighten existing writing while preserving meaning, structure, and voice. Use for plain-language cleanup or removing AI-style phrasing. Use one-clear-sentence when the user asks for a single sentence.
 ---
 
 Edit the target text so it reads as if a clear human wrote it. Return the edited text, not a critique of it.
@@ -21,7 +21,7 @@ This is mechanical style cleanup: remove the AI-default voice and tighten the pr
 - Format and markup exactly: headings, lists, code, links, tables, quotes. Strip only stray markup that was clearly an error.
 - Domain terms of art (see "Keep what is load-bearing").
 
-If the text needs real restructuring, fact-checking, or a fresh draft, say that is `write-up` rather than silently doing it.
+Apply this workflow to style cleanup. Follow explicit requests for restructuring, fact-checking, or drafting as separate writing tasks.
 
 ## What to cut and fix
 

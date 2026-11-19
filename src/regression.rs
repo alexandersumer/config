@@ -144,7 +144,6 @@ fn test_one_clear_sentence_skill_rewrites_recent_context() -> Result<()> {
         "drop file inventories, examples, subtask lists, and incidental evidence",
         "Do not acknowledge, confirm, promise future behavior",
         "Use when the user explicitly asks for one sentence",
-        "Use one-clear-paragraph for a single-paragraph synthesis",
         "plain-edit for style cleanup that preserves the source structure",
         "Got it",
         "I will use that style",
@@ -246,14 +245,6 @@ fn test_mutating_skill_write_boundaries() -> Result<()> {
             &[
                 "git merge --no-commit",
                 "complete the merge commit only after",
-            ],
-        ),
-        (
-            "resume-branch-work",
-            &[
-                "source of intended scope",
-                "source of truth for current implementation state",
-                "intended scope and final effective diff",
             ],
         ),
         (
