@@ -11,7 +11,7 @@ use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::{
-    fs::{MetadataExt, OpenOptionsExt},
+    fs::{FileExt, MetadataExt, OpenOptionsExt},
     process::CommandExt,
 };
 use std::path::PathBuf;
@@ -132,6 +132,81 @@ struct Progress {
     stage: Option<String>,
     needs_verification: bool,
 }
+
+const DEFAULT_MAX_ATTEMPT: Duration = Duration::from_secs(30 * 60);
+
+struct AttemptDeadline {
+    window: Duration,
+    expires: Instant,
+    cap: Option<Instant>,
+}
+
+impl AttemptDeadline {
+    fn new(start: Instant, window: Duration, extend_on_fetch_progress: bool) -> Self {
+        Self {
+            window,
+            expires: start + window,
+            cap: extend_on_fetch_progress.then(|| start + DEFAULT_MAX_ATTEMPT),
+        }
+    }
+
+    fn observe(&mut self, now: Instant, fetch_output_changed: bool) {
+        if let Some(cap) = self.cap.filter(|_| fetch_output_changed) {
+            self.expires = (now + self.window).min(cap);
+        }
+    }
+
+    fn reached_cap(&self, now: Instant) -> bool {
+        self.cap.is_some_and(|cap| now >= cap)
+    }
+}
+
+#[cfg(test)]
+mod deadline_tests {
+    use super::*;
+
+    #[test]
+    fn fetch_activity_renews_the_default_deadline_until_the_attempt_cap() {
+        let start = Instant::now();
+        let window = Duration::from_secs(300);
+        let at = |seconds| start + Duration::from_secs(seconds);
+        let mut deadline = AttemptDeadline::new(start, window, true);
+
+        deadline.observe(at(200), true);
+        assert_eq!(deadline.expires, at(500));
+        deadline.observe(at(450), false);
+        assert_eq!(deadline.expires, at(500));
+
+        for seconds in (450..1800).step_by(250) {
+            deadline.observe(at(seconds), true);
+        }
+        assert_eq!(deadline.expires, start + DEFAULT_MAX_ATTEMPT);
+        assert!(deadline.reached_cap(deadline.expires));
+
+        let mut fixed = AttemptDeadline::new(start, window, false);
+        fixed.observe(at(200), true);
+        assert_eq!(fixed.expires, at(300));
+    }
+}
+
+fn last_fetch_output(stderr: &fs::File) -> Option<String> {
+    let offset = stderr.metadata().ok()?.len().saturating_sub(4096);
+    let mut tail = [0; 4096];
+    let size = stderr.read_at(&mut tail, offset).ok()?;
+    let mut lines = tail[..size].split(|byte| matches!(byte, b'\n' | b'\r'));
+    if offset != 0 {
+        // Only show complete records so redaction sees an entire URL.
+        lines.next();
+    }
+    // A process killed mid-write may have left a partial diagnostic.
+    lines.next_back();
+    lines
+        .filter_map(|line| std::str::from_utf8(line).ok().map(str::trim))
+        .filter(|line| !line.is_empty())
+        .last()
+        .map(super::git::diagnostic)
+}
+
 fn execute(
     options: &Options,
     repo: &Repo,
@@ -166,6 +241,7 @@ fn execute(
         }
         .write(&status_path)?;
         let executable = std::env::current_exe().map_err(|e| e.to_string())?;
+        let fetch_stderr = tempfile::tempfile().map_err(|error| error.to_string())?;
         let mut command = Command::new(executable);
         command
             .args([
@@ -180,11 +256,15 @@ fn execute(
             .stderr(output.try_clone().map_err(|e| e.to_string())?)
             .process_group(0);
         let fd = lock.as_raw_fd();
+        let fetch_fd = fetch_stderr.as_raw_fd();
         command.env("RESET_TO_ORIGIN_WORKER_LOCK", fd.to_string());
+        command.env("RESET_TO_ORIGIN_WORKER_FETCH_STDERR", fetch_fd.to_string());
         command.env("RESET_TO_ORIGIN_WORKER_STATUS", &status_path);
         unsafe {
             command.pre_exec(move || {
-                if libc::fcntl(fd, libc::F_SETFD, 0) == -1 {
+                if libc::fcntl(fd, libc::F_SETFD, 0) == -1
+                    || libc::fcntl(fetch_fd, libc::F_SETFD, 0) == -1
+                {
                     return Err(io::Error::last_os_error());
                 }
                 Ok(())
@@ -201,21 +281,39 @@ fn execute(
             false,
         );
         progress.needs_verification = true;
-        let deadline = Instant::now() + options.timeout;
-        code = loop {
+        let start = Instant::now();
+        let mut deadline =
+            AttemptDeadline::new(start, options.timeout, options.extend_on_fetch_progress);
+        let mut last_sample = start;
+        let mut observed = 0;
+        let (exit_code, reached_cap) = loop {
             if cancelled() {
-                break 130;
+                break (130, false);
             }
-            if Instant::now() >= deadline {
-                break 124;
+            let now = Instant::now();
+            if options.extend_on_fetch_progress
+                && (now.duration_since(last_sample) >= Duration::from_millis(250)
+                    || now >= deadline.expires)
+            {
+                let size = fetch_stderr
+                    .metadata()
+                    .map_err(|error| error.to_string())?
+                    .len();
+                deadline.observe(now, size != observed);
+                observed = size;
+                last_sample = now;
+            }
+            if now >= deadline.expires {
+                break (124, deadline.reached_cap(now));
             }
             if exited(&mut child.0)? {
                 let status = stop_group(&mut child.0)?;
                 child.1 = true;
-                break status.code().unwrap_or(1);
+                break (status.code().unwrap_or(1), false);
             }
             thread::sleep(Duration::from_millis(10));
         };
+        code = exit_code;
         if !child.1 {
             stop_group(&mut child.0)?;
             child.1 = true;
@@ -254,6 +352,15 @@ fn execute(
             0 => "Reset completed".into(),
             _ => status.error.clone().unwrap(),
         };
+        if reached_cap {
+            detail.push_str("\nReached the default 30-minute attempt limit. Retry this checkout with an explicit --timeout if it needs more time.");
+        }
+        if matches!(code, 124 | 130) && last_stage == "fetch" {
+            if let Some(last_output) = last_fetch_output(&fetch_stderr) {
+                writeln!(output, "Last Git fetch output: {last_output}")
+                    .map_err(|e| e.to_string())?;
+            }
+        }
         if let Some(checkout) = status.checkout.as_ref().filter(|_| {
             code == 124 && matches!(last_stage.as_str(), "reset" | "post-reset verification")
         }) {
@@ -284,6 +391,7 @@ fn execute(
         writeln!(output, "Outcome: {detail}").map_err(|e| e.to_string())?;
         if code == 0
             || code == 130
+            || reached_cap
             || progress.needs_verification
             || attempts == options.attempts
             || (code != 124
@@ -362,7 +470,7 @@ fn run_inner(options: &Options, selection: Selection, started: Instant) -> Resul
     let mut history = crate::history::Run::begin(
         "git.reset",
         options.selection.clone(),
-        serde_json::json!({"remote":crate::history::safe_name(&options.remote),"branch":options.branch.as_deref().and_then(crate::history::safe_name),"retry_options_available":crate::history::safe_name(&options.remote).is_some() && options.branch.as_deref().is_none_or(|b|crate::history::safe_name(b).is_some()),"attempts":options.attempts,"jobs":options.jobs,"timeout_seconds":options.timeout.as_secs(),"tracks_active_targets":true}),
+        serde_json::json!({"remote":crate::history::safe_name(&options.remote),"branch":options.branch.as_deref().and_then(crate::history::safe_name),"retry_options_available":crate::history::safe_name(&options.remote).is_some() && options.branch.as_deref().is_none_or(|b|crate::history::safe_name(b).is_some()),"attempts":options.attempts,"jobs":options.jobs,"timeout_seconds":options.timeout.as_secs(),"timeout_mode":if options.extend_on_fetch_progress { "fetch_activity" } else { "fixed" },"tracks_active_targets":true}),
         selection
             .repos
             .iter()

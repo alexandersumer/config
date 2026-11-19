@@ -70,9 +70,14 @@ receive no additional backup. Successful runs summarize saved recovery refs;
 commands by default, and JSON always includes the exact backup refs.
 
 Reset uses up to 32 workers by default, bounded by checkout count. `--jobs` accepts 1–32,
-`--attempts` accepts 1–10 total attempts, and `--timeout` accepts 1–86400 seconds
-per attempt. Before switching the checkout, transient failures use bounded
-backoff. Authentication, locks, and safety refusals are not retried. For a
+`--attempts` accepts 1–10 total attempts. By default each attempt has a five-minute
+deadline. Git fetch output renews that window while a transfer is active, up to
+30 minutes from the start of the attempt. Reaching the 30-minute cap stops retries
+for that checkout. An explicit `--timeout SECONDS` sets a fixed deadline of
+1–86400 seconds for each attempt. If a fetch times out, its log includes the last
+available Git message with credentials redacted. Before switching the checkout,
+transient failures use bounded backoff. Authentication, locks, and safety refusals
+are not retried. For a
 timeout during or just after the hard reset, a separate five-second read-only
 check can confirm the exact branch, commit, upstream, and clean checkout. If
 the checkout may have changed and that result cannot be verified, the target

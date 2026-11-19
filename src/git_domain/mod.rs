@@ -21,6 +21,7 @@ pub(super) struct Options {
     pub jobs: usize,
     pub attempts: usize,
     pub timeout: Duration,
+    pub extend_on_fetch_progress: bool,
     pub list: bool,
     pub verbose: bool,
     pub keep_logs: bool,
@@ -53,7 +54,7 @@ pub(crate) struct ResetArgs {
     /// Total attempts per repository (1-10, default 3)
     #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..=10))]
     pub attempts: Option<u32>,
-    /// Deadline for the entire attempt (1-86400 seconds, default 300)
+    /// Fixed deadline per attempt (1-86400 seconds; by default Git fetch activity renews a 300-second deadline)
     #[arg(long, value_name = "SECONDS", value_parser = clap::value_parser!(u32).range(1..=86_400))]
     pub timeout: Option<u32>,
     /// Known remote commit already available locally, used for fetch negotiation in one checkout
@@ -168,9 +169,11 @@ pub(crate) fn run(mut cli: ResetArgs, json: bool) -> u8 {
             };
             cli.jobs = cli.jobs.or_else(|| saved_limit("jobs", 32));
             cli.attempts = cli.attempts.or_else(|| saved_limit("attempts", 10));
-            cli.timeout = cli
-                .timeout
-                .or_else(|| saved_limit("timeout_seconds", 86_400));
+            if prior["options"]["timeout_mode"] != "fetch_activity" {
+                cli.timeout = cli
+                    .timeout
+                    .or_else(|| saved_limit("timeout_seconds", 86_400));
+            }
         }
         cli.scope.resolve(&cli.paths)
     })();
@@ -206,6 +209,7 @@ pub(crate) fn run(mut cli: ResetArgs, json: bool) -> u8 {
         jobs: cli.jobs.unwrap_or(32) as usize,
         attempts: cli.attempts.unwrap_or(3) as usize,
         timeout: Duration::from_secs(cli.timeout.unwrap_or(300).into()),
+        extend_on_fetch_progress: cli.timeout.is_none(),
         list: cli.list,
         verbose: cli.verbose,
         keep_logs: cli.keep_logs,

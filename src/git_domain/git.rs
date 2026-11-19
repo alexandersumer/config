@@ -176,7 +176,20 @@ impl Git {
         self.call_os(&args)
     }
     pub fn call_os(&self, args: &[&OsStr]) -> Result<Vec<u8>, String> {
-        let (code, out, err) = capture_with_deadline(&self.cwd, args, self.deadline)?;
+        self.call_captured(args, None)
+    }
+    fn call_captured(
+        &self,
+        args: &[&OsStr],
+        fetch_stderr: Option<&fs::File>,
+    ) -> Result<Vec<u8>, String> {
+        let (code, out, err) = if let Some(stderr) = fetch_stderr {
+            let mut cmd = command(&self.cwd);
+            cmd.args(args);
+            crate::runtime::capture_reset_fetch(cmd, stderr)?
+        } else {
+            capture_with_deadline(&self.cwd, args, self.deadline)?
+        };
         // Logs contain stderr from successful hooks as well as failed commands.
         if !err.is_empty() {
             eprint!("{}", redact(OsString::from_vec(err.clone())));
@@ -235,19 +248,24 @@ impl Git {
         effective_url: &str,
         redirect: &mut Option<String>,
         args: &[&str],
+        fetch_stderr: Option<&fs::File>,
         before_retry: impl FnOnce() -> Result<(), String>,
     ) -> Result<Vec<u8>, String> {
+        let call = |args: &[&str]| {
+            let args: Vec<_> = args.iter().map(OsStr::new).collect();
+            self.call_captured(&args, fetch_stderr)
+        };
         let redirected = |rewrite: &str| {
             let args: Vec<_> = ["-c", rewrite]
                 .into_iter()
                 .chain(args.iter().copied())
                 .collect();
-            self.call(&args)
+            call(&args)
         };
         if let Some(rewrite) = redirect {
             return redirected(rewrite);
         }
-        let error = match self.call(args) {
+        let error = match call(args) {
             Ok(output) => return Ok(output),
             Err(error) if bitbucket_ssh_moved(&error) => error,
             Err(error) => return Err(error),

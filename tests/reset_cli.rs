@@ -677,7 +677,11 @@ fn fetch_timeout_cancellation_and_normal_completion_reap_descendants() {
             "for arg in \"$@\"; do\n if [ \"$arg\" = ls-remote ]; then {} fi\n if [ \"$arg\" = fetch ]; then\n  (n=0; while [ ! -e '{}' ] && [ \"$n\" -lt 400 ]; do sleep 0.05; n=$((n+1)); done; [ ! -e '{}' ] || touch '{}') &\n  echo $! > '{}'\n  echo $$ > '{}'\n  {}\n fi\ndone",
             if mode == "timeout" { "sleep 2;" } else { ":;" },
             release.display(), release.display(), escaped.display(), descendant.display(),
-            marker.display(), if mode == "normal" { ":" } else { "sleep 20" }
+            marker.display(), match mode {
+                "normal" => ":",
+                "timeout" => "while :; do printf 'Receiving objects from https://user:secret@example.com/repo\\r' >&2; sleep 1; done",
+                _ => "sleep 20",
+            }
         );
         let dir = f.shim(&script);
         let timeout = if mode == "timeout" { "8" } else { "30" };
@@ -725,6 +729,11 @@ fn fetch_timeout_cancellation_and_normal_completion_reap_descendants() {
             assert!(record["backups"].as_array().unwrap().is_empty());
         } else {
             assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.new);
+        }
+        if mode == "timeout" {
+            let log = fs::read_to_string(logs(&out).join("0001.log")).unwrap();
+            assert!(log.contains("Last Git fetch output: Receiving objects from https://[redacted]@example.com/repo"), "{log}");
+            assert!(!log.contains("user:secret"), "{log}");
         }
         let pid = fs::read_to_string(descendant)
             .unwrap()
@@ -1977,6 +1986,7 @@ fn retry_continues_past_a_replaced_checkout_with_the_original_limits() {
     );
     assert_eq!(history["options"]["attempts"], 1);
     assert_eq!(history["options"]["timeout_seconds"], 17);
+    assert_eq!(history["options"]["timeout_mode"], "fixed");
     assert_eq!(history["options"]["jobs"], 1);
 }
 

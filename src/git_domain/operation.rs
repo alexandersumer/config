@@ -222,6 +222,7 @@ impl Operation {
         remote: &str,
         explicit: Option<&str>,
         hint: Option<&str>,
+        fetch_stderr: &fs::File,
     ) -> Result<(), String> {
         self.stage("preflight")?;
         self.clean()?;
@@ -259,7 +260,7 @@ impl Operation {
         }
         let advertised = git::reference_text(
             self.git
-                .remote_call(remote, effective_url, &mut redirect, &args, || Ok(()))
+                .remote_call(remote, effective_url, &mut redirect, &args, None, || Ok(()))
                 .map_err(remote_error)?,
         )?;
         let branch = match explicit {
@@ -317,6 +318,7 @@ impl Operation {
             "-c",
             "gc.auto=0",
             "fetch",
+            "--progress",
             "--atomic",
             "--write-fetch-head",
             "--no-tags",
@@ -353,9 +355,14 @@ impl Operation {
         args.extend([remote, &refspec]);
         let output = self
             .git
-            .remote_call(remote, effective_url, &mut redirect, &args, || {
-                self.clear_fetch_head()
-            })
+            .remote_call(
+                remote,
+                effective_url,
+                &mut redirect,
+                &args,
+                Some(fetch_stderr),
+                || self.clear_fetch_head(),
+            )
             .map_err(remote_error)?;
         print!("{}", git::redact(OsString::from_vec(output)));
         // A stale preexisting tracking ref is not proof that this fetch included it.
@@ -632,6 +639,22 @@ pub(super) fn worker(args: &[OsString]) -> u8 {
         );
         return 1;
     }
+    let Some(fetch_fd) = std::env::var("RESET_TO_ORIGIN_WORKER_FETCH_STDERR")
+        .ok()
+        .and_then(|value| value.parse::<i32>().ok())
+        .filter(|&fd| fd > 2 && Some(fd) != inherited_lock)
+    else {
+        eprintln!("Internal workers require a supervisor-owned fetch output file");
+        return 2;
+    };
+    if unsafe { libc::fcntl(fetch_fd, libc::F_SETFD, libc::FD_CLOEXEC) } == -1 {
+        eprintln!(
+            "Cannot isolate fetch output file: {}",
+            std::io::Error::last_os_error()
+        );
+        return 1;
+    }
+    let fetch_stderr = unsafe { fs::File::from_raw_fd(fetch_fd) };
     let git = match Git::new(cwd) {
         Ok(git) => git,
         Err(e) => {
@@ -668,6 +691,7 @@ pub(super) fn worker(args: &[OsString]) -> u8 {
             Some(branch)
         },
         (!hint.is_empty()).then_some(hint),
+        &fetch_stderr,
     );
     if let Err(error) = &result {
         let error = git::redact(error);

@@ -222,7 +222,36 @@ pub(crate) fn capture(
     timeout: std::time::Duration,
     own_group: bool,
 ) -> Result<(i32, Vec<u8>, Vec<u8>), String> {
-    capture_inner(cmd, timeout, own_group, false, std::process::Stdio::null())
+    capture_inner(
+        cmd,
+        timeout,
+        own_group,
+        false,
+        std::process::Stdio::null(),
+        None,
+    )
+}
+
+/// The reset supervisor owns this worker's process group and observes the
+/// anonymous stderr file while Git runs. Only redacted output reaches its log.
+pub(crate) fn capture_reset_fetch(
+    cmd: std::process::Command,
+    stderr: &std::fs::File,
+) -> Result<(i32, Vec<u8>, Vec<u8>), String> {
+    use std::io::Seek;
+    stderr.set_len(0).map_err(|error| error.to_string())?;
+    stderr
+        .try_clone()
+        .and_then(|mut file| file.rewind())
+        .map_err(|error| error.to_string())?;
+    capture_inner(
+        cmd,
+        std::time::Duration::ZERO,
+        false,
+        false,
+        std::process::Stdio::null(),
+        Some(stderr),
+    )
 }
 
 pub(crate) fn capture_with_input(
@@ -231,7 +260,7 @@ pub(crate) fn capture_with_input(
     own_group: bool,
     input: std::fs::File,
 ) -> Result<(i32, Vec<u8>, Vec<u8>), String> {
-    capture_inner(cmd, timeout, own_group, false, input.into())
+    capture_inner(cmd, timeout, own_group, false, input.into(), None)
 }
 
 /// A lock-owning supervisor must survive cancellation until its Git group is
@@ -240,7 +269,7 @@ pub(crate) fn capture_guarded(
     cmd: std::process::Command,
     timeout: std::time::Duration,
 ) -> Result<(i32, Vec<u8>, Vec<u8>), String> {
-    capture_inner(cmd, timeout, true, true, std::process::Stdio::null())
+    capture_inner(cmd, timeout, true, true, std::process::Stdio::null(), None)
 }
 
 fn stop_guarded(child: &mut Child) -> Result<bool, String> {
@@ -268,11 +297,14 @@ fn capture_inner(
     own_group: bool,
     guarded: bool,
     stdin: std::process::Stdio,
+    stderr: Option<&std::fs::File>,
 ) -> Result<(i32, Vec<u8>, Vec<u8>), String> {
     use std::io::{Read, Seek};
     use std::os::unix::process::CommandExt;
     let mut out = tempfile::tempfile().map_err(|e| e.to_string())?;
-    let mut err = tempfile::tempfile().map_err(|e| e.to_string())?;
+    let mut err = stderr
+        .map_or_else(tempfile::tempfile, std::fs::File::try_clone)
+        .map_err(|e| e.to_string())?;
     cmd.stdout(out.try_clone().map_err(|e| e.to_string())?)
         .stderr(err.try_clone().map_err(|e| e.to_string())?)
         .stdin(stdin);
