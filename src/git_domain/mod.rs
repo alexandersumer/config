@@ -27,6 +27,7 @@ pub(super) struct Options {
     pub json: bool,
     pub selection: serde_json::Value,
     pub retry_blocked: Vec<serde_json::Value>,
+    pub negotiation_tip: Option<String>,
 }
 
 /// Clap owns syntax, help, version, suggestions, and typed value validation.
@@ -55,6 +56,9 @@ pub(crate) struct ResetArgs {
     /// Deadline for the entire attempt (1-86400 seconds, default 300)
     #[arg(long, value_name = "SECONDS", value_parser = clap::value_parser!(u32).range(1..=86_400))]
     pub timeout: Option<u32>,
+    /// Known remote commit already available locally, used for fetch negotiation in one checkout
+    #[arg(long, value_name = "OID", value_parser = object_id, conflicts_with = "list")]
+    pub negotiation_tip: Option<String>,
     /// Discover and list targets without modifying repositories
     #[arg(long)]
     pub list: bool,
@@ -72,6 +76,16 @@ fn git_name(value: &str) -> Result<String, String> {
     } else {
         Ok(value.into())
     }
+}
+
+fn object_id(value: &str) -> Result<String, String> {
+    if !matches!(value.len(), 40 | 64)
+        || !value.bytes().all(|byte| byte.is_ascii_hexdigit())
+        || value.bytes().all(|byte| byte == b'0')
+    {
+        return Err("expected a full Git commit object ID".into());
+    }
+    Ok(value.to_ascii_lowercase())
 }
 
 pub(crate) fn worker(args: &[OsString]) -> u8 {
@@ -197,6 +211,7 @@ pub(crate) fn run(mut cli: ResetArgs, json: bool) -> u8 {
         keep_logs: cli.keep_logs,
         json,
         retry_blocked,
+        negotiation_tip: cli.negotiation_tip,
     };
     let _signals = match crate::runtime::Signals::install() {
         Ok(s) => s,
@@ -212,6 +227,9 @@ pub(crate) fn run(mut cli: ResetArgs, json: bool) -> u8 {
             .retain(|r| !resolved.protected_target(&r.path));
         selection.excluded.retain(|p| !resolved.excluded(p));
         selection.skipped.retain(|p, _| !resolved.excluded(p));
+        if options.negotiation_tip.is_some() && selection.repos.len() != 1 {
+            return Err("--negotiation-tip requires exactly one selected checkout".into());
+        }
         discover::report_skipped(&selection.skipped)?;
         Ok(selection)
     }) {

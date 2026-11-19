@@ -217,9 +217,23 @@ impl Operation {
             Err(e) => Err(format!("Cannot clear previous FETCH_HEAD: {e}")),
         }
     }
-    fn reset(&mut self, remote: &str, explicit: Option<&str>) -> Result<(), String> {
+    fn reset(
+        &mut self,
+        remote: &str,
+        explicit: Option<&str>,
+        hint: Option<&str>,
+    ) -> Result<(), String> {
         self.stage("preflight")?;
         self.clean()?;
+        if let Some(hint) = hint {
+            super::object_id(hint)?;
+            if !self.git.has_local_commit(hint) {
+                return Err(
+                    "Fetch negotiation tip could not be verified as a locally available commit"
+                        .into(),
+                );
+            }
+        }
         let url = self.git.call(&["remote", "get-url", remote])?;
         let url = OsString::from_vec(url.strip_suffix(b"\n").unwrap_or(&url).to_vec());
         let effective_url = url.to_str().unwrap_or_default();
@@ -281,6 +295,8 @@ impl Operation {
             .find(|(value, name)| !value.starts_with("ref:") && *name == advertised_ref)
             .map(|(oid, _)| oid.to_owned())
             .ok_or("Target branch is not advertised by the remote")?;
+        let oid =
+            super::object_id(&oid).map_err(|_| "Remote advertised an invalid commit object ID")?;
         let specs = self
             .git
             .text(&["config", "--get-all", &format!("remote.{remote}.fetch")])?;
@@ -295,30 +311,51 @@ impl Operation {
         // without writing FETCH_HEAD (for example through a wrapper).
         self.clear_fetch_head()?;
         let refspec = format!("+{full}:{destination}");
+        let mut args = vec![
+            "-c",
+            "maintenance.auto=false",
+            "-c",
+            "gc.auto=0",
+            "fetch",
+            "--atomic",
+            "--write-fetch-head",
+            "--no-tags",
+            "--no-prune",
+            "--no-prune-tags",
+            "--no-recurse-submodules",
+            "--refmap=",
+        ];
+        let tip = if let Some(hint) = hint {
+            Some(hint)
+        } else if self.git.text(&["rev-parse", "--is-shallow-repository"])? == "true"
+            && self.git.has_local_commit(&oid)
+        {
+            Some(oid.as_str())
+        } else {
+            None
+        };
+        let tip_option = tip.map(|tip| format!("--negotiation-tip={tip}"));
+        let previous_tip = if tip.is_some()
+            && self
+                .git
+                .optional(&["show-ref", "--verify", "--quiet", &destination])?
+                .is_some()
+        {
+            Some(format!("--negotiation-tip={destination}"))
+        } else {
+            None
+        };
+        if let (Some(tip), Some(option)) = (tip, tip_option.as_deref()) {
+            println!("Fetch negotiation uses a locally available remote commit: {tip}");
+            args.push(option);
+            args.extend(previous_tip.as_deref());
+        }
+        args.extend([remote, &refspec]);
         let output = self
             .git
-            .remote_call(
-                remote,
-                effective_url,
-                &mut redirect,
-                &[
-                    "-c",
-                    "maintenance.auto=false",
-                    "-c",
-                    "gc.auto=0",
-                    "fetch",
-                    "--atomic",
-                    "--write-fetch-head",
-                    "--no-tags",
-                    "--no-prune",
-                    "--no-prune-tags",
-                    "--no-recurse-submodules",
-                    "--refmap=",
-                    remote,
-                    &refspec,
-                ],
-                || self.clear_fetch_head(),
-            )
+            .remote_call(remote, effective_url, &mut redirect, &args, || {
+                self.clear_fetch_head()
+            })
             .map_err(remote_error)?;
         print!("{}", git::redact(OsString::from_vec(output)));
         // A stale preexisting tracking ref is not proof that this fetch included it.
@@ -561,7 +598,7 @@ pub(super) fn worker(args: &[OsString]) -> u8 {
         eprintln!("Internal workers require a supervisor-owned repository lock");
         return 2;
     }
-    if args.len() != 2 {
+    if args.len() != 3 {
         eprintln!("Invalid internal worker arguments");
         return 2;
     }
@@ -569,6 +606,9 @@ pub(super) fn worker(args: &[OsString]) -> u8 {
         return 2;
     };
     let Some(branch) = args[1].to_str() else {
+        return 2;
+    };
+    let Some(hint) = args[2].to_str() else {
         return 2;
     };
     let cwd = match std::env::current_dir() {
@@ -627,6 +667,7 @@ pub(super) fn worker(args: &[OsString]) -> u8 {
         } else {
             Some(branch)
         },
+        (!hint.is_empty()).then_some(hint),
     );
     if let Err(error) = &result {
         let error = git::redact(error);

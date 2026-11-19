@@ -93,6 +93,11 @@ impl ResultRecord {
             130 => Some("cancelled"),
             _ if super::git::bitbucket_ssh_moved(&self.detail) => Some("bitbucket_ssh_moved"),
             _ if super::git::remote_access_error(&self.detail) => Some("remote_unavailable"),
+            _ if fetch_disconnected(&self.detail, self.stage.as_deref())
+                && retryable(&self.detail, self.stage.as_deref()) =>
+            {
+                Some("fetch_disconnected")
+            }
             _ if self
                 .detail
                 .starts_with("Repository is busy or cannot be locked") =>
@@ -104,7 +109,11 @@ impl ResultRecord {
     }
 }
 
-fn retryable(text: &str) -> bool {
+fn fetch_disconnected(text: &str, stage: Option<&str>) -> bool {
+    stage == Some("fetch") && text.contains("fatal: Could not read from remote repository.")
+}
+
+fn retryable(text: &str, stage: Option<&str>) -> bool {
     static PERMANENT: OnceLock<Regex> = OnceLock::new();
     static TRANSIENT: OnceLock<Regex> = OnceLock::new();
     let permanent = PERMANENT.get_or_init(|| Regex::new(r"(?i)Permission denied|Access denied|Forbidden|Authentication failed|could not read Username|Host key verification failed|You may not have access to this repository|refusing|would be overwritten|Git operation in progress|cannot lock|Repository is busy").unwrap());
@@ -112,7 +121,7 @@ fn retryable(text: &str) -> bool {
     !super::git::remote_access_error(text)
         && !super::git::bitbucket_ssh_moved(text)
         && !permanent.is_match(text)
-        && transient.is_match(text)
+        && (transient.is_match(text) || fetch_disconnected(text, stage))
 }
 
 #[derive(Default)]
@@ -163,6 +172,7 @@ fn execute(
                 "--internal-reset-worker",
                 &options.remote,
                 options.branch.as_deref().unwrap_or(""),
+                options.negotiation_tip.as_deref().unwrap_or(""),
             ])
             .current_dir(&repo.path)
             .stdin(Stdio::null())
@@ -276,7 +286,11 @@ fn execute(
             || code == 130
             || progress.needs_verification
             || attempts == options.attempts
-            || (code != 124 && !status.error.as_deref().is_some_and(retryable))
+            || (code != 124
+                && !status
+                    .error
+                    .as_deref()
+                    .is_some_and(|error| retryable(error, Some(last_stage))))
         {
             break;
         }
@@ -676,7 +690,7 @@ mod tests {
             "early EOF",
             "Could not resolve hostname",
         ] {
-            assert!(retryable(text));
+            assert!(retryable(text, None));
         }
         for text in [
             "HTTP/2 401",
@@ -685,7 +699,7 @@ mod tests {
             "cannot lock ref",
             "refusing reset; Connection reset",
         ] {
-            assert!(!retryable(text));
+            assert!(!retryable(text, Some("fetch")));
         }
     }
 }

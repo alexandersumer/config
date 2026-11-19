@@ -1058,6 +1058,107 @@ fn empty_container_succeeds_without_logs_or_mutation() {
 }
 
 #[test]
+fn generic_disconnect_retries_fetch_but_not_initial_remote_lookup() {
+    for stage in ["fetch", "ls-remote"] {
+        let f = Fixture::new();
+        let failed_once = f.temp.path().join("failed-once");
+        let shim = f.shim(&format!(
+            r#"for arg do
+                if [ "$arg" = '{stage}' ] && [ ! -e '{}' ]; then
+                    touch '{}'
+                    printf '%s\n' 'fatal: Could not read from remote repository.' >&2
+                    exit 128
+                fi
+            done"#,
+            failed_once.display(),
+            failed_once.display()
+        ));
+        let mut cmd = f.cli(&f.repo, &[OsStr::new("--attempts=2"), OsStr::new("--json")]);
+        f.with_shim(&mut cmd, &shim);
+        let out = cmd.output().unwrap();
+        let parsed: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        if stage == "fetch" {
+            success(&out);
+            assert_eq!(parsed["results"][0]["attempts"], 2);
+            assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.new);
+        } else {
+            assert_eq!(out.status.code(), Some(1));
+            assert_eq!(parsed["results"][0]["attempts"], 1);
+            assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.old);
+        }
+    }
+}
+
+#[test]
+fn shallow_fetch_uses_local_advertisement_without_changing_depth_or_target() {
+    let f = Fixture::new();
+    let shallow = f.workspace.join("shallow");
+    git(&f.origin, &["update-ref", "refs/heads/main", &f.old]);
+    let url = format!("file://{}", f.origin.display());
+    git(
+        &f.workspace,
+        &["clone", "--depth=1", &url, origin_arg(&shallow)],
+    );
+    git(&f.origin, &["update-ref", "refs/heads/main", &f.new]);
+    let shallow_path = shallow.join(".git/shallow");
+    let boundary = fs::read(&shallow_path).unwrap();
+    fs::write(
+        shallow.join(".git/objects/info/alternates"),
+        format!("{}/objects\n", f.origin.display()),
+    )
+    .unwrap();
+    let marker = f.temp.path().join("hint");
+    let shim = f.shim(&format!(
+        r#"for arg do
+            if [ "$arg" = '--negotiation-tip={}' ]; then
+                touch '{}'
+            fi
+        done"#,
+        f.new,
+        marker.display()
+    ));
+    let mut cmd = f.cli(&shallow, &[]);
+    f.with_shim(&mut cmd, &shim);
+    success(&cmd.output().unwrap());
+    assert!(
+        marker.is_file(),
+        "the locally available advertised commit was not offered"
+    );
+    assert_eq!(git(&shallow, &["rev-parse", "HEAD"]), f.new);
+    assert_eq!(fs::read(&shallow_path).unwrap(), boundary);
+}
+
+#[test]
+fn explicit_negotiation_tip_is_local_and_cannot_select_the_reset_commit() {
+    let f = Fixture::new();
+    let missing = "f".repeat(f.old.len());
+    let absent = f.run(&f.repo, &["--negotiation-tip", &missing]);
+    failure(&absent, "locally available commit");
+    assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.old);
+
+    let other = f.clone("another repo");
+    let batch = f.run(&f.workspace, &["--negotiation-tip", &f.old]);
+    failure(&batch, "requires exactly one selected checkout");
+    assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.old);
+    assert_eq!(git(&other, &["rev-parse", "HEAD"]), f.new);
+
+    let marker = f.temp.path().join("explicit-tip");
+    let shim = f.shim(&format!(
+        "for arg do if [ \"$arg\" = '--negotiation-tip={}' ]; then touch '{}'; fi; done",
+        f.old,
+        marker.display()
+    ));
+    let mut cmd = f.cli(
+        &f.repo,
+        &[OsStr::new("--negotiation-tip"), OsStr::new(&f.old)],
+    );
+    f.with_shim(&mut cmd, &shim);
+    success(&cmd.output().unwrap());
+    assert!(marker.is_file());
+    assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.new);
+}
+
+#[test]
 fn multiple_roots_use_bounded_parallel_workers_and_quiet_success_output() {
     let f = Fixture::new();
     let mut repos = vec![f.repo.clone()];

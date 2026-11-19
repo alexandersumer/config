@@ -190,6 +190,22 @@ impl Git {
         }
         Ok(out)
     }
+    /// Git's non-fetching object lookup. Older Git releases that do not
+    /// recognize the global option cannot establish local availability.
+    pub fn has_local_commit(&self, oid: &str) -> bool {
+        let expected_format = if oid.len() == 40 { "sha1" } else { "sha256" };
+        self.text(&["rev-parse", "--show-object-format"])
+            .is_ok_and(|format| format == expected_format)
+            && self
+                .optional(&[
+                    "--no-lazy-fetch",
+                    "--no-replace-objects",
+                    "cat-file",
+                    "-t",
+                    oid,
+                ])
+                .is_ok_and(|output| output.as_deref() == Some(b"commit\n"))
+    }
     pub fn sparse_included(&self, paths: &[u8]) -> Result<Vec<u8>, String> {
         use std::io::{Seek, Write};
         let mut input = tempfile::tempfile().map_err(|e| e.to_string())?;

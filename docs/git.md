@@ -91,6 +91,17 @@ can redirect a standard Bitbucket remote to `ssh.bitbucket.org` for that
 attempt. The rule is scoped to the exact stored URL and applies to both discovery
 and fetch. Git still uses the remote's settings and SSH's configured host-key
 verification. The rule leaves the remote URL and Git configuration on disk intact.
+Once a branch has been advertised, a generic remote disconnect during fetch is
+eligible for the same bounded retries. A generic failure during initial lookup
+still stops unless Git reports a specific transient transport error.
+
+For shallow checkouts, reset can use an advertised commit already available
+locally to reduce the pack transfer. If you know a previous commit from the same
+remote is available locally, `--negotiation-tip OID` can supply it for one
+checkout. Git still fetches and verifies the current branch and preserves the
+existing shallow boundary. When Git cannot check local availability without
+lazy fetching, reset skips automatic hints and refuses an explicit hint.
+
 Persistent connection failures remain failures after the retry limit. Use fewer
 workers with `--jobs N` on constrained networks. There is no transaction or rollback across checkouts:
 fetches, backups, switches, and upstream changes may persist after later failure.
