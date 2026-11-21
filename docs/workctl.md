@@ -55,7 +55,7 @@ and functions and refreshes command hashes when loaded.
 | `workctl auth preflight` | Verify credentials and renew those that need it |
 | `workctl auth inspect --profile code` | Resolve credential requirements without provider calls |
 | `workctl auth exec -- COMMAND` | Run preflight, then launch a command |
-| `workctl pull-request approve WORKSPACE/REPOSITORY ...` | Approve open Bitbucket Cloud pull requests assigned to you in the specified repositories |
+| `workctl pull-request approve --author-team TEAM_ID WORKSPACE/REPOSITORY ...` | Approve open Bitbucket Cloud pull requests assigned to you in the specified repositories |
 | `workctl git reset [PATH ...]` | Reset primary checkouts to a verified remote branch |
 | `workctl git worktree clean [PATH ...]` | Preview linked-worktree removal; `--apply` removes eligible worktrees |
 | `workctl git worktree inventory [PATH ...]` | Inspect worktrees, age evidence, local work, operations, and orphans |
@@ -130,14 +130,15 @@ credential ownership, custom profiles, and failure handling.
 ## Pull requests
 
 ```sh
-workctl pull-request approve --dry-run workspace/repository workspace/another-repository
-workctl pull-request approve workspace/repository https://bitbucket.org/workspace/another-repository
+workctl pull-request approve --author-team TEAM_ID --dry-run workspace/repository workspace/another-repository
+workctl pull-request approve --author-team TEAM_ID workspace/repository https://bitbucket.org/workspace/another-repository
 ```
 
 Pass one or more Bitbucket Cloud repositories as `WORKSPACE/REPOSITORY` or as
 repository URLs. The command deduplicates arguments and reads every page in those
 repositories before posting any approvals. The `pr` alias remains available for
-existing invocations.
+existing invocations. Choose exactly one author scope. Use `--author-team TEAM_ID`
+for team members, or explicitly pass `--all-authors` to allow any author.
 
 The command uses `curl` for the Bitbucket Cloud API and native `bb` OAuth through
 the `bitbucket` preflight. It reuses valid credentials, refreshes them when needed,
@@ -152,11 +153,21 @@ neither authored nor already approved it. Bitbucket does not expose a conditiona
 endpoint, so an external change can still occur between that check and the POST.
 
 `--dry-run` reads the same eligibility evidence without posting approvals.
-Transient read failures get up to two retries. Each POST is sent once and
-the resulting approval is read back, even if the POST response was lost. Failed
-or unverified items produce a nonzero exit status. The report includes a result
-for each pull request checked. A rerun uses fresh Bitbucket state. Add `--json`
-for a schema-versioned report.
+Verification uses up to four workers. Bitbucket narrows discovery by reviewer
+and, when the team filter fits in the query, author. The command checks both
+again before approval. Current approvals found during discovery need no further
+requests.
+
+On HTTP 429, workers share a cooldown. The command honors `Retry-After` and
+backs off when the header is absent. It stops dispatching requests when it
+exhausts the retry limit or the 60-second cooldown budget. A rate-limited
+approval can retry after fresh eligibility checks. If the write outcome is
+uncertain, the command reads back the approval and reports any uncertainty.
+Rate-limit handling requires curl 7.84 or later.
+
+Failed or unverified items produce a nonzero exit status. The report includes a
+result for each pull request checked. A rerun uses fresh Bitbucket state. Add
+`--json` for a schema-versioned report.
 
 ### Restrict approvals to an Atlassian team
 

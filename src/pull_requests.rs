@@ -1,4 +1,5 @@
 //! Repository-scoped Bitbucket Cloud approvals using the native bb OAuth cache.
+mod rate_limit;
 mod team;
 
 use crate::auth::{self, process};
@@ -6,17 +7,21 @@ use crate::{presentation, runtime};
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{self, Write};
 use std::os::fd::OwnedFd;
 use std::os::unix::net::UnixStream;
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 const API: &str = "https://api.bitbucket.org/2.0";
 const REQUEST_SECONDS: u64 = 30;
+const WORKERS: usize = 4;
+const MAX_ATTEMPTS: u32 = 3;
 
 #[derive(Debug, clap::Args)]
+#[command(group(clap::ArgGroup::new("author_scope").required(true).args(["author_team", "all_authors"])))]
 pub(crate) struct Options {
     /// Bitbucket Cloud repositories as WORKSPACE/REPOSITORY or https://bitbucket.org/WORKSPACE/REPOSITORY
     #[arg(required = true, num_args = 1.., value_parser = repository)]
@@ -24,6 +29,9 @@ pub(crate) struct Options {
     /// Limit approvals to authors who are full members of this Atlassian team
     #[arg(long, value_name = "TEAM_ID", value_parser = team::team_id)]
     author_team: Option<String>,
+    /// Explicitly allow pull requests from any author
+    #[arg(long)]
+    all_authors: bool,
     /// Report eligible pull requests without sending approvals
     #[arg(long)]
     dry_run: bool,
@@ -79,6 +87,8 @@ struct ListedPullRequest {
     #[serde(flatten)]
     candidate: Candidate,
     author: Option<User>,
+    #[serde(default)]
+    participants: Vec<Participant>,
 }
 
 fn author_matches(author: Option<&User>, team: Option<&BTreeSet<String>>) -> bool {
@@ -93,6 +103,12 @@ fn author_matches(author: Option<&User>, team: Option<&BTreeSet<String>>) -> boo
 struct Participant {
     user: User,
     approved: bool,
+}
+
+fn approved_by(participants: &[Participant], user: &str) -> bool {
+    participants
+        .iter()
+        .any(|p| p.user.uuid == user && p.approved)
 }
 
 #[derive(Deserialize)]
@@ -116,18 +132,22 @@ struct Activity {
 struct Client {
     token: String,
     session: process::Session,
+    rate_limit: rate_limit::RateLimit,
+    human: bool,
 }
 
 enum RequestError {
     Transport(i32),
     Http(u16),
+    RateLimited(String),
+    EligibilityExpired,
     Invalid(String),
 }
 
 impl RequestError {
     fn retryable(&self) -> bool {
         // A read may be repeated after a timeout, dropped/truncated transfer, or
-        // transient service failure. HTTP 429 needs provider-directed backoff.
+        // transient service failure. Rate limiting uses the shared cooldown.
         matches!(
             self,
             Self::Transport(18 | 28 | 52 | 55 | 56 | 92) | Self::Http(408 | 500 | 502 | 503 | 504)
@@ -138,28 +158,50 @@ impl RequestError {
         match self {
             Self::Transport(code) => format!("Bitbucket HTTPS request failed (curl exit {code})"),
             Self::Http(code) => format!("Bitbucket API returned HTTP {code}"),
+            Self::RateLimited(_) => "Bitbucket rate limited the request (HTTP 429)".into(),
+            Self::EligibilityExpired => {
+                "Approval eligibility must be rechecked after the rate limit cooldown".into()
+            }
             Self::Invalid(reason) => reason,
         }
     }
 }
 
 impl Client {
-    fn request<T: DeserializeOwned>(&self, method: &str, url: &str) -> Result<T, String> {
-        let mut retries = 0;
-        loop {
-            match self.request_once(method, url) {
+    fn request<T: DeserializeOwned>(&self, url: &str) -> Result<T, String> {
+        for attempt in 0..MAX_ATTEMPTS {
+            match self.send("GET", url, attempt) {
+                Err(RequestError::RateLimited(_)) => {
+                    if let Some(reason) = self.rate_limit.stop_reason() {
+                        return Err(reason);
+                    }
+                }
                 Err(error)
-                    if method == "GET"
-                        && retries < 2
-                        && error.retryable()
-                        && !runtime::cancelled() =>
+                    if attempt + 1 < MAX_ATTEMPTS && error.retryable() && !runtime::cancelled() =>
                 {
-                    std::thread::sleep(Duration::from_millis(250 << retries));
-                    retries += 1;
+                    std::thread::sleep(Duration::from_millis(250 << attempt));
                 }
                 result => return result.map_err(RequestError::message),
             }
         }
+        unreachable!("the final attempt returns its result")
+    }
+
+    fn send<T: DeserializeOwned>(
+        &self,
+        method: &str,
+        url: &str,
+        attempt: u32,
+    ) -> Result<T, RequestError> {
+        let waited = self.rate_limit.wait().map_err(RequestError::Invalid)?;
+        if method == "POST" && waited {
+            return Err(RequestError::EligibilityExpired);
+        }
+        let result = self.request_once(method, url);
+        if let Err(RequestError::RateLimited(header)) = &result {
+            self.rate_limit.limited(header, attempt, self.human);
+        }
+        result
     }
 
     fn request_once<T: DeserializeOwned>(
@@ -195,7 +237,7 @@ impl Client {
             "--request",
             method,
             "--write-out",
-            "\n%{http_code}",
+            "\n%{http_code}\n%header{retry-after}",
             "--",
             url,
         ]);
@@ -208,22 +250,29 @@ impl Client {
             Stdio::from(OwnedFd::from(input)),
         )
         .map_err(RequestError::Invalid)?;
+        let mut parts = output.stdout.rsplitn(3, |byte| *byte == b'\n');
+        let retry_after = parts
+            .next()
+            .and_then(|bytes| std::str::from_utf8(bytes).ok());
+        let status = parts
+            .next()
+            .and_then(|bytes| std::str::from_utf8(bytes).ok())
+            .and_then(|value| value.parse::<u16>().ok());
+        if status == Some(429) {
+            return Err(RequestError::RateLimited(
+                retry_after.unwrap_or_default().into(),
+            ));
+        }
         if output.code != 0 {
             return Err(RequestError::Transport(output.code));
         }
-        let split = output
-            .stdout
-            .iter()
-            .rposition(|b| *b == b'\n')
-            .ok_or_else(|| invalid("Bitbucket response has no HTTP status"))?;
-        let (body, status) = (&output.stdout[..split], &output.stdout[split + 1..]);
-        if status != b"200" {
-            let code = std::str::from_utf8(status)
-                .ok()
-                .and_then(|s| s.parse::<u16>().ok())
-                .ok_or_else(|| invalid("Invalid Bitbucket HTTP status"))?;
+        let code = status.ok_or_else(|| invalid("Bitbucket response has no HTTP status"))?;
+        if code != 200 {
             return Err(RequestError::Http(code));
         }
+        let body = parts
+            .next()
+            .ok_or_else(|| invalid("Bitbucket response has no body"))?;
         serde_json::from_slice(body)
             .map_err(|_| invalid("Bitbucket response did not match the expected JSON schema"))
     }
@@ -240,7 +289,7 @@ impl Client {
             if !seen.insert(url.clone()) {
                 return Err("Bitbucket pagination repeated a page".into());
             }
-            let page: Page<T> = self.request("GET", &url)?;
+            let page: Page<T> = self.request(&url)?;
             for item in page.values {
                 if visit(item)? {
                     return Ok(true);
@@ -265,16 +314,36 @@ impl Client {
         collection: &str,
         me: &str,
         team: Option<&BTreeSet<String>>,
-    ) -> Result<BTreeSet<u64>, String> {
-        let mut ids = BTreeSet::new();
-        let uuid = &me[1..me.len() - 1]; // validated when resolving the current user
+    ) -> Result<BTreeMap<u64, bool>, String> {
+        let mut ids = BTreeMap::new();
+        let reviewer = format!("reviewers.uuid=\"{me}\"");
+        // Keep the URL bounded. Large teams still get the same local author filter.
+        let selector = team
+            .map(|members| {
+                let ids = members
+                    .iter()
+                    .map(|id| json!(id).to_string())
+                    .collect::<Vec<_>>();
+                format!("{reviewer} AND author.account_id IN ({})", ids.join(","))
+            })
+            .filter(|selector| selector.len() <= 900)
+            .unwrap_or(reviewer);
+        let mut encoded = String::new();
+        for byte in selector.bytes() {
+            if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
+                encoded.push(char::from(byte));
+            } else {
+                use std::fmt::Write;
+                write!(&mut encoded, "%{byte:02X}").expect("encode Bitbucket query");
+            }
+        }
         let author_fields = if team.is_some() {
             ",values.author.uuid,values.author.account_id"
         } else {
             ""
         };
         let query = format!(
-            "state=OPEN&sort=id&pagelen=50&fields=next,values.id,values.state,values.reviewers.uuid{author_fields}&q=reviewers.uuid%3D%22%7B{uuid}%7D%22"
+            "state=OPEN&sort=id&pagelen=50&fields=next,values.id,values.state,values.reviewers.uuid,values.participants.user.uuid,values.participants.approved{author_fields}&q={encoded}"
         );
         self.any_page(collection, &query, |listed: ListedPullRequest| {
             let pr = listed.candidate;
@@ -285,7 +354,10 @@ impl Client {
                 && pr.reviewers.iter().any(|user| user.uuid == me)
                 && author_matches(listed.author.as_ref(), team)
             {
-                ids.insert(pr.id);
+                let already_approved = approved_by(&listed.participants, me);
+                ids.entry(pr.id)
+                    .and_modify(|approved| *approved |= already_approved)
+                    .or_insert(already_approved);
             }
             Ok(false)
         })?;
@@ -300,62 +372,82 @@ impl Client {
         dry_run: bool,
         team: Option<&BTreeSet<String>>,
     ) -> Result<&'static str, String> {
-        let approved_before = self.any_page(
-            &format!("{endpoint}/activity"),
-            "pagelen=50&fields=next,values.approval.user.uuid",
-            |event: Activity| {
-                Ok(event
-                    .approval
-                    .is_some_and(|approval| approval.user.uuid == me))
-            },
-        )?;
-        if approved_before {
-            return Ok("previously_approved");
-        }
         let detail = format!("{endpoint}?fields=id,state,author.uuid,author.account_id,reviewers.uuid,participants.user.uuid,participants.approved");
-        let pr: PullRequest = self.request("GET", &detail)?;
-        if pr.candidate.id != id {
-            return Err("Bitbucket returned a different pull request ID".into());
-        }
-        if pr.candidate.state != "OPEN"
-            || !pr.candidate.reviewers.iter().any(|user| user.uuid == me)
-            || pr.author.uuid == me
-        {
-            return Ok("no_longer_eligible");
-        }
-        if pr
-            .participants
-            .iter()
-            .any(|p| p.user.uuid == me && p.approved)
-        {
-            return Ok("already_approved");
-        }
-        if !author_matches(Some(&pr.author), team) {
-            return Ok("author_outside_team");
-        }
-        if dry_run {
-            return Ok("would_approve");
-        }
+        for attempt in 0..MAX_ATTEMPTS {
+            let approved_before = self.any_page(
+                &format!("{endpoint}/activity"),
+                "pagelen=50&fields=next,values.approval.user.uuid",
+                |event: Activity| {
+                    Ok(event
+                        .approval
+                        .is_some_and(|approval| approval.user.uuid == me))
+                },
+            )?;
+            if approved_before {
+                return Ok("previously_approved");
+            }
+            let pr: PullRequest = self.request(&detail)?;
+            if pr.candidate.id != id {
+                return Err("Bitbucket returned a different pull request ID".into());
+            }
+            if pr.candidate.state != "OPEN"
+                || !pr.candidate.reviewers.iter().any(|user| user.uuid == me)
+                || pr.author.uuid == me
+            {
+                return Ok("no_longer_eligible");
+            }
+            if approved_by(&pr.participants, me) {
+                return Ok("already_approved");
+            }
+            if !author_matches(Some(&pr.author), team) {
+                return Ok("author_outside_team");
+            }
+            if dry_run {
+                return Ok("would_approve");
+            }
 
-        // A dropped connection can leave a successful write. Read back before
-        // deciding the outcome. This invocation never replays an approval POST.
-        let write = self.request::<Participant>("POST", &format!("{endpoint}/approve"));
-        let verified = self.request::<PullRequest>("GET", &detail);
-        if verified.as_ref().is_ok_and(|pr| {
-            pr.candidate.id == id
-                && pr
-                    .participants
-                    .iter()
-                    .any(|p| p.user.uuid == me && p.approved)
-        }) {
-            return Ok("approved");
+            let write = self.send::<Participant>("POST", &format!("{endpoint}/approve"), attempt);
+            if attempt + 1 < MAX_ATTEMPTS
+                && matches!(
+                    write,
+                    Err(RequestError::RateLimited(_) | RequestError::EligibilityExpired)
+                )
+                && !self.rate_limit.paused()
+            {
+                continue;
+            }
+            // A dropped connection can leave a successful write. Read back the
+            // outcome and never replay a POST that may have reached Bitbucket.
+            let verified = self.request::<PullRequest>(&detail);
+            if verified
+                .as_ref()
+                .is_ok_and(|pr| pr.candidate.id == id && approved_by(&pr.participants, me))
+            {
+                return Ok("approved");
+            }
+            let reason = write
+                .err()
+                .map(RequestError::message)
+                .or_else(|| verified.err())
+                .unwrap_or_else(|| "approval was absent from the read-back".into());
+            return Err(format!("Approval could not be verified ({reason}). Inspect the pull request or rerun to check fresh state"));
         }
-        let reason = write
-            .err()
-            .or_else(|| verified.err())
-            .unwrap_or_else(|| "approval was absent from the read-back".into());
-        Err(format!("Approval could not be verified ({reason}). Inspect the pull request or rerun to check fresh state"))
+        unreachable!("the final attempt returns its result")
     }
+}
+
+fn supported_curl(output: &[u8]) -> bool {
+    let text = String::from_utf8_lossy(output);
+    let Some(version) = text.split_whitespace().nth(1) else {
+        return false;
+    };
+    let mut numbers = version
+        .split('.')
+        .filter_map(|part| part.parse::<u32>().ok());
+    numbers
+        .next()
+        .zip(numbers.next())
+        .is_some_and(|pair| pair >= (7, 84))
 }
 
 fn approve(
@@ -371,9 +463,9 @@ fn approve(
     // Check the transport before any credential refresh or browser interaction.
     let mut curl = Command::new("curl");
     curl.args(["--disable", "--version"]);
-    let (code, _, _) = runtime::capture(curl, Duration::from_secs(5), true)?;
-    if code != 0 {
-        return Err("A working curl is required for the Bitbucket API".into());
+    let (code, version, _) = runtime::capture(curl, Duration::from_secs(5), true)?;
+    if code != 0 || !supported_curl(&version) {
+        return Err("curl 7.84 or later is required for Bitbucket rate-limit handling".into());
     }
     let roster = options
         .author_team
@@ -387,8 +479,10 @@ fn approve(
     let client = Client {
         token: auth::bitbucket_token(options.non_interactive, human)?,
         session: process::Session::default(),
+        rate_limit: rate_limit::RateLimit::default(),
+        human,
     };
-    let me: User = client.request("GET", &format!("{API}/user?fields=uuid"))?;
+    let me: User = client.request(&format!("{API}/user?fields=uuid"))?;
     let uuid_pattern =
         regex::Regex::new(r"^\{[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\}$")
             .expect("static Bitbucket UUID pattern");
@@ -410,29 +504,64 @@ fn approve(
         let ids = client
             .assigned_ids(&collection, &me.uuid, roster.as_ref())
             .map_err(|reason| format!("{repo}: {reason}"))?;
-        discovered.push((repo, collection, ids));
+        discovered.extend(
+            ids.into_iter()
+                .map(|(id, approved)| (repo, format!("{collection}/{id}"), id, approved)),
+        );
     }
-    for (repo, collection, ids) in discovered {
-        for id in ids {
-            if runtime::cancelled() {
-                return Err("Interrupted with pull requests remaining".into());
-            }
-            if human {
-                writeln!(io::stderr().lock(), "Checking {repo} #{id}…")
-                    .map_err(|_| "Cannot report pull request progress")?;
-            }
-            let endpoint = format!("{collection}/{id}");
-            let mut row = json!({"repository":repo,"id":id,"url":format!("https://bitbucket.org/{repo}/pull-requests/{id}")});
-            match client.approval_status(&endpoint, id, &me.uuid, options.dry_run, roster.as_ref())
-            {
-                Ok(status) => row["status"] = json!(status),
-                Err(reason) => {
-                    row["status"] = json!("failed");
-                    row["reason"] = json!(reason);
+    let next = AtomicUsize::new(0);
+    let progress_failed = AtomicBool::new(false);
+    let mut indexed = Vec::new();
+    std::thread::scope(|scope| {
+        let mut workers = Vec::new();
+        for _ in 0..WORKERS.min(discovered.len()) {
+            workers.push(scope.spawn(|| {
+                let mut outcomes = Vec::new();
+                while !runtime::cancelled() && !client.rate_limit.paused() && !progress_failed.load(Ordering::Relaxed) {
+                    let index = next.fetch_add(1, Ordering::Relaxed);
+                    let Some((repo, endpoint, id, already_approved)) = discovered.get(index) else { break };
+                    let mut row = json!({"repository":repo,"id":id,"url":format!("https://bitbucket.org/{repo}/pull-requests/{id}")});
+                    if human && writeln!(io::stderr().lock(), "Checking {repo} #{id}…").is_err() {
+                        progress_failed.store(true, Ordering::Relaxed);
+                        break;
+                    }
+                    if *already_approved {
+                        row["status"] = json!("already_approved");
+                    } else {
+                        match client.approval_status(endpoint, *id, &me.uuid, options.dry_run, roster.as_ref()) {
+                            Ok(status) => row["status"] = json!(status),
+                            Err(reason) => {
+                                row["status"] = json!("failed");
+                                row["reason"] = json!(reason);
+                            }
+                        }
+                    }
+                    outcomes.push((index, row));
                 }
-            }
-            results.push(row);
+                outcomes
+            }));
         }
+        for worker in workers {
+            indexed.extend(worker.join().expect("approval worker"));
+        }
+    });
+    indexed.sort_unstable_by_key(|(index, _)| *index);
+    results.extend(indexed.into_iter().map(|(_, result)| result));
+    let remaining = discovered.len() - results.len();
+    if let Some(reason) = client.rate_limit.stop_reason() {
+        return Err(format!(
+            "{reason}. {remaining} pull requests were left pending."
+        ));
+    }
+    if runtime::cancelled() {
+        return Err(format!(
+            "Interrupted with {remaining} pull requests remaining"
+        ));
+    }
+    if progress_failed.load(Ordering::Relaxed) {
+        return Err(format!(
+            "Cannot report pull request progress. {remaining} pull requests were left pending."
+        ));
     }
     Ok(())
 }

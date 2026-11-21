@@ -2300,6 +2300,9 @@ exec /usr/bin/curl --disable --noproxy '*' --cacert "$PR_FIXTURE_CERT" --connect
             fs::set_permissions(&wrapper, fs::Permissions::from_mode(0o755)).unwrap();
         }
         let mut command = fixture.command(command);
+        if !args.contains(&"--author-team") {
+            command.arg("--all-authors");
+        }
         command
             .arg("--non-interactive")
             .args(args)
@@ -2317,10 +2320,13 @@ exec /usr/bin/curl --disable --noproxy '*' --cacert "$PR_FIXTURE_CERT" --connect
     }
 
     fn posts(&self) -> Vec<String> {
-        self.requests()
+        let mut paths: Vec<_> = self
+            .requests()
             .into_iter()
             .filter_map(|(method, path)| (method == "POST").then_some(path))
-            .collect()
+            .collect();
+        paths.sort_unstable();
+        paths
     }
 }
 
@@ -2590,6 +2596,10 @@ fn pr_approve_e2e_limits_authors_to_verified_team_members_across_pages() {
             "/2.0/repositories/team/one/pullrequests/6/approve"
         ]
     );
+    assert!(!api
+        .requests()
+        .iter()
+        .any(|(_, path)| path.ends_with("/2/activity")));
     let rows = result["results"].as_array().unwrap();
     assert_eq!(
         rows.iter().find(|row| row["id"] == 11).unwrap()["status"],
@@ -2643,4 +2653,83 @@ fn pr_approve_e2e_fails_closed_when_team_membership_is_incomplete() {
             "any Bitbucket request requires a fully verified team roster"
         );
     }
+}
+
+#[test]
+fn pr_approve_e2e_requires_an_explicit_author_scope_before_authentication() {
+    let fixture = Fixture::new(json!({}));
+    for flags in [vec![], vec!["--all-authors", "--author-team", AUTHOR_TEAM]] {
+        let mut command = fixture.command(&["pull-request", "approve", "team/one"]);
+        let output = command.args(flags).output().unwrap();
+        assert_eq!(output.status.code(), Some(2), "{}", text(&output));
+        assert!(text(&output).contains("--author-team"));
+        assert!(text(&output).contains("--all-authors"));
+    }
+    assert!(fixture.calls().is_empty());
+}
+
+#[test]
+fn pr_approve_e2e_honors_rate_limits_and_rechecks_before_retrying_a_write() {
+    let fixture = Fixture::new(json!({}));
+    let api = PullRequestApi::new("rate_partial");
+    let result = approval_result(api.command(&fixture, &["team/two"]).output().unwrap(), 0);
+    assert_eq!(result["results"][0]["status"], "approved");
+    let requests = api.requests();
+    assert!(!requests.iter().any(|(method, _)| method == "EARLY"));
+    let posts: Vec<_> = requests
+        .iter()
+        .enumerate()
+        .filter_map(|(index, (method, _))| (method == "POST").then_some(index))
+        .collect();
+    assert_eq!(posts.len(), 2);
+    let between = &requests[posts[0] + 1..posts[1]];
+    assert!(between
+        .iter()
+        .any(|(_, path)| path.ends_with("/8/activity")));
+    assert!(between.iter().any(|(_, path)| path.ends_with("/8")));
+}
+
+#[test]
+fn pr_approve_e2e_stops_on_a_retry_after_beyond_the_wait_budget() {
+    let fixture = Fixture::new(json!({}));
+    let api = PullRequestApi::new("rate_long");
+    let result = approval_result(api.command(&fixture, &["team/two"]).output().unwrap(), 1);
+    assert!(
+        result["error"].as_str().unwrap().contains("rate limit"),
+        "{result}"
+    );
+    assert_eq!(
+        api.requests().len(),
+        2,
+        "identity and one rate-limited listing"
+    );
+    assert!(api.posts().is_empty());
+}
+
+#[test]
+fn pr_approve_e2e_overlaps_independent_verification_reads() {
+    let fixture = Fixture::new(json!({}));
+    let api = PullRequestApi::new("overlap");
+    let result = approval_result(
+        api.command(&fixture, &["team/one", "--dry-run"])
+            .output()
+            .unwrap(),
+        0,
+    );
+    assert_eq!(result["results"][0]["status"], "would_approve");
+    assert_eq!(result["results"][1]["status"], "already_approved");
+    assert!(api.posts().is_empty());
+}
+
+#[test]
+fn pr_approve_e2e_uses_fresh_state_when_a_rate_limited_write_was_committed() {
+    let fixture = Fixture::new(json!({}));
+    let api = PullRequestApi::new("rate_after_commit");
+    let result = approval_result(api.command(&fixture, &["team/two"]).output().unwrap(), 0);
+    assert_eq!(result["results"][0]["status"], "previously_approved");
+    assert_eq!(
+        api.posts(),
+        ["/2.0/repositories/team/two/pullrequests/8/approve"]
+    );
+    assert!(!api.requests().iter().any(|(method, _)| method == "EARLY"));
 }

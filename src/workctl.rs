@@ -10,7 +10,7 @@ use std::io::Write;
     about = "Work credentials, Git maintenance, and Bitbucket Cloud pull requests",
     propagate_version = true,
     args_override_self = true,
-    after_help = "Examples:\n  workctl git reset /path/to/work /path/to/oss\n  workctl git worktree clean /path/to/work\n  workctl auth preflight\n  workctl pull-request approve --dry-run workspace/repository\n  workctl doctor\n  workctl completions zsh\n\nExit codes: 0 success, 1 failed or blocked, 2 invalid usage, 130 interrupted."
+    after_help = "Examples:\n  workctl git reset /path/to/work /path/to/oss\n  workctl git worktree clean /path/to/work\n  workctl auth preflight\n  workctl pull-request approve --author-team TEAM_ID --dry-run workspace/repository\n  workctl doctor\n  workctl completions zsh\n\nExit codes: 0 success, 1 failed or blocked, 2 invalid usage, 130 interrupted."
 )]
 struct Cli {
     /// Emit a single schema-versioned JSON result on stdout

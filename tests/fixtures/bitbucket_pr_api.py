@@ -6,6 +6,8 @@ import re
 import socket
 import ssl
 import sys
+import time
+import threading
 import urllib.parse
 
 root = pathlib.Path(sys.argv[1])
@@ -16,6 +18,9 @@ me = {"uuid": "{aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa}"}
 other = {"uuid": "{bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb}"}
 approved = {2}
 truncated_page = False
+limits = set()
+cooldown = 0
+parallel_reads = threading.Barrier(2, timeout=5)
 log = (root / "http.jsonl").open("w", buffering=1)
 
 
@@ -30,6 +35,8 @@ def candidate(pr, state="OPEN", reviewers=None):
     result = dict(id=pr, state=state, reviewers=[me] if reviewers is None else reviewers)
     if mode == "author_team":
         result["author"] = author(pr)
+        if pr == 2:
+            result["participants"] = [{"user": me, "approved": True}]
     return result
 
 
@@ -37,11 +44,13 @@ class Api(http.server.BaseHTTPRequestHandler):
     def log_message(self, *_args):
         pass
 
-    def respond(self, code, body):
+    def respond(self, code, body, retry_after=None):
         payload = json.dumps(body).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(payload)))
+        if retry_after is not None:
+            self.send_header("Retry-After", str(retry_after))
         self.end_headers()
         self.wfile.write(payload)
 
@@ -52,12 +61,15 @@ class Api(http.server.BaseHTTPRequestHandler):
         self.route()
 
     def route(self):
-        global truncated_page
+        global truncated_page, cooldown
         if self.headers.get("Authorization") != "Bearer AUTH_SECRET_MUST_NEVER_APPEAR":
             return self.respond(401, {})
         url = urllib.parse.urlsplit(self.path)
         path, query = url.path, urllib.parse.parse_qs(url.query)
         log.write(json.dumps([self.command, path]) + "\n")
+        if mode in {"rate_partial", "rate_after_commit"} and cooldown and time.monotonic() < cooldown:
+            log.write(json.dumps(["EARLY", path]) + "\n")
+            return self.respond(429, {}, 300)
         if path == "/2.0/user" and self.command == "GET":
             return self.respond(200, me)
         route = re.fullmatch(base + r"team/(one|two|unlisted|bad)/pullrequests(?:/(\d+)(/activity|/approve)?)?", path)
@@ -67,8 +79,12 @@ class Api(http.server.BaseHTTPRequestHandler):
         if pr is None and self.command == "GET":
             if query.get("state") != ["OPEN"]:
                 return self.respond(400, {})
-            if "page" not in query and query.get("q") != ['reviewers.uuid="' + me["uuid"] + '"']:
-                return self.respond(400, {})
+            if "page" not in query:
+                selector = 'reviewers.uuid="' + me["uuid"] + '"'
+                if mode == "author_team":
+                    selector += ' AND author.account_id IN ("first-member","second-member")'
+                if query.get("q") != [selector]:
+                    return self.respond(400, {})
             if mode == "author_team" and "page" not in query:
                 if "values.author.account_id" not in query.get("fields", [""])[0].split(","):
                     return self.respond(400, {})
@@ -76,6 +92,12 @@ class Api(http.server.BaseHTTPRequestHandler):
                 return self.respond(200, {"values": [candidate(10)]})
             if repo == "bad":
                 return self.respond(403, {})
+            if mode == "rate_long":
+                return self.respond(429, {}, 300)
+            if mode == "rate_partial" and "list" not in limits:
+                limits.add("list")
+                cooldown = time.monotonic() + 1
+                return self.respond(429, {}, 1)
             if repo == "two":
                 return self.respond(200, {"values": [candidate(8)]})
             if query.get("page") == ["2"]:
@@ -102,6 +124,11 @@ class Api(http.server.BaseHTTPRequestHandler):
             return self.respond(200, {"values": values, "next": pagination})
         pr = int(pr)
         if suffix == "/activity" and self.command == "GET":
+            if mode == "overlap" and pr in {1, 2}:
+                try:
+                    parallel_reads.wait()
+                except threading.BrokenBarrierError:
+                    return self.respond(500, {})
             if pr == 3:
                 if query.get("page") == ["2"]:
                     return self.respond(200, {"values": [{"approval": {"user": me}}]})
@@ -113,6 +140,12 @@ class Api(http.server.BaseHTTPRequestHandler):
                 return self.respond(503, {})
             return self.respond(200, {"values": [{"update": {"state": "OPEN"}}]})
         if suffix == "/approve" and self.command == "POST":
+            if mode in {"rate_partial", "rate_after_commit"} and pr == 8 and "write" not in limits:
+                limits.add("write")
+                cooldown = time.monotonic() + 1
+                if mode == "rate_after_commit":
+                    approved.add(pr)
+                return self.respond(429, {}, 1)
             if pr in approved or pr not in {1, 3, 6, 8, 11}:
                 return self.respond(409, {})
             if mode == "partial" and pr == 1:
@@ -132,7 +165,8 @@ class Api(http.server.BaseHTTPRequestHandler):
         return self.respond(405, {})
 
 
-with http.server.HTTPServer(("127.0.0.1", 0), Api) as server:
+server_type = http.server.ThreadingHTTPServer if mode == "overlap" else http.server.HTTPServer
+with server_type(("127.0.0.1", 0), Api) as server:
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(root / "cert.pem", root / "key.pem")
     server.socket = ctx.wrap_socket(server.socket, server_side=True)
