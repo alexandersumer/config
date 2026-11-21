@@ -80,11 +80,37 @@ pub(super) fn wrap(text: &str) -> String {
 /// Keep the primary error readable without dumping a potentially enormous fetch
 /// transcript. The complete redacted diagnostic remains in JSON and the log.
 pub(super) fn failure(detail: &str) -> String {
+    let mut omitted_progress = false;
     // The full invocation belongs in diagnostics. Lead with its actual failure,
     // so a long refspec cannot consume the summary before the cause appears.
     let concise = detail.split_once("]: git ").and_then(|(stage, command)| {
         let (_, result) = command.split_once(" failed (exit ")?;
         let (_, error) = result.split_once("): ")?;
+        let lines: Vec<_> = error
+            .split(['\r', '\n'])
+            .filter(|line| {
+                let progress = [
+                    "Enumerating objects:",
+                    "Counting objects:",
+                    "Compressing objects:",
+                    "Receiving objects:",
+                    "Resolving deltas:",
+                ]
+                .iter()
+                .any(|prefix| {
+                    line.trim_start()
+                        .trim_start_matches("remote: ")
+                        .starts_with(prefix)
+                });
+                omitted_progress |= progress;
+                !progress && !line.trim().is_empty()
+            })
+            .collect();
+        let error = if lines.is_empty() {
+            error.to_owned()
+        } else {
+            lines.join("\n")
+        };
         Some(format!("{stage}]: {error}"))
     });
     let detail = concise.as_deref().unwrap_or(detail);
@@ -92,7 +118,7 @@ pub(super) fn failure(detail: &str) -> String {
         .lines()
         .filter(|line| !line.trim().is_empty())
         .collect();
-    let mut shortened = lines.len() > 3;
+    let mut shortened = omitted_progress || lines.len() > 3;
     let mut summary = Vec::new();
     // Fetch can print many successful ref updates before its actual error.
     // Keep that error visible even when the rest of the transcript is shortened.
@@ -148,6 +174,20 @@ mod tests {
         assert!(!rendered.contains("\\u{a}"));
         assert!(!rendered.contains('\x1b'));
         assert!(rendered.len() < 300);
+    }
+
+    #[test]
+    fn fetch_disconnect_summary_leads_with_ssh_error_instead_of_progress() {
+        let rendered = failure(
+            "Error [fetch]: git fetch origin failed (exit 128): remote: Enumerating objects: 520\n\
+             Receiving objects: 1%\rReceiving objects: 2%\r\n\
+             Read from remote host ssh.bitbucket.org: Connection reset by peer\n\
+             fatal: early EOF\nfatal: fetch-pack: invalid index-pack output",
+        );
+        assert!(rendered.starts_with("    Error [fetch]: Read from remote host ssh.bitbucket.org:"));
+        assert!(rendered.contains("fatal: early EOF"));
+        assert!(rendered.contains("full diagnostics in log"));
+        assert!(!rendered.contains("Receiving objects"));
     }
 
     #[test]

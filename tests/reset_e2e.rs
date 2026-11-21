@@ -193,6 +193,73 @@ impl Runtime {
 }
 
 #[test]
+fn partial_sparse_reset_fetches_only_checkout_blobs_over_git_protocol() {
+    let mut rt = Runtime::new();
+    let seed = rt.root().join("seed");
+    rt.git(rt.root(), &["init", "-b", "trunk", path(&seed)]);
+    for name in ["included", "excluded"] {
+        fs::create_dir(seed.join(name)).unwrap();
+        fs::write(seed.join(name).join("file"), format!("base {name}")).unwrap();
+    }
+    rt.git(&seed, &["add", "."]);
+    rt.git(&seed, &["commit", "-m", "base"]);
+    let origin = rt.root().join("origin.git");
+    rt.git(rt.root(), &["clone", "--bare", path(&seed), path(&origin)]);
+    rt.git(&origin, &["config", "uploadpack.allowFilter", "true"]);
+    rt.git(
+        &origin,
+        &["config", "uploadpack.allowAnySHA1InWant", "true"],
+    );
+    let url = rt.serve(&origin);
+    let partial = rt.root().join("partial");
+    rt.git(
+        rt.root(),
+        &[
+            "clone",
+            "--filter=blob:none",
+            "--no-checkout",
+            &url,
+            path(&partial),
+        ],
+    );
+    rt.git(&partial, &["sparse-checkout", "set", "--cone", "included"]);
+    rt.git(&partial, &["checkout", "trunk"]);
+    for name in ["included", "excluded"] {
+        fs::write(seed.join(name).join("file"), format!("tip {name}")).unwrap();
+    }
+    rt.git(&seed, &["commit", "-am", "new"]);
+    rt.git(&seed, &["push", path(&origin), "trunk"]);
+    let target = rt.git(&seed, &["rev-parse", "HEAD"]);
+    let included = rt.git(&seed, &["rev-parse", "HEAD:included/file"]);
+    let excluded = rt.git(&seed, &["rev-parse", "HEAD:excluded/file"]);
+
+    let mut command = rt.command(&partial, &rt.binary);
+    command
+        .args(["git", "reset", "--json", "--keep-logs", "--attempts=1"])
+        .env("GIT_NO_LAZY_FETCH", "1");
+    let result = rt.run(command);
+    assert!(result.status.success(), "{}", text(&result));
+    assert_eq!(rt.git(&partial, &["rev-parse", "HEAD"]), target);
+    assert_eq!(rt.git(&partial, &["rev-parse", "@{upstream}"]), target);
+    assert_eq!(
+        fs::read_to_string(partial.join("included/file")).unwrap(),
+        "tip included"
+    );
+    assert!(!partial.join("excluded/file").exists());
+    assert_eq!(
+        rt.git(&partial, &["--no-lazy-fetch", "cat-file", "-t", &included]),
+        "blob"
+    );
+    let mut missing = rt.command(&partial, "git");
+    missing.args(["--no-lazy-fetch", "cat-file", "-e", &excluded]);
+    assert!(
+        !rt.run(missing).status.success(),
+        "excluded blob must remain promised"
+    );
+    assert!(rt.git(&partial, &["status", "--porcelain"]).is_empty());
+}
+
+#[test]
 fn standalone_cleanup_uses_current_git_protocol_evidence_and_explicit_discard() {
     let mut rt = Runtime::new();
     let seed = rt.root().join("seed");

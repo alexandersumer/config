@@ -2252,6 +2252,175 @@ fn failed_default_runs_retain_diagnostics_and_show_their_location() {
 }
 
 #[test]
+fn partial_clone_checkout_retries_object_transfer_before_touching_the_checkout() {
+    let f = Fixture::new();
+    git(&f.origin, &["config", "uploadpack.allowFilter", "true"]);
+    git(
+        &f.origin,
+        &["config", "uploadpack.allowAnySHA1InWant", "true"],
+    );
+    let partial = f.workspace.join("partial");
+    let url = format!("file://{}", f.origin.display());
+    git(
+        &f.workspace,
+        &["clone", "--filter=blob:none", &url, origin_arg(&partial)],
+    );
+    f.push_file("promised");
+    let tip = git(&f.seed, &["rev-parse", "HEAD"]);
+    let object = git(&f.seed, &["rev-parse", "HEAD:promised"]);
+    let attempt = f.temp.path().join("hydration-attempt");
+    let shim = f.shim(&format!(
+        r#"
+for arg in "$@"; do
+    [ "$arg" = --stdin ] || continue
+    case " $* " in *" fetch "*) ;; *) continue ;; esac
+    if [ ! -f '{attempt}' ]; then
+        test ! -e promised || exit 97
+        test "$(git rev-parse HEAD)" = '{old}' || exit 97
+        test -z "$(git for-each-ref refs/home-reset-backups)" || exit 97
+        : > '{attempt}'
+        echo 'Read from remote host ssh.bitbucket.org: Connection reset by peer' >&2
+        echo 'fatal: early EOF' >&2
+        exit 128
+    fi
+done
+"#,
+        attempt = attempt.display(),
+        old = f.new,
+    ));
+    let run = |attempts| {
+        let mut cmd = f.cli(
+            &partial,
+            &[
+                OsStr::new("--json"),
+                OsStr::new("--attempts"),
+                OsStr::new(attempts),
+            ],
+        );
+        f.with_shim(&mut cmd, &shim);
+        cmd.env("GIT_NO_LAZY_FETCH", "1").output().unwrap()
+    };
+    let out = run("1");
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+    let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let failed = &result["results"][0];
+    assert_eq!(failed["stage"], "fetch checkout objects", "{failed}");
+    assert_eq!(failed["failure_kind"], "fetch_disconnected", "{failed}");
+    assert_eq!(failed["needs_verification"], false, "{failed}");
+    assert_eq!(failed["backups"], serde_json::json!([]), "{failed}");
+    assert_eq!(git(&partial, &["rev-parse", "HEAD"]), f.new);
+    assert!(!partial.join("promised").exists());
+    assert!(!env(Command::new("git").current_dir(&partial))
+        .args(["--no-lazy-fetch", "cat-file", "-e", &object])
+        .status()
+        .unwrap()
+        .success());
+
+    fs::remove_file(&attempt).unwrap();
+    let out = run("2");
+    success(&out);
+    let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(result["results"][0]["attempts"], 2);
+    assert_eq!(git(&partial, &["rev-parse", "HEAD"]), tip);
+    assert_eq!(git(&partial, &["rev-parse", "@{upstream}"]), tip);
+    assert_eq!(
+        fs::read_to_string(partial.join("promised")).unwrap(),
+        "remote"
+    );
+    assert_eq!(
+        git(&partial, &["--no-lazy-fetch", "cat-file", "-t", &object]),
+        "blob"
+    );
+}
+
+#[test]
+fn reset_throttles_new_attempts_after_transfer_failures_until_the_batch_recovers() {
+    let f = Fixture::new();
+    let mut repos = vec![f.repo.clone()];
+    for n in 1..6 {
+        let repo = f.clone(&format!("repo-{n}"));
+        git(&repo, &["reset", "--hard", &f.old]);
+        repos.push(repo);
+    }
+    let trace = f.temp.path().join("trace");
+    let first = f.temp.path().join("first");
+    fs::create_dir(&first).unwrap();
+    let shim = f.shim(&format!(
+        r#"
+for arg in "$@"; do
+    [ "$arg" = fetch ] || continue
+    marker="{first}/$(basename "$PWD")"
+    if [ ! -f "$marker" ]; then
+        : > "$marker"
+        n=0
+        while [ "$(find '{first}' -type f | wc -l)" -lt 6 ]; do
+            n=$((n + 1))
+            [ "$n" -le 400 ] || exit 97
+            sleep 0.02
+        done
+        echo 'fatal: early EOF' >&2
+        exit 128
+    fi
+    if [ ! -f "$marker.second" ]; then
+        : > "$marker.second"
+        printf 'second-start\n' >> '{trace}'
+        sleep 1
+        printf 'second-end\n' >> '{trace}'
+        echo 'fatal: early EOF' >&2
+        exit 128
+    fi
+    printf 'third-start\n' >> '{trace}'
+    sleep 0.1
+    printf 'third-end\n' >> '{trace}'
+    break
+done
+"#,
+        first = first.display(),
+        trace = trace.display(),
+    ));
+    let mut cmd = f.cli(
+        &f.workspace,
+        &[
+            OsStr::new("--jobs=6"),
+            OsStr::new("--attempts=3"),
+            OsStr::new("--json"),
+        ],
+    );
+    f.with_shim(&mut cmd, &shim);
+    let out = cmd.output().unwrap();
+    success(&out);
+    let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(result["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|r| r["attempts"] == 3));
+    let mut active_second = 0;
+    let mut active_third = 0;
+    let mut total_third = 0;
+    for event in fs::read_to_string(trace).unwrap().lines() {
+        match event {
+            "second-start" => active_second += 1,
+            "second-end" => active_second -= 1,
+            "third-start" => {
+                active_third += 1;
+                total_third += 1;
+            }
+            "third-end" => active_third -= 1,
+            _ => panic!("unexpected trace event {event}"),
+        }
+        assert!(
+            active_second <= 4 && active_third <= 1,
+            "fetch concurrency exceeded recovery limits"
+        );
+    }
+    assert_eq!((active_second, active_third, total_third), (0, 0, 6));
+    for repo in repos {
+        assert_eq!(git(&repo, &["rev-parse", "HEAD"]), f.new);
+    }
+}
+
+#[test]
 fn optimized_default_pool_is_bounded_and_preserves_each_checkout() {
     let f = Fixture::new();
     let mut repos = vec![f.repo.clone()];

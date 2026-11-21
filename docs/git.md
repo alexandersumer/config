@@ -60,7 +60,11 @@ case-insensitive filesystems are refused before fetch; unrelated case-colliding
 refs remain untouched. The commit returned by this fetch is authoritative, even
 when the branch moved after discovery. Fresh branch-specific `FETCH_HEAD` evidence
 must match the tracking ref before reset. Cached fetch evidence cannot authorize
-a reset. Sharing a directory with untracked or ignored files is safe when the
+a reset. In a partial clone, reset batches missing checkout blobs into a separate
+fetch before switching branches, setting the upstream, or writing recovery refs.
+It applies Git's sparse checkout rules and verifies the requested blobs locally
+before running checkout mutations with lazy fetching disabled. Sharing a directory
+with untracked or ignored files is safe when the
 individual paths do not collide; nested repositories and symlinks remain protected.
 Hooks are followed by branch, commit, and tracked-file verification. Other branches,
 linked worktree files, and noncolliding local files remain intact. Replaced target
@@ -76,8 +80,11 @@ deadline. Git fetch output renews that window while a transfer is active, up to
 for that checkout. An explicit `--timeout SECONDS` sets a fixed deadline of
 1–86400 seconds for each attempt. If a fetch times out, its log includes the last
 available Git message with credentials redacted. Before switching the checkout,
-transient failures use bounded backoff. Authentication, locks, and safety refusals
-are not retried. For a
+transient failures use bounded backoff. When Git reports an interrupted transfer,
+new attempts are capped at four concurrent repositories. A further disconnect
+under the reduced limit serializes new attempts. Already running attempts continue,
+and the lower limit lasts for the rest of that run. Authentication, locks, and
+safety refusals are not retried. For a
 timeout during or just after the hard reset, a separate five-second read-only
 check can confirm the exact branch, commit, upstream, and clean checkout. If
 the checkout may have changed and that result cannot be verified, the target
@@ -107,8 +114,10 @@ checkout. Git still fetches and verifies the current branch and preserves the
 existing shallow boundary. When Git cannot check local availability without
 lazy fetching, reset skips automatic hints and refuses an explicit hint.
 
-Persistent connection failures remain failures after the retry limit. Use fewer
-workers with `--jobs N` on constrained networks. There is no transaction or rollback across checkouts:
+Persistent connection failures remain failures after the retry limit and report
+`failure_kind: "fetch_disconnected"` in JSON when Git reports a disconnect. Terminal
+summaries omit transfer progress and retain the connection error. Use fewer
+workers with `--jobs N` to start at a lower limit on constrained networks. There is no transaction or rollback across checkouts:
 fetches, backups, switches, and upstream changes may persist after later failure.
 
 ## Clean up linked worktrees

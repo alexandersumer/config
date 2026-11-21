@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
-    mpsc, Arc, Mutex, OnceLock,
+    mpsc, Arc, Condvar, Mutex, OnceLock,
 };
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -109,8 +109,85 @@ impl ResultRecord {
     }
 }
 
+fn transfer_stage(stage: &str) -> bool {
+    matches!(stage, "fetch" | "fetch checkout objects")
+}
+
+fn interrupted_transfer(text: &str, stage: Option<&str>) -> bool {
+    static INTERRUPTED: OnceLock<Regex> = OnceLock::new();
+    stage.is_some_and(transfer_stage)
+        && INTERRUPTED.get_or_init(|| Regex::new(
+            r"(?i)Connection (?:reset|closed)|Connection to [^\r\n]+ closed by remote host|early EOF|unexpected disconnect|remote end hung up|TLS connection was non-properly terminated"
+        ).unwrap()).is_match(text)
+}
+
 fn fetch_disconnected(text: &str, stage: Option<&str>) -> bool {
-    stage == Some("fetch") && text.contains("fatal: Could not read from remote repository.")
+    interrupted_transfer(text, stage)
+        || stage.is_some_and(transfer_stage)
+            && text.contains("fatal: Could not read from remote repository.")
+}
+
+struct AttemptPool {
+    state: Mutex<AttemptConcurrency>,
+    available: Condvar,
+}
+
+struct AttemptConcurrency {
+    active: usize,
+    limit: usize,
+}
+
+impl AttemptPool {
+    fn new(limit: usize) -> Self {
+        Self {
+            state: Mutex::new(AttemptConcurrency { active: 0, limit }),
+            available: Condvar::new(),
+        }
+    }
+
+    fn acquire(&self) -> Option<AttemptPermit<'_>> {
+        let mut state = self.state.lock().unwrap();
+        while state.active >= state.limit && !cancelled() {
+            state = self
+                .available
+                .wait_timeout(state, Duration::from_millis(25))
+                .unwrap()
+                .0;
+        }
+        if cancelled() {
+            return None;
+        }
+        state.active += 1;
+        Some(AttemptPermit {
+            pool: self,
+            admitted_limit: state.limit,
+        })
+    }
+}
+
+struct AttemptPermit<'a> {
+    pool: &'a AttemptPool,
+    admitted_limit: usize,
+}
+
+impl AttemptPermit<'_> {
+    fn reduce_after_disconnect(&self) -> Option<usize> {
+        let mut state = self.pool.state.lock().unwrap();
+        // Failures from the original wave all carry the same limit. A further
+        // reduction requires a new failure under the lower concurrency.
+        if state.limit != self.admitted_limit || state.limit <= 1 {
+            return None;
+        }
+        state.limit = if state.limit > 4 { 4 } else { 1 };
+        Some(state.limit)
+    }
+}
+
+impl Drop for AttemptPermit<'_> {
+    fn drop(&mut self) {
+        self.pool.state.lock().unwrap().active -= 1;
+        self.pool.available.notify_one();
+    }
 }
 
 fn retryable(text: &str, stage: Option<&str>) -> bool {
@@ -212,6 +289,7 @@ fn execute(
     repo: &Repo,
     log: &PathBuf,
     progress: &mut Progress,
+    pool: &AttemptPool,
 ) -> Result<(i32, usize, String), String> {
     let mut output = OpenOptions::new()
         .create_new(true)
@@ -233,6 +311,13 @@ fn execute(
     let mut code = 130;
     let mut detail = "Cancelled before execution".to_string();
     while attempts < options.attempts && !cancelled() {
+        let Some(permit) = pool.acquire() else {
+            return Ok((
+                130,
+                attempts,
+                "Cancelled while waiting for a reset attempt".into(),
+            ));
+        };
         attempts += 1;
         writeln!(output, "Attempt {attempts}/{}", options.attempts).map_err(|e| e.to_string())?;
         Status {
@@ -355,7 +440,7 @@ fn execute(
         if reached_cap {
             detail.push_str("\nReached the default 30-minute attempt limit. Retry this checkout with an explicit --timeout if it needs more time.");
         }
-        if matches!(code, 124 | 130) && last_stage == "fetch" {
+        if matches!(code, 124 | 130) && transfer_stage(last_stage) {
             if let Some(last_output) = last_fetch_output(&fetch_stderr) {
                 writeln!(output, "Last Git fetch output: {last_output}")
                     .map_err(|e| e.to_string())?;
@@ -389,6 +474,15 @@ fn execute(
             detail.push_str("\nCheckout may have changed. Inspect the checkout and recovery refs before starting a new reset.");
         }
         writeln!(output, "Outcome: {detail}").map_err(|e| e.to_string())?;
+        if status.error.as_deref().is_some_and(|error| {
+            interrupted_transfer(error, Some(last_stage)) && retryable(error, Some(last_stage))
+        }) {
+            if let Some(limit) = permit.reduce_after_disconnect() {
+                writeln!(output, "Git transfer lost its connection; new reset attempts are now capped at {limit} concurrent repositories for this run.")
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+        drop(permit);
         if code == 0
             || code == 130
             || reached_cap
@@ -496,6 +590,7 @@ fn run_inner(options: &Options, selection: Selection, started: Instant) -> Resul
         .iter()
         .map(|repo| (repo.common.clone(), Arc::new(Mutex::new(()))))
         .collect();
+    let pool = AttemptPool::new(options.jobs.min(total));
     let next = AtomicUsize::new(0);
     let (tx, rx) = mpsc::channel();
     let mut rendering = crate::presentation::Progress::new(total);
@@ -508,6 +603,7 @@ fn run_inner(options: &Options, selection: Selection, started: Instant) -> Resul
             let next = &next;
             let logs = &logs;
             let resources = &resources;
+            let pool = &pool;
             scope.spawn(move || loop {
                 let index = next.fetch_add(1, Ordering::Relaxed);
                 let Some(repo) = repos.get(index) else {
@@ -525,7 +621,7 @@ fn run_inner(options: &Options, selection: Selection, started: Instant) -> Resul
                 let outcome = if cancelled() {
                     Ok((130, 0, "Cancelled before execution".into()))
                 } else {
-                    execute(options, repo, &log, &mut progress)
+                    execute(options, repo, &log, &mut progress, pool)
                 };
                 let (code, attempts, detail) = outcome.unwrap_or_else(|e| {
                     // execute creates the log before acquiring coordination.

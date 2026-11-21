@@ -227,8 +227,9 @@ counts local files, and states which file deletions are authorized.
 | Primary checkout | That checkout | All its registered linked worktrees, including paths outside it |
 | Linked worktree | Refused | That linked worktree only |
 
-Reset defaults to at most 32 workers; cleanup defaults to at most four. Both accept
-`--jobs N`, where `N` is 1 through 32. Run Git operations while repositories are otherwise idle. Workctl
+Reset defaults to at most 32 workers and lowers concurrency after interrupted Git
+transfers. Cleanup defaults to at most four workers. Both accept `--jobs N`, where
+`N` is 1 through 32. Run Git operations while repositories are otherwise idle. Workctl
 locks coordinate its own invocations, not editors or unrelated Git commands.
 
 [Git reference](git.md): exact selection rules, recovery commands, discard

@@ -1,7 +1,7 @@
 //! One operation, used by every selected primary checkout.
-use super::git::{self, Git};
+use super::git::{self, FetchIo, Git};
 use super::status::{Checkout, Status};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::os::fd::FromRawFd;
@@ -217,6 +217,165 @@ impl Operation {
             Err(e) => Err(format!("Cannot clear previous FETCH_HEAD: {e}")),
         }
     }
+    fn promisor_remote(&self, remote: &str) -> Result<Option<String>, String> {
+        if self
+            .git
+            .optional(&[
+                "config",
+                "--get-regexp",
+                "^(extensions\\.partialclone|remote\\..*\\.promisor)$",
+            ])?
+            .is_none()
+        {
+            return Ok(None);
+        }
+        let flags = self.git.optional(&[
+            "config",
+            "--type=bool",
+            "--get-regexp",
+            "^remote\\..*\\.promisor$",
+        ])?;
+        let flags = flags
+            .map(git::reference_text)
+            .transpose()?
+            .unwrap_or_default();
+        let names = || {
+            flags.lines().filter_map(|line| {
+                line.strip_prefix("remote.")
+                    .and_then(|line| line.strip_suffix(".promisor true"))
+            })
+        };
+        if names().any(|name| name == remote) {
+            return Ok(Some(remote.to_owned()));
+        }
+        if let Some(name) = self
+            .git
+            .optional(&["config", "--get", "extensions.partialClone"])?
+        {
+            return git::reference_text(name).map(Some);
+        }
+        Ok(names().next().map(str::to_owned))
+    }
+
+    fn checkout_blobs(&self, trees: &[&str]) -> Result<Vec<u8>, String> {
+        let sparse = self
+            .git
+            .optional(&["config", "--type=bool", "--get", "core.sparseCheckout"])?
+            .as_deref()
+            == Some(b"true\n");
+        let mut paths = BTreeMap::<Vec<u8>, BTreeSet<String>>::new();
+        for tree in trees {
+            let listing = self.git.call(&["ls-tree", "-r", "-z", tree])?;
+            for record in listing
+                .split(|byte| *byte == 0)
+                .filter(|record| !record.is_empty())
+            {
+                let (metadata, path) = record.split_at(
+                    record
+                        .iter()
+                        .position(|b| *b == b'\t')
+                        .ok_or("Invalid Git tree listing")?,
+                );
+                let metadata =
+                    std::str::from_utf8(metadata).map_err(|_| "Invalid Git tree metadata")?;
+                let (_, object) = metadata
+                    .split_once(' ')
+                    .ok_or("Invalid Git tree metadata")?;
+                if let Some(oid) = object.strip_prefix("blob ") {
+                    paths
+                        .entry(path[1..].to_vec())
+                        .or_default()
+                        .insert(super::object_id(oid)?);
+                }
+            }
+        }
+        let included = if sparse {
+            let rules: Vec<_> = paths
+                .keys()
+                .flat_map(|path| path.iter().copied().chain([0]))
+                .collect();
+            let included = self.git.sparse_included(&rules)?;
+            Some(
+                included
+                    .split(|byte| *byte == 0)
+                    .map(<[u8]>::to_vec)
+                    .collect::<BTreeSet<_>>(),
+            )
+        } else {
+            None
+        };
+        let objects: BTreeSet<_> = paths
+            .into_iter()
+            .filter(|(path, _)| {
+                included
+                    .as_ref()
+                    .is_none_or(|included| included.contains(path))
+                    || matches!(
+                        path.rsplit(|byte| *byte == b'/').next(),
+                        Some(b".gitattributes" | b".gitmodules")
+                    )
+            })
+            .flat_map(|(_, objects)| objects)
+            .collect();
+        Ok(objects
+            .into_iter()
+            .flat_map(|oid| oid.into_bytes().into_iter().chain([b'\n']))
+            .collect())
+    }
+
+    fn hydrate_checkout(
+        &mut self,
+        trees: &[&str],
+        promisor: &str,
+        redirect: &mut Option<String>,
+        fetch_stderr: &fs::File,
+    ) -> Result<(), String> {
+        self.stage("fetch checkout objects")?;
+        let objects = self.checkout_blobs(trees)?;
+        let missing = self.git.missing_blobs(&objects)?;
+        if missing.is_empty() {
+            return Ok(());
+        }
+        let url = self.git.text(&["remote", "get-url", promisor])?;
+        let output = self.git.remote_call(
+            promisor,
+            &url,
+            redirect,
+            &[
+                "-c",
+                "maintenance.auto=false",
+                "-c",
+                "gc.auto=0",
+                "-c",
+                "fetch.negotiationAlgorithm=noop",
+                "fetch",
+                "--progress",
+                "--no-write-fetch-head",
+                "--no-tags",
+                "--no-prune",
+                "--no-prune-tags",
+                "--no-recurse-submodules",
+                "--refmap=",
+                "--filter=blob:none",
+                "--stdin",
+                "--",
+                promisor,
+            ],
+            Some(FetchIo {
+                stderr: fetch_stderr,
+                input: Some(&missing),
+            }),
+            || Ok(()),
+        )?;
+        print!("{}", git::redact(OsString::from_vec(output)));
+        if !self.git.missing_blobs(&missing)?.is_empty() {
+            return Err(
+                "Promisor fetch completed but required checkout objects are still missing".into(),
+            );
+        }
+        Ok(())
+    }
+
     fn reset(
         &mut self,
         remote: &str,
@@ -360,7 +519,10 @@ impl Operation {
                 effective_url,
                 &mut redirect,
                 &args,
-                Some(fetch_stderr),
+                Some(FetchIo {
+                    stderr: fetch_stderr,
+                    input: None,
+                }),
                 || self.clear_fetch_head(),
             )
             .map_err(remote_error)?;
@@ -383,12 +545,40 @@ impl Operation {
             "Verified target: {}",
             self.status.target.as_deref().unwrap()
         );
+        let local_tip = || {
+            self.git
+                .optional(&["rev-parse", "--verify", "--quiet", &local_ref])?
+                .map(git::reference_text)
+                .transpose()
+        };
+        let old = local_tip()?;
+        let promisor = self.promisor_remote(remote)?;
+        if let Some(promisor) = &promisor {
+            let mut trees = vec![oid.as_str()];
+            trees.extend(old.as_deref().filter(|old| *old != oid));
+            let mut promisor_redirect = None;
+            let rewrite = if promisor == remote {
+                &mut redirect
+            } else {
+                &mut promisor_redirect
+            };
+            self.hydrate_checkout(&trees, promisor, rewrite, fetch_stderr)
+                .map_err(remote_error)?;
+            if self
+                .git
+                .optional(&["rev-parse", "--verify", "--quiet", &local_ref])?
+                .map(git::reference_text)
+                .transpose()?
+                != old
+            {
+                return Err(
+                    "Target branch tip changed while fetching checkout objects; refusing reset"
+                        .into(),
+                );
+            }
+        }
         self.stage("check trees and backup")?;
         self.tree(&oid)?;
-        let old = self
-            .git
-            .optional(&["rev-parse", "--verify", "--quiet", &local_ref])?
-            .map(|b| String::from_utf8_lossy(&b).trim().to_owned());
         if let Some(old) = &old {
             self.tree(&local_ref)?;
             if old != &oid {
@@ -418,22 +608,30 @@ impl Operation {
         });
         self.stage("switch")?;
         if old.is_some() {
-            self.git.action(&[
-                "switch",
-                "--no-recurse-submodules",
-                "--no-overwrite-ignore",
-                &branch,
-            ])?;
+            checkout_action(
+                &self.git,
+                promisor.is_some(),
+                &[
+                    "switch",
+                    "--no-recurse-submodules",
+                    "--no-overwrite-ignore",
+                    &branch,
+                ],
+            )?;
         } else {
-            self.git.action(&[
-                "switch",
-                "--no-recurse-submodules",
-                "--no-overwrite-ignore",
-                "--no-track",
-                "--create",
-                &branch,
-                &oid,
-            ])?;
+            checkout_action(
+                &self.git,
+                promisor.is_some(),
+                &[
+                    "switch",
+                    "--no-recurse-submodules",
+                    "--no-overwrite-ignore",
+                    "--no-track",
+                    "--create",
+                    &branch,
+                    &oid,
+                ],
+            )?;
         }
         self.status.state = Some(format!("switched to {branch}"));
         self.status.write(&self.status_path)?;
@@ -448,8 +646,11 @@ impl Operation {
             &branch,
         ])?;
         self.stage("reset")?;
-        self.git
-            .action(&["reset", "--no-recurse-submodules", "--hard", &oid])?;
+        checkout_action(
+            &self.git,
+            promisor.is_some(),
+            &["reset", "--no-recurse-submodules", "--hard", &oid],
+        )?;
         self.stage("post-reset verification")?;
         self.clean()?;
         self.verify_head(&local_ref, &oid)?;
@@ -457,6 +658,18 @@ impl Operation {
         self.status.write(&self.status_path)?;
         println!("State: reset completed at {oid}");
         Ok(())
+    }
+}
+
+fn checkout_action(git: &Git, local_only: bool, args: &[&str]) -> Result<(), String> {
+    if local_only {
+        let local: Vec<_> = ["--no-lazy-fetch"]
+            .into_iter()
+            .chain(args.iter().copied())
+            .collect();
+        git.action(&local)
+    } else {
+        git.action(args)
     }
 }
 

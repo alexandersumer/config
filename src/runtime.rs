@@ -237,6 +237,7 @@ pub(crate) fn capture(
 pub(crate) fn capture_reset_fetch(
     cmd: std::process::Command,
     stderr: &std::fs::File,
+    stdin: std::process::Stdio,
 ) -> Result<(i32, Vec<u8>, Vec<u8>), String> {
     use std::io::Seek;
     stderr.set_len(0).map_err(|error| error.to_string())?;
@@ -249,7 +250,7 @@ pub(crate) fn capture_reset_fetch(
         std::time::Duration::ZERO,
         false,
         false,
-        std::process::Stdio::null(),
+        stdin,
         Some(stderr),
     )
 }

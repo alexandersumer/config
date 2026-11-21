@@ -2,6 +2,7 @@
 use super::display;
 use std::ffi::{OsStr, OsString};
 use std::fs;
+use std::io::{Seek, Write};
 use std::os::unix::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -141,6 +142,21 @@ pub(super) fn path_output(bytes: &[u8]) -> PathBuf {
     PathBuf::from(OsString::from_vec(bytes.to_vec()))
 }
 
+fn anonymous_input(bytes: &[u8]) -> Result<fs::File, String> {
+    let mut input = tempfile::tempfile().map_err(|e| e.to_string())?;
+    input
+        .write_all(bytes)
+        .and_then(|_| input.rewind())
+        .map_err(|e| e.to_string())?;
+    Ok(input)
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct FetchIo<'a> {
+    pub stderr: &'a fs::File,
+    pub input: Option<&'a [u8]>,
+}
+
 pub(super) struct Git {
     pub cwd: PathBuf,
     pub directory: PathBuf,
@@ -181,12 +197,17 @@ impl Git {
     fn call_captured(
         &self,
         args: &[&OsStr],
-        fetch_stderr: Option<&fs::File>,
+        fetch: Option<FetchIo<'_>>,
     ) -> Result<Vec<u8>, String> {
-        let (code, out, err) = if let Some(stderr) = fetch_stderr {
+        let (code, out, err) = if let Some(fetch) = fetch {
             let mut cmd = command(&self.cwd);
             cmd.args(args);
-            crate::runtime::capture_reset_fetch(cmd, stderr)?
+            let stdin = fetch
+                .input
+                .map(anonymous_input)
+                .transpose()?
+                .map_or_else(Stdio::null, Stdio::from);
+            crate::runtime::capture_reset_fetch(cmd, fetch.stderr, stdin)?
         } else {
             capture_with_deadline(&self.cwd, args, self.deadline)?
         };
@@ -220,12 +241,7 @@ impl Git {
                 .is_ok_and(|output| output.as_deref() == Some(b"commit\n"))
     }
     pub fn sparse_included(&self, paths: &[u8]) -> Result<Vec<u8>, String> {
-        use std::io::{Seek, Write};
-        let mut input = tempfile::tempfile().map_err(|e| e.to_string())?;
-        input
-            .write_all(paths)
-            .and_then(|_| input.rewind())
-            .map_err(|e| e.to_string())?;
+        let input = anonymous_input(paths)?;
         let mut command = command(&self.cwd);
         command.args(["sparse-checkout", "check-rules", "-z"]);
         let (code, included, error) = crate::runtime::capture_with_input(
@@ -242,18 +258,58 @@ impl Git {
         }
         Ok(included)
     }
+    pub fn missing_blobs(&self, objects: &[u8]) -> Result<Vec<u8>, String> {
+        let mut cmd = command(&self.cwd);
+        cmd.args([
+            "--no-lazy-fetch",
+            "--no-replace-objects",
+            "cat-file",
+            "--batch-check=%(objecttype)",
+        ]);
+        let (code, out, err) = crate::runtime::capture_with_input(
+            cmd,
+            remaining(self.deadline)?,
+            self.deadline.is_some(),
+            anonymous_input(objects)?,
+        )?;
+        if code != 0 {
+            return Err(format!(
+                "Cannot check local checkout objects: {}",
+                diagnostic(OsString::from_vec(err))
+            ));
+        }
+        let lines = |bytes| std::str::from_utf8(bytes).map(str::lines);
+        let wants = lines(objects).map_err(|_| "Invalid Git object input")?;
+        let mut results = lines(&out).map_err(|_| "Invalid Git object check response")?;
+        let mut missing = Vec::new();
+        for oid in wants {
+            match results.next() {
+                Some("blob") => {}
+                Some(line) if line.strip_suffix(" missing") == Some(oid) => {
+                    missing.extend_from_slice(oid.as_bytes());
+                    missing.push(b'\n');
+                }
+                _ => return Err("Unexpected Git object check response".into()),
+            }
+        }
+        if results.next().is_some() {
+            return Err("Unexpected trailing Git object check results".into());
+        }
+        Ok(missing)
+    }
+
     pub fn remote_call(
         &self,
         remote: &str,
         effective_url: &str,
         redirect: &mut Option<String>,
         args: &[&str],
-        fetch_stderr: Option<&fs::File>,
+        fetch: Option<FetchIo<'_>>,
         before_retry: impl FnOnce() -> Result<(), String>,
     ) -> Result<Vec<u8>, String> {
         let call = |args: &[&str]| {
             let args: Vec<_> = args.iter().map(OsStr::new).collect();
-            self.call_captured(&args, fetch_stderr)
+            self.call_captured(&args, fetch)
         };
         let redirected = |rewrite: &str| {
             let args: Vec<_> = ["-c", rewrite]
