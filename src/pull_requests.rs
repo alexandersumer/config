@@ -1,4 +1,6 @@
 //! Repository-scoped Bitbucket Cloud approvals using the native bb OAuth cache.
+mod team;
+
 use crate::auth::{self, process};
 use crate::{presentation, runtime};
 use serde::de::DeserializeOwned;
@@ -19,6 +21,9 @@ pub(crate) struct Options {
     /// Bitbucket Cloud repositories as WORKSPACE/REPOSITORY or https://bitbucket.org/WORKSPACE/REPOSITORY
     #[arg(required = true, num_args = 1.., value_parser = repository)]
     repositories: Vec<String>,
+    /// Limit approvals to authors who are full members of this Atlassian team
+    #[arg(long, value_name = "TEAM_ID", value_parser = team::team_id)]
+    author_team: Option<String>,
     /// Report eligible pull requests without sending approvals
     #[arg(long)]
     dry_run: bool,
@@ -53,6 +58,7 @@ fn repository(value: &str) -> Result<String, String> {
 #[derive(Deserialize)]
 struct User {
     uuid: String,
+    account_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -66,6 +72,21 @@ struct Candidate {
     id: u64,
     state: String,
     reviewers: Vec<User>,
+}
+
+#[derive(Deserialize)]
+struct ListedPullRequest {
+    #[serde(flatten)]
+    candidate: Candidate,
+    author: Option<User>,
+}
+
+fn author_matches(author: Option<&User>, team: Option<&BTreeSet<String>>) -> bool {
+    team.is_none_or(|members| {
+        author
+            .and_then(|user| user.account_id.as_ref())
+            .is_some_and(|id| members.contains(id))
+    })
 }
 
 #[derive(Deserialize)]
@@ -239,17 +260,31 @@ impl Client {
         }
     }
 
-    fn assigned_ids(&self, collection: &str, me: &str) -> Result<BTreeSet<u64>, String> {
+    fn assigned_ids(
+        &self,
+        collection: &str,
+        me: &str,
+        team: Option<&BTreeSet<String>>,
+    ) -> Result<BTreeSet<u64>, String> {
         let mut ids = BTreeSet::new();
         let uuid = &me[1..me.len() - 1]; // validated when resolving the current user
+        let author_fields = if team.is_some() {
+            ",values.author.uuid,values.author.account_id"
+        } else {
+            ""
+        };
         let query = format!(
-            "state=OPEN&sort=id&pagelen=50&fields=next,values.id,values.state,values.reviewers.uuid&q=reviewers.uuid%3D%22%7B{uuid}%7D%22"
+            "state=OPEN&sort=id&pagelen=50&fields=next,values.id,values.state,values.reviewers.uuid{author_fields}&q=reviewers.uuid%3D%22%7B{uuid}%7D%22"
         );
-        self.any_page(collection, &query, |pr: Candidate| {
+        self.any_page(collection, &query, |listed: ListedPullRequest| {
+            let pr = listed.candidate;
             if pr.id == 0 {
                 return Err("Bitbucket returned an invalid pull request ID".into());
             }
-            if pr.state == "OPEN" && pr.reviewers.iter().any(|user| user.uuid == me) {
+            if pr.state == "OPEN"
+                && pr.reviewers.iter().any(|user| user.uuid == me)
+                && author_matches(listed.author.as_ref(), team)
+            {
                 ids.insert(pr.id);
             }
             Ok(false)
@@ -263,6 +298,7 @@ impl Client {
         id: u64,
         me: &str,
         dry_run: bool,
+        team: Option<&BTreeSet<String>>,
     ) -> Result<&'static str, String> {
         let approved_before = self.any_page(
             &format!("{endpoint}/activity"),
@@ -276,7 +312,7 @@ impl Client {
         if approved_before {
             return Ok("previously_approved");
         }
-        let detail = format!("{endpoint}?fields=id,state,author.uuid,reviewers.uuid,participants.user.uuid,participants.approved");
+        let detail = format!("{endpoint}?fields=id,state,author.uuid,author.account_id,reviewers.uuid,participants.user.uuid,participants.approved");
         let pr: PullRequest = self.request("GET", &detail)?;
         if pr.candidate.id != id {
             return Err("Bitbucket returned a different pull request ID".into());
@@ -293,6 +329,9 @@ impl Client {
             .any(|p| p.user.uuid == me && p.approved)
         {
             return Ok("already_approved");
+        }
+        if !author_matches(Some(&pr.author), team) {
+            return Ok("author_outside_team");
         }
         if dry_run {
             return Ok("would_approve");
@@ -336,6 +375,15 @@ fn approve(
     if code != 0 {
         return Err("A working curl is required for the Bitbucket API".into());
     }
+    let roster = options
+        .author_team
+        .as_deref()
+        .map(|id| team::member_accounts(id, options.non_interactive, human))
+        .transpose()?;
+    if roster.as_ref().is_some_and(BTreeSet::is_empty) {
+        return Ok(());
+    }
+
     let client = Client {
         token: auth::bitbucket_token(options.non_interactive, human)?,
         session: process::Session::default(),
@@ -360,7 +408,7 @@ fn approve(
         }
         let collection = format!("{API}/repositories/{repo}/pullrequests");
         let ids = client
-            .assigned_ids(&collection, &me.uuid)
+            .assigned_ids(&collection, &me.uuid, roster.as_ref())
             .map_err(|reason| format!("{repo}: {reason}"))?;
         discovered.push((repo, collection, ids));
     }
@@ -375,7 +423,8 @@ fn approve(
             }
             let endpoint = format!("{collection}/{id}");
             let mut row = json!({"repository":repo,"id":id,"url":format!("https://bitbucket.org/{repo}/pull-requests/{id}")});
-            match client.approval_status(&endpoint, id, &me.uuid, options.dry_run) {
+            match client.approval_status(&endpoint, id, &me.uuid, options.dry_run, roster.as_ref())
+            {
                 Ok(status) => row["status"] = json!(status),
                 Err(reason) => {
                     row["status"] = json!("failed");
@@ -404,9 +453,11 @@ pub(crate) fn run(options: Options, json_output: bool) -> u8 {
     let error = outcome.err();
     let output = if json_output {
         // Keep the operation identifier stable for existing schema-version 1 readers.
-        presentation::json(
-            &json!({"schema_version":1,"operation":"pr.approve","status":status,"dry_run":options.dry_run,"repositories":repositories,"results":results,"error":error}),
-        )
+        let mut report = json!({"schema_version":1,"operation":"pr.approve","status":status,"dry_run":options.dry_run,"repositories":repositories,"results":results,"error":error});
+        if let Some(team_id) = &options.author_team {
+            report["author_team"] = json!(team_id);
+        }
+        presentation::json(&report)
     } else {
         let render = || -> io::Result<()> {
             if let Some(reason) = error {
@@ -431,7 +482,14 @@ pub(crate) fn run(options: Options, json_output: bool) -> u8 {
                 writeln!(stdout)?;
             }
             if results.is_empty() && !failed && !interrupted {
-                writeln!(stdout, "No open pull requests assigned to you.")?;
+                if let Some(team_id) = &options.author_team {
+                    writeln!(
+                        stdout,
+                        "No open pull requests assigned to you from Atlassian team {team_id}."
+                    )?;
+                } else {
+                    writeln!(stdout, "No open pull requests assigned to you.")?;
+                }
             }
             Ok(())
         };

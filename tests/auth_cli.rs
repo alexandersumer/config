@@ -2538,3 +2538,109 @@ fn pr_approve_e2e_serializes_overlapping_runs() {
         ["/2.0/repositories/team/two/pullrequests/8/approve"]
     );
 }
+
+const AUTHOR_TEAM: &str = "a281a177-e938-48ab-a46e-d8315e03101b";
+
+fn membership_page(nodes: Value, next: Option<&str>) -> Value {
+    json!({
+        "apiVersion": "v2",
+        "command": "teams.members.list",
+        "data": {
+            "id": format!("ari:cloud:identity::team/{AUTHOR_TEAM}"),
+            "state": "ACTIVE",
+            "members": {
+                "nodes": nodes,
+                "pageInfo": {"hasNextPage": next.is_some(), "endCursor": next}
+            }
+        }
+    })
+}
+
+#[test]
+fn pr_approve_e2e_limits_authors_to_verified_team_members_across_pages() {
+    let api = PullRequestApi::new("author_team");
+    let first = membership_page(
+        json!([
+            {"state":"FULL_MEMBER","member":{"accountId":"first-member"}},
+            {"state":"INVITED","member":{"accountId":"invited-member"}}
+        ]),
+        Some("page-two"),
+    );
+    let second = membership_page(
+        json!([
+            {"state":"FULL_MEMBER","member":{"accountId":"second-member"}}
+        ]),
+        None,
+    );
+    let fixture = Fixture::new(json!({"twg_valid":false,"team_membership_pages":[first,second]}));
+    let result = approval_result(
+        api.command(
+            &fixture,
+            &["--author-team", AUTHOR_TEAM, "team/one", "team/two"],
+        )
+        .output()
+        .unwrap(),
+        0,
+    );
+    assert_eq!(result["author_team"], AUTHOR_TEAM);
+    assert_eq!(
+        api.posts(),
+        [
+            "/2.0/repositories/team/one/pullrequests/1/approve",
+            "/2.0/repositories/team/one/pullrequests/6/approve"
+        ]
+    );
+    let rows = result["results"].as_array().unwrap();
+    assert_eq!(
+        rows.iter().find(|row| row["id"] == 11).unwrap()["status"],
+        "author_outside_team",
+        "a different author in fresh detail must block the write"
+    );
+    assert!(rows.iter().all(|row| row["id"] != 8 && row["id"] != 12));
+    assert!(fixture
+        .calls()
+        .iter()
+        .any(|call| call[0] == "twg" && call[1][0] == "auth" && call[1][1] == "refresh"));
+    let members_calls: Vec<_> = fixture
+        .calls()
+        .into_iter()
+        .filter(|call| call[0] == "twg" && call[1][0] == "teams")
+        .collect();
+    assert_eq!(members_calls.len(), 2);
+    assert_eq!(
+        members_calls[1][1].as_array().unwrap().last().unwrap(),
+        "--after=page-two"
+    );
+}
+
+#[test]
+fn pr_approve_e2e_fails_closed_when_team_membership_is_incomplete() {
+    let api = PullRequestApi::new("author_team");
+    let member = json!([{"state":"FULL_MEMBER","member":{"accountId":"first-member"}}]);
+    let first = membership_page(member.clone(), Some("page-two"));
+    let mut wrong_team = membership_page(member, None);
+    wrong_team["data"]["id"] =
+        json!("ari:cloud:identity::team/00000000-0000-0000-0000-000000000000");
+    let fixture = Fixture::new(json!({}));
+    for (second, reason) in [
+        (Value::Null, "could not read"),
+        (wrong_team, "did not verify"),
+        (first.clone(), "repeated"),
+    ] {
+        fixture.state(json!({"team_membership_pages":[first,second]}));
+        let result = approval_result(
+            api.command(&fixture, &["--author-team", AUTHOR_TEAM, "team/one"])
+                .output()
+                .unwrap(),
+            1,
+        );
+        assert!(
+            result["error"].as_str().unwrap().contains(reason),
+            "{result}"
+        );
+        assert!(
+            api.requests().is_empty(),
+            "any Bitbucket request requires a fully verified team roster"
+        );
+    }
+}

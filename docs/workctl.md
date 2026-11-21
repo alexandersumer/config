@@ -158,6 +158,21 @@ or unverified items produce a nonzero exit status. The report includes a result
 for each pull request checked. A rerun uses fresh Bitbucket state. Add `--json`
 for a schema-versioned report.
 
+### Restrict approvals to an Atlassian team
+
+```sh
+workctl pull-request approve --author-team TEAM_ID --dry-run workspace/repository
+```
+
+Use the UUID in the Atlassian team profile URL as `TEAM_ID`. Workctl reads the
+active team's full roster through `twg` before contacting Bitbucket. It matches
+full members to pull request authors by Atlassian account ID and checks the
+author again immediately before approval. An empty roster or an author without
+a matching account ID yields no approval. Directory errors, incomplete
+pagination, and responses for a different team stop the run before any approval.
+The team roster is read once per invocation. Add `--json` to include the team ID
+in the report.
+
 ## Git operations
 
 ### Reset checkouts

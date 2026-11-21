@@ -148,7 +148,20 @@ elif name == 'twg':
     assert '-o' in args and args[args.index('-o') + 1] == 'json'
     assert '--output-summary' in args and args[args.index('--output-summary') + 1] == 'none'
     assert os.environ['TWG_AGENT_DEFAULTS'] == '0'
-    if args[0] == 'doctor':
+    if args[:3] == ['teams', 'members', 'list']:
+        assert args[3:13] == ['--team-id', 'a281a177-e938-48ab-a46e-d8315e03101b',
+                              '--first', '100', '--mode', 'user', '-o', 'json',
+                              '--output-summary', 'none']
+        pages = state['team_membership_pages']
+        if len(args) == 13:
+            page = pages[0]
+        else:
+            assert args[13:] == ['--after=page-two']
+            page = pages[1]
+        if page is None:
+            sys.exit(1)
+        print(json.dumps(page))
+    elif args[0] == 'doctor':
         print(json.dumps({'data': {'connectivity': state.get('twg_connectivity_response', {'ok': state.get('twg_valid', True)}),
                                  'auth': {'resolved': {'tokenPresent': state.get('twg_token_present', state.get('twg_valid', True))}},
                                  'bitbucket': state.get('twg_bb_response', {'attempted': True, 'ok': state.get('twg_bb_valid', True),

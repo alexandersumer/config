@@ -275,11 +275,13 @@ fn render(result: &Value, stderr: bool, elapsed: std::time::Duration) -> std::io
     )?;
     output.flush()
 }
-/// Prime the provider-owned cache, then obtain an in-memory token for the
-/// account the preflight verified. Never follow a later active-account switch.
-pub(crate) fn bitbucket_token(non_interactive: bool, human: bool) -> Result<String, String> {
+pub(crate) fn prepare_profile(
+    profile: &str,
+    non_interactive: bool,
+    human: bool,
+) -> Result<Value, String> {
     let options = Options {
-        profile: "bitbucket".into(),
+        profile: profile.into(),
         include_profiles: Vec::new(),
         config: None,
         check: false,
@@ -297,23 +299,29 @@ pub(crate) fn bitbucket_token(non_interactive: bool, human: bool) -> Result<Stri
         let reason = outcome["error"]
             .as_str()
             .or_else(|| target["reason"].as_str())
-            .unwrap_or("Bitbucket preflight did not verify access");
-        let action = target["action"]
-            .as_str()
-            .unwrap_or("Check workctl auth preflight --profile bitbucket");
+            .unwrap_or("Authentication preflight did not verify access");
+        let fallback = format!("Check workctl auth preflight --profile {profile}");
+        let action = target["action"].as_str().unwrap_or(&fallback);
         return Err(format!("{reason}. {action}"));
     }
+    Ok(outcome)
+}
+
+/// Obtain an in-memory token for the account the preflight verified.
+pub(crate) fn bitbucket_token(non_interactive: bool, human: bool) -> Result<String, String> {
+    let outcome = prepare_profile("bitbucket", non_interactive, human)?;
+    let timeout = 30;
     let account = outcome["targets"][0]["account"]
         .as_str()
         .ok_or("Bitbucket preflight did not identify the account")?;
-    let _lock = process::Lock::acquire(options.timeout)?;
+    let _lock = process::Lock::acquire(timeout)?;
     let mut command = std::process::Command::new("bb");
     command.args(["auth", "token", "--account", account]);
     let output = process::capture(
         &process::Session::default(),
         "Bitbucket",
         command,
-        options.timeout,
+        timeout,
         None,
     )?;
     let token = String::from_utf8(output.stdout)
