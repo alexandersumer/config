@@ -16,10 +16,10 @@ const REQUEST_SECONDS: u64 = 30;
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Options {
-    /// Bitbucket Cloud repositories as WORKSPACE/REPO or https://bitbucket.org/WORKSPACE/REPO
+    /// Bitbucket Cloud repositories as WORKSPACE/REPOSITORY or https://bitbucket.org/WORKSPACE/REPOSITORY
     #[arg(required = true, num_args = 1.., value_parser = repository)]
     repositories: Vec<String>,
-    /// Report eligible PRs without sending approvals
+    /// Report eligible pull requests without sending approvals
     #[arg(long)]
     dry_run: bool,
     /// Allow silent OAuth refresh without browser login
@@ -46,7 +46,7 @@ fn repository(value: &str) -> Result<String, String> {
     {
         Ok(value.to_ascii_lowercase())
     } else {
-        Err("expected WORKSPACE/REPO or a Bitbucket Cloud repository URL".into())
+        Err("expected WORKSPACE/REPOSITORY or a Bitbucket Cloud repository URL".into())
     }
 }
 
@@ -315,7 +315,7 @@ impl Client {
             .err()
             .or_else(|| verified.err())
             .unwrap_or_else(|| "approval was absent from the read-back".into());
-        Err(format!("Approval could not be verified ({reason}). Inspect the PR or rerun to check fresh state"))
+        Err(format!("Approval could not be verified ({reason}). Inspect the pull request or rerun to check fresh state"))
     }
 }
 
@@ -327,6 +327,7 @@ fn approve(
 ) -> Result<(), String> {
     let _signals =
         runtime::Signals::install().map_err(|_| "Cannot install cancellation handlers")?;
+    // Retain the same lock across versions so old and new invocations coordinate.
     let _lock = process::Lock::acquire_for("pr-approve", 30)?;
     // Check the transport before any credential refresh or browser interaction.
     let mut curl = Command::new("curl");
@@ -402,6 +403,7 @@ pub(crate) fn run(options: Options, json_output: bool) -> u8 {
     };
     let error = outcome.err();
     let output = if json_output {
+        // Keep the operation identifier stable for existing schema-version 1 readers.
         presentation::json(
             &json!({"schema_version":1,"operation":"pr.approve","status":status,"dry_run":options.dry_run,"repositories":repositories,"results":results,"error":error}),
         )
@@ -421,7 +423,7 @@ pub(crate) fn run(options: Options, json_output: bool) -> u8 {
                     "{} #{}  {}",
                     row["repository"].as_str().unwrap_or_default(),
                     row["id"],
-                    row["status"].as_str().unwrap_or_default()
+                    row["status"].as_str().unwrap_or_default().replace('_', " ")
                 )?;
                 if let Some(reason) = row["reason"].as_str() {
                     write!(stdout, " ({})", presentation::safe_text(reason))?;

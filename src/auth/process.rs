@@ -308,10 +308,13 @@ impl Lock {
                 return Err("Cannot acquire auth coordination lock".into());
             }
             if Instant::now() >= deadline {
-                return Err(if operation == "auth" {
-                    "Auth refresh already running; coordination deadline exceeded".into()
-                } else {
-                    format!("{operation} already running; coordination deadline exceeded")
+                return Err(match operation {
+                    "auth" => "Auth refresh already running; coordination deadline exceeded".into(),
+                    "pr-approve" => {
+                        "Pull request approval already running; coordination deadline exceeded"
+                            .into()
+                    }
+                    _ => format!("{operation} already running; coordination deadline exceeded"),
                 });
             }
             std::thread::sleep(Duration::from_millis(20));

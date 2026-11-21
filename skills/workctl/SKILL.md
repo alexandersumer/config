@@ -19,7 +19,7 @@ workspace. Prefer `--json` for structured results.
 | Prepare credentials for work | `workctl auth preflight --profile PROFILE --json` |
 | Explicitly renew credentials | `workctl auth preflight --profile PROFILE --force --json` |
 | Prepare auth and launch a command | `workctl auth exec --profile PROFILE -- COMMAND` |
-| Approve open Bitbucket PRs assigned to you in specific repos | `workctl pr approve WORKSPACE/REPO ... --json` (add `--dry-run` to preview) |
+| Approve open Bitbucket pull requests assigned to you in specified repositories | `workctl pull-request approve WORKSPACE/REPOSITORY ... --json` (add `--dry-run` to preview) |
 | Inspect reset targets | `workctl git reset --list PATH --json` |
 | Reset checkouts | `workctl git reset PATH --json` |
 | Inventory worktrees | `workctl git worktree inventory PATH --json` |

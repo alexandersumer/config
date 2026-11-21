@@ -55,7 +55,7 @@ and functions and refreshes command hashes when loaded.
 | `workctl auth preflight` | Verify credentials and renew those that need it |
 | `workctl auth inspect --profile code` | Resolve credential requirements without provider calls |
 | `workctl auth exec -- COMMAND` | Run preflight, then launch a command |
-| `workctl pr approve WORKSPACE/REPO ...` | Approve open Bitbucket Cloud PRs assigned to you in the specified repositories |
+| `workctl pull-request approve WORKSPACE/REPOSITORY ...` | Approve open Bitbucket Cloud pull requests assigned to you in the specified repositories |
 | `workctl git reset [PATH ...]` | Reset primary checkouts to a verified remote branch |
 | `workctl git worktree clean [PATH ...]` | Preview linked-worktree removal; `--apply` removes eligible worktrees |
 | `workctl git worktree inventory [PATH ...]` | Inspect worktrees, age evidence, local work, operations, and orphans |
@@ -130,29 +130,33 @@ credential ownership, custom profiles, and failure handling.
 ## Pull requests
 
 ```sh
-workctl pr approve --dry-run workspace/repo workspace/another-repo
-workctl pr approve workspace/repo https://bitbucket.org/workspace/another-repo
+workctl pull-request approve --dry-run workspace/repository workspace/another-repository
+workctl pull-request approve workspace/repository https://bitbucket.org/workspace/another-repository
 ```
 
-Pass at least one Bitbucket Cloud repository as `WORKSPACE/REPO` or its repository
-URL. The command deduplicates arguments and discovers all pages in those
-repositories before posting any approvals. It uses `curl` for the Bitbucket Cloud
-API and native `bb` OAuth through the `bitbucket` preflight. It reuses valid auth,
-refreshes when needed, and may open a browser if sign-in is required. Use
-`--non-interactive` to allow only silent refresh.
+Pass one or more Bitbucket Cloud repositories as `WORKSPACE/REPOSITORY` or as
+repository URLs. The command deduplicates arguments and reads every page in those
+repositories before posting any approvals. The `pr` alias remains available for
+existing invocations.
+
+The command uses `curl` for the Bitbucket Cloud API and native `bb` OAuth through
+the `bitbucket` preflight. It reuses valid credentials, refreshes them when needed,
+and may open a browser if sign-in is required. Use `--non-interactive` to allow
+only silent refresh.
 
 The command uses the authenticated user's Bitbucket UUID. It skips existing
 approvals and historical approvals visible in Bitbucket's activity log, including
 approvals that were reset or withdrawn. Immediately before posting, it checks
-that the PR is open, you are still assigned, you are not the author, and there
-is no current approval from you. Bitbucket does not expose a conditional approval
+that the pull request is open, you are still assigned as a reviewer, and you have
+neither authored nor already approved it. Bitbucket does not expose a conditional approval
 endpoint, so an external change can still occur between that check and the POST.
 
 `--dry-run` reads the same eligibility evidence without posting approvals.
 Transient read failures get up to two retries. Each POST is sent once and
-the resulting approval is read back, even if the POST response was lost. Failed or unverified items produce a nonzero exit
-status and per-PR results. A rerun uses fresh Bitbucket state. Add `--json` for a
-schema-versioned report.
+the resulting approval is read back, even if the POST response was lost. Failed
+or unverified items produce a nonzero exit status. The report includes a result
+for each pull request checked. A rerun uses fresh Bitbucket state. Add `--json`
+for a schema-versioned report.
 
 ## Git operations
 
@@ -352,7 +356,7 @@ to the relevant command's reference.
 | Command | JSON schema |
 | --- | --- |
 | `auth preflight`, `auth inspect` | 1 |
-| `pr approve`, `git reset` | 1 |
+| `pull-request approve`, `git reset` | 1 |
 | `git worktree clean` | 2 |
 | `git worktree inventory` | 1 |
 | `history` (listing or stored run) | 1 |

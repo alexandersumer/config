@@ -7,10 +7,10 @@ use std::io::Write;
 #[command(
     name = "workctl",
     version,
-    about = "Work credentials and Git maintenance",
+    about = "Work credentials, Git maintenance, and Bitbucket Cloud pull requests",
     propagate_version = true,
     args_override_self = true,
-    after_help = "Examples:\n  workctl git reset /path/to/work /path/to/oss\n  workctl git worktree clean /path/to/work\n  workctl auth preflight\n  workctl auth exec --profile code -- bb pr list\n  workctl doctor\n  workctl completions zsh\n\nExit codes: 0 success, 1 failed or blocked, 2 invalid usage, 130 interrupted."
+    after_help = "Examples:\n  workctl git reset /path/to/work /path/to/oss\n  workctl git worktree clean /path/to/work\n  workctl auth preflight\n  workctl pull-request approve --dry-run workspace/repository\n  workctl doctor\n  workctl completions zsh\n\nExit codes: 0 success, 1 failed or blocked, 2 invalid usage, 130 interrupted."
 )]
 struct Cli {
     /// Emit a single schema-versioned JSON result on stdout
@@ -33,7 +33,8 @@ enum Operation {
         command: Git,
     },
     /// Review actions for Bitbucket Cloud pull requests
-    Pr {
+    #[command(alias = "pr")]
+    PullRequest {
         #[command(subcommand)]
         command: PullRequest,
     },
@@ -84,7 +85,7 @@ enum Auth {
 }
 #[derive(Subcommand, Debug)]
 enum PullRequest {
-    /// Approve open PRs assigned to you in the supplied repositories
+    /// Approve open pull requests assigned to you in the supplied repositories
     Approve(crate::pull_requests::Options),
 }
 #[derive(Subcommand, Debug)]
@@ -181,7 +182,7 @@ pub(crate) fn run(args: Vec<OsString>) -> u8 {
         Operation::Auth {
             command: Auth::Exec { options, command },
         } => crate::auth::run(options, cli.json, Some(command)),
-        Operation::Pr {
+        Operation::PullRequest {
             command: PullRequest::Approve(options),
         } => crate::pull_requests::run(options, cli.json),
         Operation::Git {

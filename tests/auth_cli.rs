@@ -2282,6 +2282,10 @@ impl PullRequestApi {
     }
 
     fn command(&self, fixture: &Fixture, args: &[&str]) -> Command {
+        self.invocation(fixture, &["pull-request", "approve", "--json"], args)
+    }
+
+    fn invocation(&self, fixture: &Fixture, command: &[&str], args: &[&str]) -> Command {
         let wrapper = fixture.root.path().join("bin/curl");
         if !wrapper.exists() {
             fs::write(
@@ -2295,8 +2299,9 @@ exec /usr/bin/curl --disable --noproxy '*' --cacert "$PR_FIXTURE_CERT" --connect
         .unwrap();
             fs::set_permissions(&wrapper, fs::Permissions::from_mode(0o755)).unwrap();
         }
-        let mut command = fixture.command(&["pr", "approve", "--json", "--non-interactive"]);
+        let mut command = fixture.command(command);
         command
+            .arg("--non-interactive")
             .args(args)
             .env("PR_FIXTURE_PORT", self.port.to_string())
             .env("PR_FIXTURE_CERT", self.root.path().join("cert.pem"));
@@ -2402,9 +2407,30 @@ fn pr_approve_e2e_refreshes_and_approves_only_assigned_prs_across_pages_and_reru
             (8, "approved".into()),
         ]
     );
-    let second = approval_result(api.command(&fixture, &repos).output().unwrap(), 0);
+    let second = approval_result(
+        api.invocation(&fixture, &["pr", "approve", "--json"], &repos)
+            .output()
+            .unwrap(),
+        0,
+    );
+    assert_eq!(first["operation"], "pr.approve");
+    assert_eq!(second["operation"], first["operation"]);
     assert!(!statuses(&second).iter().any(|(_, s)| s == "approved"));
     assert_eq!(api.posts(), expected, "rerun must not repeat any approval");
+    let human = api
+        .invocation(
+            &fixture,
+            &["pull-request", "approve"],
+            &["team/two", "--dry-run"],
+        )
+        .output()
+        .unwrap();
+    assert!(human.status.success(), "{}", text(&human));
+    assert_eq!(
+        String::from_utf8(human.stdout).unwrap(),
+        "team/two #8  previously approved\n"
+    );
+    assert_eq!(api.posts(), expected);
     assert!(api
         .requests()
         .iter()

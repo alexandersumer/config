@@ -76,7 +76,7 @@ Linux/macOS CI matrix; no separate opt-in is required.
 Maintenance fixtures additionally cover named scopes, creation age and replacement
 races, bulk discard, operation refs, verified orphans, private/concurrent history,
 publication failures, storage accounting, offline inspection, and doctor drift.
-The auth lane also runs the public `pr approve` CLI through real curl/TLS
+The auth lane also runs the public `pull-request approve` CLI through real curl/TLS
 against a disposable loopback Bitbucket API fixture. It checks scoped pagination,
 provider refresh, historical approvals, rerun behavior, read-back after a lost
 response, and partial failures. It requires Python 3, curl, OpenSSL, and loopback
