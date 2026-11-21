@@ -32,6 +32,11 @@ enum Operation {
         #[command(subcommand)]
         command: Git,
     },
+    /// Review actions for Bitbucket Cloud pull requests
+    Pr {
+        #[command(subcommand)]
+        command: PullRequest,
+    },
     /// Inspect runtime prerequisites and supported capabilities without repairs
     #[command(
         after_help = "Examples:\n  workctl doctor\n  workctl doctor --profile code --managed --json"
@@ -76,6 +81,11 @@ enum Auth {
         #[arg(required = true, num_args = 1.., last = true)]
         command: Vec<OsString>,
     },
+}
+#[derive(Subcommand, Debug)]
+enum PullRequest {
+    /// Approve open PRs assigned to you in the supplied repositories
+    Approve(crate::pull_requests::Options),
 }
 #[derive(Subcommand, Debug)]
 enum Git {
@@ -171,6 +181,9 @@ pub(crate) fn run(args: Vec<OsString>) -> u8 {
         Operation::Auth {
             command: Auth::Exec { options, command },
         } => crate::auth::run(options, cli.json, Some(command)),
+        Operation::Pr {
+            command: PullRequest::Approve(options),
+        } => crate::pull_requests::run(options, cli.json),
         Operation::Git {
             command: Git::Reset(args),
         } => crate::git_domain::run(args, cli.json),

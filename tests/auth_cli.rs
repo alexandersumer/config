@@ -2221,3 +2221,294 @@ fn micros_shares_atlas_worker_and_interaction_gate_with_other_profiles() {
         .iter()
         .all(|t| t["status"] == "refreshed"));
 }
+
+struct PullRequestApi {
+    server: std::process::Child,
+    port: u16,
+    root: tempfile::TempDir,
+}
+
+impl PullRequestApi {
+    fn new(mode: &str) -> Self {
+        use std::io::BufRead;
+
+        let root = tempfile::tempdir().unwrap();
+        fs::write(
+            root.path().join("openssl.cnf"),
+            "[req]\ndistinguished_name=dn\nx509_extensions=extensions\nprompt=no\n[dn]\nCN=api.bitbucket.org\n[extensions]\nsubjectAltName=DNS:api.bitbucket.org\nbasicConstraints=critical,CA:TRUE\n",
+        )
+        .unwrap();
+        let cert = Command::new("/usr/bin/openssl")
+            .current_dir(root.path())
+            .args([
+                "req",
+                "-x509",
+                "-newkey",
+                "rsa:2048",
+                "-nodes",
+                "-days",
+                "1",
+                "-config",
+                "openssl.cnf",
+                "-keyout",
+                "key.pem",
+                "-out",
+                "cert.pem",
+            ])
+            .output()
+            .unwrap();
+        assert!(cert.status.success(), "{}", text(&cert));
+        let mut server = Command::new("/usr/bin/python3")
+            .args(["-u", "-c", include_str!("fixtures/bitbucket_pr_api.py")])
+            .arg(root.path())
+            .arg(mode)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let pipe = server.stdout.take().unwrap();
+        let mut api = Self {
+            server,
+            port: 0,
+            root,
+        };
+        let mut port = String::new();
+        std::io::BufReader::new(pipe).read_line(&mut port).unwrap();
+        api.port = port
+            .trim()
+            .parse()
+            .expect("HTTPS fixture must publish its bound port");
+        api
+    }
+
+    fn command(&self, fixture: &Fixture, args: &[&str]) -> Command {
+        let wrapper = fixture.root.path().join("bin/curl");
+        if !wrapper.exists() {
+            fs::write(
+            &wrapper,
+            r#"#!/bin/sh
+test "$1" = "--disable" || exit 99
+shift
+exec /usr/bin/curl --disable --noproxy '*' --cacert "$PR_FIXTURE_CERT" --connect-to "api.bitbucket.org:443:127.0.0.1:$PR_FIXTURE_PORT" "$@"
+"#,
+        )
+        .unwrap();
+            fs::set_permissions(&wrapper, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let mut command = fixture.command(&["pr", "approve", "--json", "--non-interactive"]);
+        command
+            .args(args)
+            .env("PR_FIXTURE_PORT", self.port.to_string())
+            .env("PR_FIXTURE_CERT", self.root.path().join("cert.pem"));
+        command
+    }
+
+    fn requests(&self) -> Vec<(String, String)> {
+        fs::read_to_string(self.root.path().join("http.jsonl"))
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect()
+    }
+
+    fn posts(&self) -> Vec<String> {
+        self.requests()
+            .into_iter()
+            .filter_map(|(method, path)| (method == "POST").then_some(path))
+            .collect()
+    }
+}
+
+impl Drop for PullRequestApi {
+    fn drop(&mut self) {
+        let _ = self.server.kill();
+        let _ = self.server.wait();
+    }
+}
+
+fn approval_result(output: Output, code: i32) -> Value {
+    let printable = text(&output);
+    assert!(!printable.contains(SECRET), "credential exposed");
+    assert_eq!(output.status.code(), Some(code), "{printable}");
+    serde_json::from_slice(&output.stdout).expect("one JSON result")
+}
+
+#[test]
+fn pr_approve_e2e_refreshes_and_approves_only_assigned_prs_across_pages_and_reruns() {
+    let api = PullRequestApi::new("read_drop");
+    let fixture = Fixture::new(json!({"bb_valid":false,"bb_silent":true}));
+    let repos = ["team/one", "https://bitbucket.org/team/two/", "TEAM/ONE"];
+    let preview = approval_result(
+        api.command(&fixture, &[&repos[..], &["--dry-run"]].concat())
+            .output()
+            .unwrap(),
+        0,
+    );
+    assert_eq!(preview["repositories"], json!(["team/one", "team/two"]));
+    assert_eq!(
+        preview["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|row| row["status"] == "would_approve")
+            .count(),
+        3
+    );
+    assert!(api.posts().is_empty());
+    assert_eq!(
+        api.requests()
+            .iter()
+            .filter(|(method, path)| method == "GET"
+                && path == "/2.0/repositories/team/one/pullrequests")
+            .count(),
+        3,
+        "truncated second page must be fetched again before discovery succeeds"
+    );
+    let calls = fixture.calls();
+    assert_eq!(calls[0], json!(["bb", ["auth", "status"]]));
+    assert_eq!(calls[1], json!(["bb", ["auth", "token"]]));
+    assert!(calls.contains(&json!(["bb", ["auth", "token", "--account", "office"]])));
+    assert!(!calls.contains(&json!(["bb", ["auth", "login"]])));
+
+    let first = approval_result(api.command(&fixture, &repos).output().unwrap(), 0);
+    let expected = vec![
+        "/2.0/repositories/team/one/pullrequests/1/approve",
+        "/2.0/repositories/team/one/pullrequests/6/approve",
+        "/2.0/repositories/team/two/pullrequests/8/approve",
+    ];
+    assert_eq!(api.posts(), expected);
+    let statuses = |result: &Value| {
+        result["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| {
+                (
+                    r["id"].as_u64().unwrap(),
+                    r["status"].as_str().unwrap().to_owned(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        statuses(&first),
+        [
+            (1, "approved".into()),
+            (2, "already_approved".into()),
+            (3, "previously_approved".into()),
+            (6, "approved".into()),
+            (7, "no_longer_eligible".into()),
+            (9, "no_longer_eligible".into()),
+            (8, "approved".into()),
+        ]
+    );
+    let second = approval_result(api.command(&fixture, &repos).output().unwrap(), 0);
+    assert!(!statuses(&second).iter().any(|(_, s)| s == "approved"));
+    assert_eq!(api.posts(), expected, "rerun must not repeat any approval");
+    assert!(api
+        .requests()
+        .iter()
+        .all(|(_, route)| !route.contains("unlisted")));
+}
+
+#[test]
+fn pr_approve_e2e_rejects_bad_scope_pagination_and_blocked_auth_before_any_write() {
+    let fixture = Fixture::new(json!({}));
+    for mode in ["escape", "cycle", "normal"] {
+        let api = PullRequestApi::new(mode);
+        let repos = if mode == "normal" {
+            vec!["team/one", "team/bad"]
+        } else {
+            vec!["team/one"]
+        };
+        let result = approval_result(api.command(&fixture, &repos).output().unwrap(), 1);
+        let error = result["error"].as_str().unwrap();
+        assert!(
+            error.contains(if mode == "normal" {
+                "HTTP 403"
+            } else {
+                "pagination"
+            }),
+            "{error}"
+        );
+        assert!(api.posts().is_empty());
+        assert!(!api
+            .requests()
+            .iter()
+            .any(|(_, path)| path.contains("unlisted")));
+    }
+
+    let api = PullRequestApi::new("normal");
+    for args in [
+        vec![],
+        vec!["team/one", "https://other.invalid/team/two"],
+        vec!["team/../two"],
+    ] {
+        let output = api.command(&fixture, &args).output().unwrap();
+        assert_eq!(output.status.code(), Some(2), "{}", text(&output));
+    }
+    fixture.state(json!({"bb_valid":false}));
+    let blocked = approval_result(api.command(&fixture, &["team/one"]).output().unwrap(), 1);
+    assert!(blocked["error"].as_str().unwrap().contains("bb auth login"));
+    assert!(api.requests().is_empty());
+}
+
+#[test]
+fn pr_approve_e2e_reports_partial_failure_and_never_replays_a_write() {
+    let api = PullRequestApi::new("partial");
+    let fixture = Fixture::new(json!({}));
+    let result = approval_result(
+        api.command(&fixture, &["team/one", "team/two"])
+            .output()
+            .unwrap(),
+        1,
+    );
+    assert_eq!(result["status"], "failed");
+    let rows = result["results"].as_array().unwrap();
+    assert_eq!(
+        rows.iter().find(|r| r["id"] == 1).unwrap()["status"],
+        "failed"
+    );
+    assert!(rows.iter().find(|r| r["id"] == 6).unwrap()["reason"]
+        .as_str()
+        .unwrap()
+        .contains("503"));
+    assert_eq!(
+        rows.iter().find(|r| r["id"] == 8).unwrap()["status"],
+        "approved"
+    );
+    assert_eq!(
+        api.posts(),
+        [
+            "/2.0/repositories/team/one/pullrequests/1/approve",
+            "/2.0/repositories/team/two/pullrequests/8/approve",
+        ]
+    );
+}
+
+#[test]
+fn pr_approve_e2e_serializes_overlapping_runs() {
+    let api = PullRequestApi::new("normal");
+    let fixture = Fixture::new(json!({}));
+    let spawn = || {
+        api.command(&fixture, &["team/two"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap()
+    };
+    let first = spawn();
+    let second = spawn();
+    let first = approval_result(first.wait_with_output().unwrap(), 0);
+    let second = approval_result(second.wait_with_output().unwrap(), 0);
+    let mut statuses = [
+        first["results"][0]["status"].as_str().unwrap(),
+        second["results"][0]["status"].as_str().unwrap(),
+    ];
+    statuses.sort_unstable();
+    assert_eq!(statuses, ["approved", "previously_approved"]);
+    assert_eq!(
+        api.posts(),
+        ["/2.0/repositories/team/two/pullrequests/8/approve"]
+    );
+}

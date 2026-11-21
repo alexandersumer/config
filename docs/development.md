@@ -76,7 +76,12 @@ Linux/macOS CI matrix; no separate opt-in is required.
 Maintenance fixtures additionally cover named scopes, creation age and replacement
 races, bulk discard, operation refs, verified orphans, private/concurrent history,
 publication failures, storage accounting, offline inspection, and doctor drift.
-Five explicit live-auth tests remain separate from simulator-backed CI proof.
+The auth lane also runs the public `pr approve` CLI through real curl/TLS
+against a disposable loopback Bitbucket API fixture. It checks scoped pagination,
+provider refresh, historical approvals, rerun behavior, read-back after a lost
+response, and partial failures. It requires Python 3, curl, OpenSSL, and loopback
+networking. Five explicit live-auth tests remain separate from simulator-backed
+CI proof.
 The CI workflow runs the public CLI
 contracts on Linux and macOS; configured CI is distinct from a completed hosted run.
 

@@ -8,6 +8,7 @@ mod history;
 mod install;
 mod links;
 mod presentation;
+mod pull_requests;
 mod registry;
 mod regression;
 mod runtime;

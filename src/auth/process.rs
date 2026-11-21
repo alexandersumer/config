@@ -149,9 +149,20 @@ impl Drop for ProviderChild<'_> {
 pub(crate) fn capture(
     session: &Session,
     label: &str,
+    command: Command,
+    timeout: u64,
+    login: Option<&str>,
+) -> Result<Output, String> {
+    capture_with_stdin(session, label, command, timeout, login, Stdio::null())
+}
+
+pub(crate) fn capture_with_stdin(
+    session: &Session,
+    label: &str,
     mut command: Command,
     timeout: u64,
     login: Option<&str>,
+    stdin: Stdio,
 ) -> Result<Output, String> {
     // Acquire before launching any flow, and hold through descendant cleanup.
     // No command deadline runs while waiting for another interactive operation.
@@ -167,7 +178,7 @@ pub(crate) fn capture(
         ))?;
     }
     command
-        .stdin(Stdio::null())
+        .stdin(stdin)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .env("TERM", "dumb")
@@ -256,10 +267,14 @@ pub(crate) fn capture(
 pub(crate) struct Lock(std::fs::File);
 impl Lock {
     pub fn acquire(timeout: u64) -> Result<Self, String> {
+        Self::acquire_for("auth", timeout)
+    }
+
+    pub fn acquire_for(operation: &str, timeout: u64) -> Result<Self, String> {
         use std::os::fd::AsRawFd;
         use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
         let uid = unsafe { libc::geteuid() };
-        let path = std::env::temp_dir().join(format!("workctl-auth-{uid}.lock"));
+        let path = std::env::temp_dir().join(format!("workctl-{operation}-{uid}.lock"));
         let file = std::fs::OpenOptions::new()
             .read(true)
             .write(true)
@@ -293,7 +308,11 @@ impl Lock {
                 return Err("Cannot acquire auth coordination lock".into());
             }
             if Instant::now() >= deadline {
-                return Err("Auth refresh already running; coordination deadline exceeded".into());
+                return Err(if operation == "auth" {
+                    "Auth refresh already running; coordination deadline exceeded".into()
+                } else {
+                    format!("{operation} already running; coordination deadline exceeded")
+                });
             }
             std::thread::sleep(Duration::from_millis(20));
         }

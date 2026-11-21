@@ -1,6 +1,6 @@
 //! Auth readiness is deterministic and scoped to declared credential targets.
 mod config;
-mod process;
+pub(crate) mod process;
 mod providers;
 pub(crate) use config::Options;
 use serde_json::{json, Value};
@@ -275,6 +275,61 @@ fn render(result: &Value, stderr: bool, elapsed: std::time::Duration) -> std::io
     )?;
     output.flush()
 }
+/// Prime the provider-owned cache, then obtain an in-memory token for the
+/// account the preflight verified. Never follow a later active-account switch.
+pub(crate) fn bitbucket_token(non_interactive: bool, human: bool) -> Result<String, String> {
+    let options = Options {
+        profile: "bitbucket".into(),
+        include_profiles: Vec::new(),
+        config: None,
+        check: false,
+        reuse_valid: false,
+        force: false,
+        non_interactive,
+        min_valid_for: 300,
+        timeout: 30,
+        coordination_timeout: None,
+        login_timeout: 180,
+    };
+    let outcome = result(&options, human);
+    if code(&outcome) != 0 {
+        let target = &outcome["targets"][0];
+        let reason = outcome["error"]
+            .as_str()
+            .or_else(|| target["reason"].as_str())
+            .unwrap_or("Bitbucket preflight did not verify access");
+        let action = target["action"]
+            .as_str()
+            .unwrap_or("Check workctl auth preflight --profile bitbucket");
+        return Err(format!("{reason}. {action}"));
+    }
+    let account = outcome["targets"][0]["account"]
+        .as_str()
+        .ok_or("Bitbucket preflight did not identify the account")?;
+    let _lock = process::Lock::acquire(options.timeout)?;
+    let mut command = std::process::Command::new("bb");
+    command.args(["auth", "token", "--account", account]);
+    let output = process::capture(
+        &process::Session::default(),
+        "Bitbucket",
+        command,
+        options.timeout,
+        None,
+    )?;
+    let token = String::from_utf8(output.stdout)
+        .map_err(|_| "Bitbucket CLI did not return an OAuth token")?;
+    let token = token.trim_end_matches(['\r', '\n']);
+    if output.code != 0
+        || !(1..=4096).contains(&token.len())
+        || !token
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"-._~+/=".contains(&b))
+    {
+        return Err("Bitbucket CLI did not return an OAuth token".into());
+    }
+    Ok(token.to_owned())
+}
+
 pub(crate) fn run(options: Options, json_output: bool, child: Option<Vec<OsString>>) -> u8 {
     if json_output && child.is_some() {
         let _ = crate::presentation::json(
