@@ -40,7 +40,7 @@ after any command to see its options.
 | Apply linked-worktree cleanup | `workctl git worktree clean --apply ~/src` |
 | Inspect unsuccessful operation runs | `workctl history --unsuccessful --json` |
 | Inspect credential requirements offline | `workctl auth inspect --profile code --json` |
-| Renew and verify work credentials | `workctl auth preflight` |
+| Verify work credentials and renew as needed | `workctl auth preflight` |
 | Check code credentials, then run a command | `workctl auth exec --profile code -- bb pr list` |
 | Check CLI prerequisites | `workctl doctor` |
 

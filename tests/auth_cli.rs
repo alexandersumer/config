@@ -142,7 +142,7 @@ impl Fixture {
             .collect()
     }
     fn run(&self, extra: &[&str], expected: i32) -> Value {
-        let mut c = self.command(&["auth", "preflight", "--reuse-valid", "--json"]);
+        let mut c = self.command(&["auth", "preflight", "--json"]);
         let out = c.args(extra).output().unwrap();
         assert_eq!(out.status.code(), Some(expected), "{}", text(&out));
         assert!(!text(&out).contains(SECRET), "{}", text(&out));
@@ -184,12 +184,14 @@ fn alive(pid: i32) -> bool {
         && !String::from_utf8_lossy(&out.stdout).trim().starts_with('Z')
 }
 #[test]
-fn valid_cache_reuse_is_read_only_and_json_never_contains_credentials() {
+fn default_warm_work_checks_all_nine_credentials_without_renewal() {
     let f = Fixture::new(json!({}));
     for _ in 0..2 {
         let r = f.run(&[], 0);
         assert_eq!(r["status"], "completed");
-        assert_eq!(r["targets"][0]["status"], "valid");
+        let targets = r["targets"].as_array().unwrap();
+        assert_eq!(targets.len(), 9);
+        assert!(targets.iter().all(|target| target["status"] == "valid"));
         assert_eq!(r["targets"][1]["remaining_seconds"], Value::Null);
         assert!(r["targets"][1]["note"]
             .as_str()
@@ -198,8 +200,10 @@ fn valid_cache_reuse_is_read_only_and_json_never_contains_credentials() {
         assert_eq!(r["targets"][2]["status"], "valid");
         assert_eq!(r["duration_guaranteed"], false);
     }
-    assert_eq!(f.calls().len(), 20);
-    assert!(f.calls().iter().all(|c| c[1][1] == "status"
+    let calls = f.calls();
+    assert_eq!(calls.len(), 18);
+    assert_eq!(calls.iter().filter(|c| c[1][0] == "doctor").count(), 2);
+    assert!(calls.iter().all(|c| c[1][1] == "status"
         || c[1][0] == "workspace"
         || c[1][0] == "doctor"
         || c[1].as_array().unwrap().contains(&json!("--cached"))));
@@ -245,13 +249,91 @@ fn all_missing_renewable_credentials_are_refreshed_once_and_normal_cache_is_rech
     );
     let before = calls.len();
     f.run(&[], 0);
-    assert_eq!(f.calls().len() - before, 10);
+    assert_eq!(f.calls().len() - before, 9);
 }
 #[test]
-fn silent_oauth_refresh_succeeds_without_browser_in_noninteractive_mode() {
-    let f = Fixture::new(json!({"bb_minutes":1,"bb_silent":true,"twg_valid":false}));
-    f.run(&["--profile", "code", "--non-interactive"], 0);
-    assert!(!f.calls().iter().any(|c| c[1][1] == "login"));
+fn default_exec_renews_only_short_lived_bitbucket_and_uses_one_api_proof() {
+    let f = Fixture::new(json!({"bb_minutes": 1, "bb_silent": true}));
+    let out = f
+        .command(&[
+            "auth",
+            "exec",
+            "--",
+            "/bin/sh",
+            "-c",
+            "printf ready; exit 37",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(37), "{}", text(&out));
+    assert_eq!(out.stdout, b"ready");
+    let calls = f.calls();
+    let bb: Vec<_> = calls.iter().filter(|c| c[0] == "bb").collect();
+    assert_eq!(
+        bb,
+        [
+            &json!(["bb", ["auth", "status"]]),
+            &json!(["bb", ["auth", "token"]]),
+            &json!(["bb", ["auth", "status"]]),
+            &json!(["bb", ["workspace", "list", "--json"]]),
+        ]
+    );
+    assert_eq!(calls.len(), 11);
+    assert!(calls.iter().all(|c| c[1][1] != "login"
+        && c[1][1] != "refresh"
+        && !c[1].as_array().unwrap().contains(&json!("--force"))));
+    assert!(!text(&out).contains(SECRET));
+}
+
+#[test]
+fn twg_rechecks_oauth_after_refresh_and_reuses_that_doctor_for_manual_token() {
+    let f = Fixture::new(json!({"twg_valid": false, "twg_bb_valid": false}));
+    let r = f.run(
+        &["--profile", "code", "--non-interactive", "--reuse-valid"],
+        1,
+    );
+    assert_eq!(r["targets"][0]["status"], "valid");
+    assert_eq!(r["targets"][1]["status"], "refreshed");
+    assert_eq!(r["targets"][2]["provider_status"], "invalid-or-expired");
+    let calls = f.calls();
+    let twg: Vec<_> = calls.iter().filter(|c| c[0] == "twg").collect();
+    assert_eq!(twg.len(), 3);
+    assert_eq!(twg[0][1][0], "doctor");
+    assert_eq!(twg[1][1][1], "refresh");
+    assert_eq!(twg[2][1][0], "doctor");
+}
+
+#[test]
+fn bitbucket_post_refresh_api_failure_does_not_open_browser_or_launch_child() {
+    for (failure, reason) in [
+        ("outage", "API proof failed"),
+        ("forbidden", "API proof failed"),
+        ("malformed", "documented JSON array"),
+    ] {
+        let f = Fixture::new(
+            json!({"bb_minutes": 1, "bb_silent": true, "bb_api_after_silent": failure}),
+        );
+        let out = f
+            .command(&[
+                "auth",
+                "exec",
+                "--reuse-valid",
+                "--profile",
+                "bitbucket",
+                "--",
+                "/bin/echo",
+                "child ran",
+            ])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+        assert!(out.stdout.is_empty());
+        assert!(text(&out).contains(reason), "{}", text(&out));
+        assert!(!text(&out).contains(SECRET));
+        let calls = f.calls();
+        assert_eq!(calls.len(), 4);
+        assert!(calls.iter().all(|c| c[1][1] != "login"));
+    }
 }
 #[test]
 fn short_lived_active_account_is_preserved_during_login() {
@@ -269,7 +351,7 @@ fn check_only_never_makes_any_refresh_or_login_call() {
     let f = Fixture::new(json!({"bb_valid":false,"twg_valid":false,"atlas_valid":false}));
     let r = f.run(&["--check"], 1);
     assert_eq!(r["status"], "blocked");
-    assert_eq!(f.calls().len(), 9);
+    assert_eq!(f.calls().len(), 8);
 }
 #[test]
 fn noninteractive_blocks_mfa_instead_of_launching_a_browser() {
@@ -300,7 +382,7 @@ fn malformed_permission_and_outage_errors_do_not_trigger_auth_refresh() {
     for mode in ["malformed", "permission", "outage"] {
         let f = Fixture::new(json!({"mode":mode}));
         let r = f.run(&[], 1);
-        assert_eq!(f.calls().len(), 9);
+        assert_eq!(f.calls().len(), 8);
         assert!(r["targets"]
             .as_array()
             .unwrap()
@@ -416,6 +498,8 @@ fn blocked_auth_and_invalid_usage_never_execute_the_child() {
     for args in [
         vec!["auth", "exec"],
         vec!["auth", "preflight", "--timeout", "0"],
+        vec!["auth", "preflight", "--check", "--force"],
+        vec!["auth", "preflight", "--reuse-valid", "--force"],
         vec![
             "auth",
             "exec",
@@ -874,11 +958,11 @@ fn issuance_outage_is_not_mislabeled_as_missing_human_mfa() {
 }
 
 #[test]
-fn default_preflight_forces_every_renewable_provider_once_on_every_invocation() {
+fn forced_preflight_renews_every_renewable_provider_once_on_every_invocation() {
     let f = Fixture::new(json!({}));
     for _ in 0..2 {
         let out = f
-            .command(&["auth", "preflight", "--json"])
+            .command(&["auth", "preflight", "--force", "--json"])
             .output()
             .unwrap();
         assert_eq!(out.status.code(), Some(0), "{}", text(&out));
@@ -930,7 +1014,7 @@ fn default_preflight_forces_every_renewable_provider_once_on_every_invocation() 
 fn forced_preflight_does_not_hide_failed_renewal_behind_valid_cache() {
     let f = Fixture::new(json!({"refresh_fails":true}));
     let out = f
-        .command(&["auth", "preflight", "--json"])
+        .command(&["auth", "preflight", "--force", "--json"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
@@ -954,7 +1038,13 @@ fn forced_preflight_does_not_hide_failed_renewal_behind_valid_cache() {
 fn forced_noninteractive_does_not_claim_existing_credentials_were_renewed() {
     let f = Fixture::new(json!({}));
     let out = f
-        .command(&["auth", "preflight", "--non-interactive", "--json"])
+        .command(&[
+            "auth",
+            "preflight",
+            "--force",
+            "--non-interactive",
+            "--json",
+        ])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
@@ -971,7 +1061,14 @@ fn forced_twg_requires_confirmed_renewal_not_a_skipped_refresh() {
     for status in ["not_due", "skipped", "fresh", "unknown"] {
         let f = Fixture::new(json!({"twg_refresh_status":status}));
         let out = f
-            .command(&["auth", "preflight", "--profile", "code", "--json"])
+            .command(&[
+                "auth",
+                "preflight",
+                "--force",
+                "--profile",
+                "code",
+                "--json",
+            ])
             .output()
             .unwrap();
         assert_eq!(out.status.code(), Some(1), "{status}");
@@ -1213,7 +1310,7 @@ fn service_cache_cannot_substitute_a_different_audience_or_start_noninteractive_
 fn service_progress_identifies_the_audience_before_any_browser_prompt() {
     let f = Fixture::new(json!({}));
     let out = f
-        .command(&["auth", "preflight", "--profile", "checks"])
+        .command(&["auth", "preflight", "--profile", "checks", "--force"])
         .output()
         .unwrap();
     assert!(out.status.success());
@@ -1221,7 +1318,7 @@ fn service_progress_identifies_the_audience_before_any_browser_prompt() {
     let target = stderr
         .find("Renewing SLAuth (prod · pollinator · MFA)")
         .unwrap();
-    let prompt = stderr.find("Complete browser sign-in or MFA").unwrap();
+    let prompt = stderr.find("Requesting SLAuth token").unwrap();
     assert!(target < prompt);
     assert!(!text(&out).contains(SECRET));
 }
@@ -1357,7 +1454,7 @@ fn interactive_commands_are_exclusive_while_background_work_continues() {
     let config = f.profile(json!([
         {"provider":"bitbucket"}, {"provider":"twg"}, {"provider":"slauth","audience":"service"}
     ]));
-    let child = f.start(&["--config", &config]);
+    let child = f.start(&["--force", "--config", &config]);
     f.started("twg-doctor");
     let end = Instant::now() + Duration::from_secs(5);
     while !f.has_started("bb-auth-login") && !f.has_started("atlas-force-service") {
@@ -1396,6 +1493,7 @@ fn queued_login_receives_its_full_command_deadline() {
         {"provider":"slauth","audience":"service"}, {"provider":"bitbucket"}
     ]));
     let child = f.start(&[
+        "--force",
         "--config",
         &config,
         "--timeout",
@@ -1478,7 +1576,7 @@ fn cancellation_cleans_multiple_workers_and_does_not_launch_queued_interaction()
     let config = f.profile(json!([
         {"provider":"bitbucket"}, {"provider":"twg"}, {"provider":"slauth","audience":"service"}
     ]));
-    let child = f.start(&["--config", &config]);
+    let child = f.start(&["--force", "--config", &config]);
     f.started("twg-doctor");
     f.finished("bb-auth-status");
     f.finished("atlas-cache-service");
@@ -1591,7 +1689,12 @@ fn missing_twg_bitbucket_prevents_wrapped_command_without_renewing_other_auth() 
 
 #[test]
 fn twg_bitbucket_checks_only_its_own_evidence_and_never_rotates_a_valid_token() {
-    for args in [vec![], vec!["--check"], vec!["--non-interactive"]] {
+    for args in [
+        vec![],
+        vec!["--check"],
+        vec!["--force"],
+        vec!["--non-interactive"],
+    ] {
         let f = Fixture::new(json!({"twg_valid":false}));
         let mut command = f.command(&["auth", "preflight", "--profile", "twg-bitbucket", "--json"]);
         let out = command.args(args).output().unwrap();
@@ -1703,7 +1806,7 @@ fn included_profiles_add_requirements_deduplicate_and_validate_before_auth() {
     );
     assert_eq!(r["targets"].as_array().unwrap().len(), 4);
     assert_eq!(r["targets"][3]["target"], "kerberos:default");
-    assert_eq!(f.calls().iter().filter(|c| c[0] == "twg").count(), 2);
+    assert_eq!(f.calls().iter().filter(|c| c[0] == "twg").count(), 1);
     drop(f);
     let f = Fixture::new(json!({"kerberos_valid":false}));
     let r = f.run(
@@ -1926,13 +2029,25 @@ fn micros_check_and_reuse_only_read_the_exact_mfa_cache() {
 fn micros_renewal_requires_issuance_server_login_and_cache_verification() {
     let f = Fixture::new(json!({"assert_serial":true,"assert_interaction":true}));
     let out = f
-        .command(&["auth", "preflight", "--profile", "micros", "--json"])
+        .command(&[
+            "auth",
+            "preflight",
+            "--profile",
+            "micros",
+            "--force",
+            "--json",
+        ])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(0), "{}", text(&out));
     assert!(!text(&out).contains(SECRET));
     let r: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(r["targets"][0]["status"], "refreshed");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.find("Requesting SLAuth token").unwrap()
+            < stderr.find("Logging in to Micros").unwrap()
+    );
     let calls = f.calls();
     assert_eq!(calls.len(), 5);
     assert!(calls[1][1].as_array().unwrap().contains(&json!("--force")));
@@ -2084,6 +2199,7 @@ fn micros_shares_atlas_worker_and_interaction_gate_with_other_profiles() {
         .command(&[
             "auth",
             "preflight",
+            "--force",
             "--profile",
             "bitbucket",
             "--include-profile",

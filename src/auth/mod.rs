@@ -13,7 +13,7 @@ fn result(options: &Options, human: bool) -> Value {
         if human {
             let mode = if options.check {
                 "check only"
-            } else if options.reuse_valid {
+            } else if !options.force {
                 "reuse valid credentials"
             } else {
                 "renew supported credentials; check manual tokens"
@@ -53,6 +53,7 @@ fn result(options: &Options, human: bool) -> Value {
                     // Catch worker failures here so siblings stop before join waits.
                     let work = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         let mut completed = Vec::new();
+                        let twg_doctor = providers::TwgDoctor::default();
                         for (index, target) in queue {
                             if crate::runtime::cancelled() {
                                 break;
@@ -66,7 +67,7 @@ fn result(options: &Options, human: bool) -> Value {
                                         || matches!(target, config::Target::TwgBitbucket {})
                                     {
                                         "Checking"
-                                    } else if options.reuse_valid {
+                                    } else if !options.force {
                                         "Preparing"
                                     } else {
                                         "Renewing"
@@ -78,7 +79,8 @@ fn result(options: &Options, human: bool) -> Value {
                                         .unwrap_or_default()
                                 ))?;
                             }
-                            let mut checked = providers::check(&target, options, session);
+                            let mut checked =
+                                providers::check(&target, options, session, &twg_doctor);
                             if human {
                                 checked["display_name"] = json!(target.display_name());
                                 checked["scope"] = json!(target.scope());

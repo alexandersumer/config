@@ -3,6 +3,7 @@ use super::config::{Options, Target};
 use super::process::{self, Output};
 use base64::Engine;
 use serde_json::{json, Value};
+use std::cell::RefCell;
 use std::process::Command;
 
 #[derive(Debug)]
@@ -37,14 +38,15 @@ struct Context<'a> {
     options: &'a Options,
     session: &'a process::Session,
     target: &'a Target,
+    twg_doctor: &'a TwgDoctor,
 }
-fn call(c: Command, ctx: &Context<'_>, login: bool) -> Result<Output, String> {
+fn call(c: Command, ctx: &Context<'_>, login: Option<&str>) -> Result<Output, String> {
     let options = ctx.options;
     process::capture(
         ctx.session,
         &ctx.target.label(),
         c,
-        if login {
+        if login.is_some() {
             options.login_timeout
         } else {
             options.timeout
@@ -89,7 +91,7 @@ fn bb_status(target: &Target, ctx: &Context<'_>) -> Result<Output, String> {
     {
         c.args(["--account", account]);
     }
-    call(c, ctx, false)
+    call(c, ctx, None)
 }
 fn bitbucket(output: &Output, requested: Option<&str>, started_at: u64) -> Probe {
     if output.code != 0 {
@@ -165,13 +167,21 @@ fn twg_command(args: &[&str]) -> Command {
         .env("TWG_AGENT_DEFAULTS", "0");
     c
 }
-fn twig_probe(ctx: &Context<'_>) -> Result<Probe, String> {
-    let output = call(twg_command(&["doctor"]), ctx, false)?;
-    let Ok(value) = serde_json::from_slice::<Value>(&output.stdout) else {
-        return Ok(Probe::Failed(
-            "TWG did not return its documented JSON status",
-        ));
-    };
+// One doctor response contains independent evidence for both credentials.
+#[derive(Default)]
+pub(crate) struct TwgDoctor(RefCell<Option<Result<Value, String>>>);
+
+fn twg_probe(ctx: &Context<'_>) -> Result<Probe, String> {
+    let mut doctor = ctx.twg_doctor.0.borrow_mut();
+    let value = doctor.get_or_insert_with(|| {
+        let output = call(twg_command(&["doctor"]), ctx, None)?;
+        serde_json::from_slice(&output.stdout)
+            .map_err(|_| "TWG did not return its documented JSON status".into())
+    });
+    let value = value.as_ref().map_err(Clone::clone)?;
+    if matches!(ctx.target, Target::TwgBitbucket {}) {
+        return Ok(twg_bitbucket_probe(value));
+    }
     if value
         .pointer("/data/connectivity/ok")
         .and_then(Value::as_bool)
@@ -200,10 +210,7 @@ fn twig_probe(ctx: &Context<'_>) -> Result<Probe, String> {
         "TWG access check failed; inspect connectivity or permissions with twg doctor",
     ))
 }
-fn twg_bitbucket_probe(ctx: &Context<'_>) -> Result<Probe, String> {
-    let output = call(twg_command(&["doctor"]), ctx, false)?;
-    let value: Value = serde_json::from_slice(&output.stdout)
-        .map_err(|_| "TWG did not return its documented JSON status")?;
+fn twg_bitbucket_probe(value: &Value) -> Probe {
     let status = value
         .pointer("/data/bitbucket/status")
         .and_then(Value::as_str);
@@ -211,13 +218,13 @@ fn twg_bitbucket_probe(ctx: &Context<'_>) -> Result<Probe, String> {
     let attempted = value
         .pointer("/data/bitbucket/attempted")
         .and_then(Value::as_bool);
-    Ok(match (status, ok, attempted) {
+    match (status, ok, attempted) {
         (Some("valid"), Some(true), Some(true)) => Probe::Valid(Evidence { expires_at: None, account: None }),
         (Some("missing"), Some(false), Some(_)) => Probe::ManualToken("missing"),
         (Some("invalid-or-expired"), Some(false), Some(true)) => Probe::ManualToken("invalid-or-expired"),
         (Some("forbidden"), Some(false), Some(true)) => Probe::Failed("TWG Bitbucket token lacks required scopes; verify permissions with twg doctor; refreshing OAuth cannot repair this"),
         _ => Probe::Failed("TWG Bitbucket connectivity check failed or returned an unsupported status; inspect twg doctor"),
-    })
+    }
 }
 
 fn kerberos_probe(principal: Option<&str>, ctx: &Context<'_>) -> Result<Probe, String> {
@@ -230,7 +237,7 @@ fn kerberos_probe(principal: Option<&str>, ctx: &Context<'_>) -> Result<Probe, S
         }],
     );
     test.env("LC_ALL", "C");
-    let output = call(test, ctx, false)?;
+    let output = call(test, ctx, None)?;
     if output.code != 0 {
         let message = String::from_utf8_lossy(&output.stderr).to_ascii_lowercase();
         return Ok(
@@ -256,7 +263,7 @@ fn kerberos_probe(principal: Option<&str>, ctx: &Context<'_>) -> Result<Probe, S
 fn kerberos_identity(principal: Option<&str>, ctx: &Context<'_>) -> Result<String, String> {
     let mut list = command("klist", &[]);
     list.env("LC_ALL", "C");
-    let output = call(list, ctx, false)?;
+    let output = call(list, ctx, None)?;
     if output.code != 0 {
         return Err("Cannot identify Kerberos principal; obtain the intended ticket using your supported login before preflight".into());
     }
@@ -305,7 +312,7 @@ fn slauth_command(target: &Target, cached: bool) -> Command {
     c
 }
 fn slauth_probe(target: &Target, ctx: &Context<'_>) -> Result<Probe, String> {
-    let output = call(slauth_command(target, true), ctx, false)?;
+    let output = call(slauth_command(target, true), ctx, None)?;
     if output.code != 0 {
         return Ok(if auth_error(&output) {
             Probe::Missing
@@ -409,7 +416,7 @@ fn probe(target: &Target, ctx: &Context<'_>) -> Result<Probe, String> {
                     }) {
                         return Ok(Probe::Failed("Selected Bitbucket account is inactive; use bb auth switch before preflight"));
                     }
-                    let proof = call(command("bb", &["workspace", "list", "--json"]), ctx, false)?;
+                    let proof = call(command("bb", &["workspace", "list", "--json"]), ctx, None)?;
                     if proof.code != 0 {
                         return Ok(if auth_error(&proof) {
                             evidence
@@ -430,8 +437,7 @@ fn probe(target: &Target, ctx: &Context<'_>) -> Result<Probe, String> {
             }
             Ok(cached)
         }
-        Target::Twg {} => twig_probe(ctx),
-        Target::TwgBitbucket {} => twg_bitbucket_probe(ctx),
+        Target::Twg {} | Target::TwgBitbucket {} => twg_probe(ctx),
         Target::Kerberos { principal } => kerberos_probe(principal.as_deref(), ctx),
         Target::Slauth { .. } => slauth_probe(target, ctx),
         Target::Micros {} => {
@@ -466,35 +472,49 @@ fn manual_token_blocked(target: &Target, status: &str) -> Value {
     result["note"] = json!("Manually managed token: checked, never automatically rotated. Renewing native Bitbucket or TWG OAuth does not replace it.");
     result
 }
+enum Renewal {
+    Confirmed,
+    Unconfirmed,
+    Checked(Probe),
+}
+impl From<bool> for Renewal {
+    fn from(confirmed: bool) -> Self {
+        if confirmed {
+            Self::Confirmed
+        } else {
+            Self::Unconfirmed
+        }
+    }
+}
+
 fn refresh(
     target: &Target,
     ctx: &Context<'_>,
     evidence: Option<&Evidence>,
-) -> Result<bool, String> {
+) -> Result<Renewal, String> {
     let options = ctx.options;
     match target {
         Target::Bitbucket { account } => {
             // Token retrieval performs the provider's supported silent OAuth refresh.
-            let force = !options.reuse_valid;
+            let force = options.force;
             if force && options.non_interactive {
-                return Err("Bitbucket forced renewal requires browser login; rerun interactively or use --reuse-valid".into());
+                return Err("Bitbucket forced renewal requires browser login; rerun interactively or omit --force".into());
             }
             let mut c = command("bb", &["auth", "token"]);
             if let Some(account) = account {
                 c.args(["--account", account]);
             }
             if !force {
-                let output = call(c, ctx, false)?;
+                let output = call(c, ctx, None)?;
                 if output.code != 0 && !auth_error(&output) {
                     return Err("Bitbucket silent refresh failed with a non-auth error".into());
                 }
-                if let Probe::Valid(e) = probe(target, ctx)? {
-                    if enough(&e, options) {
-                        return Ok(true);
-                    }
-                }
-                if options.non_interactive {
-                    return Ok(false);
+                let checked = probe(target, ctx)?;
+                match &checked {
+                    Probe::Valid(e) if enough(e, options) => return Ok(Renewal::Checked(checked)),
+                    Probe::Failed(_) => return Ok(Renewal::Checked(checked)),
+                    _ if options.non_interactive => return Ok(Renewal::Checked(checked)),
+                    _ => {}
                 }
             }
             let selected = account
@@ -504,37 +524,32 @@ fn refresh(
             if let Some(account) = selected {
                 login.args(["--account", account]);
             }
-            Ok(call(login, ctx, true)?.code == 0)
+            Ok((call(login, ctx, Some("Starting browser login"))?.code == 0).into())
         }
         Target::Twg {} => {
             // Site/account selection and secret entry remain owned by TWG.
             // Its login requires a controlling terminal, so do not launch a
             // misleading prompt in our pipe-based supervisor.
-            let output = call(twg_command(&["auth", "refresh", "--force"]), ctx, false)?;
+            ctx.twg_doctor.0.borrow_mut().take();
+            let output = call(twg_command(&["auth", "refresh", "--force"]), ctx, None)?;
             if output.code != 0 {
                 return if auth_error(&output) {
-                    Ok(false)
+                    Ok(Renewal::Unconfirmed)
                 } else {
                     Err("TWG silent refresh failed; use twg auth refresh to inspect provider diagnostics".into())
                 };
             }
             let value: Value = serde_json::from_slice(&output.stdout)
                 .map_err(|_| "TWG refresh response is not JSON")?;
-            Ok(value
-                .pointer("/data/status")
-                .and_then(Value::as_str)
-                .is_some_and(|s| {
-                    s == "refreshed"
-                        || (options.reuse_valid && ["fresh", "not_due", "skipped"].contains(&s))
-                }))
+            Ok((value.pointer("/data/status").and_then(Value::as_str) == Some("refreshed")).into())
         }
-        Target::TwgBitbucket {} => Ok(false),
+        Target::TwgBitbucket {} => Ok(Renewal::Unconfirmed),
         Target::Micros {} => {
             micros_scope()?;
             if options.non_interactive {
-                return Ok(false);
+                return Ok(Renewal::Unconfirmed);
             }
-            if !refresh(&micros_token(), ctx, evidence)? {
+            if !matches!(refresh(&micros_token(), ctx, evidence)?, Renewal::Confirmed) {
                 return Err(
                     "Micros token issuance did not succeed; login was not attempted".into(),
                 );
@@ -548,23 +563,31 @@ fn refresh(
                     )
                 }
             }
-            let output = call(command("atlas", &["micros", "login"]), ctx, true)?;
+            let output = call(
+                command("atlas", &["micros", "login"]),
+                ctx,
+                Some("Logging in to Micros"),
+            )?;
             if output.code != 0 {
                 return Err("Micros login failed after token issuance; inspect Micros access and connectivity".into());
             }
-            Ok(true)
+            Ok(Renewal::Confirmed)
         }
         Target::Kerberos { principal } => {
             if principal.is_some() {
                 kerberos_identity(principal.as_deref(), ctx)?;
             }
-            Ok(call(command("kinit", &["-R"]), ctx, false)?.code == 0)
+            Ok((call(command("kinit", &["-R"]), ctx, None)?.code == 0).into())
         }
         Target::Slauth { .. } => {
             if options.non_interactive {
-                return Ok(false);
+                return Ok(Renewal::Unconfirmed);
             }
-            let output = call(slauth_command(target, false), ctx, true)?;
+            let output = call(
+                slauth_command(target, false),
+                ctx,
+                Some("Requesting SLAuth token"),
+            )?;
             if output.code != 0 {
                 let diagnostics = format!(
                     "{} {}",
@@ -606,24 +629,28 @@ fn refresh(
             {
                 return Err(format!("SLAuth issuance failed (exit {}); inspect Atlas login and connectivity; cache rechecked without reissuing", output.code));
             }
-            Ok(output.code == 0)
+            Ok((output.code == 0).into())
         }
     }
 }
-pub(crate) fn check(target: &Target, options: &Options, session: &process::Session) -> Value {
+pub(crate) fn check(
+    target: &Target,
+    options: &Options,
+    session: &process::Session,
+    twg_doctor: &TwgDoctor,
+) -> Value {
     let ctx = &Context {
         options,
         session,
         target,
+        twg_doctor,
     };
     let run = || -> Result<Value, String> {
         let initial = probe(target, ctx)?;
         let evidence = match initial {
             Probe::Valid(e)
                 if enough(&e, options)
-                    && (options.check
-                        || options.reuse_valid
-                        || matches!(target, Target::TwgBitbucket {})) =>
+                    && (!options.force || matches!(target, Target::TwgBitbucket {})) =>
             {
                 return Ok(ready(target, e, false))
             }
@@ -657,12 +684,12 @@ pub(crate) fn check(target: &Target, options: &Options, session: &process::Sessi
                 action,
             ));
         }
-        let refreshed = match refresh(target, ctx, evidence.as_ref()) {
-            Ok(refreshed) => refreshed,
+        let renewal = match refresh(target, ctx, evidence.as_ref()) {
+            Ok(renewal) => renewal,
             Err(error) => {
                 // Issuance can finish writing its normal cache just before a
                 // timeout or provider error. Check once; never repeat issuance.
-                if options.reuse_valid
+                if !options.force
                     && !matches!(target, Target::Micros {})
                     && !crate::runtime::cancelled()
                 {
@@ -675,11 +702,17 @@ pub(crate) fn check(target: &Target, options: &Options, session: &process::Sessi
                 return Err(error);
             }
         };
-        if !options.reuse_valid && !refreshed {
+        if options.force && matches!(renewal, Renewal::Unconfirmed) {
             return Ok(blocked(target, "Provider did not confirm forced renewal; existing cached access is not proof of renewal", action));
         }
-        // A successful issuance is not proof. Recheck the provider's normal cache.
-        match probe(target, ctx)? {
+        // Reuse evidence already obtained after silent renewal; otherwise verify
+        // the provider's normal cache and API access where available.
+        let refreshed = matches!(renewal, Renewal::Confirmed);
+        let checked = match renewal {
+            Renewal::Checked(checked) => checked,
+            _ => probe(target, ctx)?,
+        };
+        match checked {
             Probe::Valid(e) if enough(&e, options) => Ok(ready(target, e, true)),
             Probe::Valid(e) => Ok(
                 json!({"target":target.label(),"status":"blocked","reason":"Refreshed token cannot meet the requested minimum lifetime; provider TTL policy applies","remaining_seconds":e.remaining(),"action":"Choose a shorter --min-valid-for; future refresh/MFA may still be required"}),

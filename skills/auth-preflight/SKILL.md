@@ -34,8 +34,8 @@ multiple services.
 | Intent | Command |
 | --- | --- |
 | Check status | `workctl auth preflight --profile PROFILE --check --json` |
-| Prepare for work | `workctl auth preflight --profile PROFILE --reuse-valid --json` |
-| Explicitly renew | `workctl auth preflight --profile PROFILE --json` |
+| Prepare for work | `workctl auth preflight --profile PROFILE --json` |
+| Explicitly renew | `workctl auth preflight --profile PROFILE --force --json` |
 
 Workctl owns checks, renewal, bounded retries, and verification; read the exit
 status and structured outcome. Choose profiles from the clients the task

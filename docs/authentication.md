@@ -4,20 +4,22 @@
 
 Use `workctl auth preflight` before a work session, or `workctl auth exec` to check credentials before launching a command.
 
-`workctl auth preflight` renews every renewable credential target, even when
-its cached credential is still valid, and then verifies the provider's normal cache.
-Run it before leaving and complete the browser/MFA prompts. Bitbucket uses browser
-OAuth login for the selected account because its CLI has no force-refresh command;
-TWG uses forced OAuth refresh and SLAuth uses forced issuance. TWG Bitbucket API tokens
-are manually managed: every mode checks them without rotating or collecting secrets.
-Kerberos uses one silent `kinit -R` attempt; it never initiates password entry.
-Each target is attempted once. Failed renewal is reported even when an older token still works.
-Use `--reuse-valid` to renew only missing or short-lived credentials, or `--check`
-to check access without explicitly renewing.
-`workctl auth exec` does that automatically before starting another command:
+Both commands reuse credentials that pass their checks and renew missing,
+rejected, or short-lived credentials when the provider supports renewal.
+Use `--check` for status without explicit renewal, or `--force` to renew all
+renewable targets even when cached access is valid. Scripts that previously
+relied on unconditional renewal should add `--force`. The existing
+`--reuse-valid` flag still selects the default behavior.
+
+Forced renewal uses browser OAuth login for native Bitbucket, forced refresh
+for TWG OAuth, forced issuance for SLAuth, and one silent `kinit -R` for
+Kerberos. Each target gets one renewal sequence and subsequent verification.
+A failed forced renewal remains a failure even if an older credential works.
+TWG Bitbucket API tokens are manually managed and checked in every mode.
 
 ```sh
 workctl auth preflight
+workctl auth preflight --profile work --force
 workctl auth preflight --profile code --check --json
 workctl auth preflight --profile logs --non-interactive
 workctl auth exec --profile work -- codex exec 'continue the staging acceptance run'
@@ -79,7 +81,7 @@ then runs `atlas micros login` and checks the cache again. Login failure remains
 failure even if token issuance succeeded. Micros login itself may reuse a token,
 so it cannot prove forced renewal on its own.
 
-`--check` and a valid `--reuse-valid` inspect only that exact MFA cache. They do
+Check-only mode and default reuse inspect only that exact MFA cache. They do
 not invoke Micros read commands: those commands can initiate SLAuth issuance.
 Cache readiness does not prove server acceptance, the identity selected by
 Micros' netrc/user resolution, or service permissions. Only the renewal path
@@ -113,7 +115,8 @@ In particular:
 
 - TWG OAuth and TWG's Bitbucket API token are separate targets. `code` and `work`
   require both, so a valid native `bb` credential cannot hide a broken `twg bb`
-  token. `twg doctor` must report both `status: valid` and `ok: true` for the token.
+  token. `twg doctor` must report both `status: valid` and `ok: true` for the token. Both targets share the same doctor response
+  within a check phase. OAuth renewal invalidates it and requires fresh evidence.
   Missing and rejected tokens block with `twg setup bitbucket --force`. Reports
   preserve `provider_status` (`missing` or `invalid-or-expired`); rejection alone
   does not prove expiration. Manual tokens are labeled as checks even in renewal
@@ -142,7 +145,7 @@ renewal. workctl never copies credentials, changes home/config locations, starts
 background renewal daemon, or stores tokens in its own files. `--check` makes no
 explicit refresh/login calls; provider CLIs may still perform their normal
 transparent renewal during status checks. `--non-interactive` permits silent
-TWG OAuth refresh (and Bitbucket silent refresh with `--reuse-valid`), but never
+TWG OAuth refresh and Bitbucket silent refresh in default mode, but never
 starts Bitbucket browser login or SLAuth
 issuance that could require browser/MFA. Missing TWG refresh authorization reports
 an actionable `twg login` requirement: the installed TWG login requires a
@@ -153,7 +156,7 @@ selected targets still follow the requested renewal mode.
 
 ## Expiry and access guarantees
 
-With `--reuse-valid`, the default refresh threshold is 300 seconds. `--min-valid-for SECONDS` applies to
+The default refresh threshold is 300 seconds. `--min-valid-for SECONDS` applies to
 known expiry, not to providers with unknown expiry. Bitbucket's supported OAuth
 status formats report a conservative lifetime; an authenticated, read-only workspace
 list also detects revoked tokens before handoff. Named Bitbucket accounts must be
@@ -177,10 +180,11 @@ command; `auth exec` checks readiness before launch, not throughout execution.
 
 Status/silent refresh commands have a 30-second deadline (`--timeout`); browser/MFA
 commands have a 180-second deadline (`--login-timeout`). Each target gets at most
-one refresh sequence. In `--reuse-valid` mode, Bitbucket tries silent renewal
-before a browser fallback.
+one refresh sequence. In default mode, Bitbucket tries silent renewal before a browser fallback.
+If silent renewal verifies the account, lifetime, and API access, workctl reuses
+that proof. Browser fallback is reserved for missing or short-lived credentials.
 Permission, malformed-output, installation and connectivity failures do not cause
-login loops. In `--reuse-valid` mode, inconclusive issuance checks the cache once without
+login loops. In default mode, inconclusive issuance checks the cache once without
 reissuing. Forced renewal requires a successful provider response and a cache check.
 Independent targets continue after a failure. Cancellation returns
 130, timeout/access failures return 1, and invalid CLI usage returns 2. Auth
@@ -208,7 +212,7 @@ Concurrent workctl preflights coordinate through an owned, private regular lock 
 the OS temporary directory, wait for a bounded interval, and recheck caches after
 acquiring it. `--coordination-timeout SECONDS` sets this wait independently
 (1–3600 seconds); when omitted it retains the `--timeout` value. For example,
-`workctl auth preflight --reuse-valid --coordination-timeout 600` can wait for a
+`workctl auth preflight --coordination-timeout 600` can wait for a
 long-running MFA preflight without lengthening individual status-command deadlines.
 The lock does not coordinate unrelated tools or invocations using a
 different temporary directory. Unsafe symlink/FIFO/public lock files are refused.
@@ -219,8 +223,8 @@ The persistent lock contains no credentials and is not deleted on release.
 Human output identifies the selected profile and renewal mode on stderr before
 checking credentials. Each target is announced before its provider
 check; concurrent announcements can arrive out of profile order. Progress lines and
-authentication prompts are written intact, and prompts identify the credential
-target. Final reports retain profile order. The final report lists aligned statuses,
+authentication prompts are written intact. Interactive operations identify the
+credential and phase, and actual Okta activation requests appear on their own line. Final reports retain profile order. The final report lists aligned statuses,
 verified accounts, readable scope details, remaining lifetime or explicitly unknown expiry, and labeled
 reasons and recovery actions. It ends with the ready count and elapsed time.
 Failed checks say access is not ready rather than implying a verified credential

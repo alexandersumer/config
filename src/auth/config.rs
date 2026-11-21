@@ -18,9 +18,12 @@ pub(crate) struct Options {
     /// Check current access without explicitly refreshing or logging in
     #[arg(long)]
     pub check: bool,
-    /// Reuse valid credentials; by default every renewable target is explicitly renewed
+    /// Reuse valid credentials (the default); retained for compatibility
     #[arg(long)]
     pub reuse_valid: bool,
+    /// Explicitly renew supported credentials even when current access is valid
+    #[arg(long, conflicts_with_all = ["check", "reuse_valid"])]
+    pub force: bool,
     /// Do not initiate browser/MFA login; silent OAuth refresh remains allowed
     #[arg(long)]
     pub non_interactive: bool,

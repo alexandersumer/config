@@ -52,7 +52,7 @@ and functions and refreshes command hashes when loaded.
 
 | Command | Purpose |
 | --- | --- |
-| `workctl auth preflight` | Renew credentials and verify access |
+| `workctl auth preflight` | Verify credentials and renew those that need it |
 | `workctl auth inspect --profile code` | Resolve credential requirements without provider calls |
 | `workctl auth exec -- COMMAND` | Run preflight, then launch a command |
 | `workctl git reset [PATH ...]` | Reset primary checkouts to a verified remote branch |
@@ -105,7 +105,8 @@ sessions, and registry credentials require their own checks; see the
 | Mode | Behavior |
 | --- | --- |
 | Default | Request one renewal per renewable target, check manual tokens, then verify access; failed renewal remains a failure even if an older credential works |
-| `--reuse-valid` | Reuse credentials that meet the validity threshold; renew missing or short-lived credentials |
+| `--force` | Explicitly renew supported credentials even when current access is valid |
+| `--reuse-valid` | Compatibility flag for default reuse |
 | `--check` | Check access without explicit refresh or login calls; providers may still renew transparently |
 
 Bitbucket, TWG, Atlas, and Kerberos checks can overlap. Targets within each provider stay

@@ -106,10 +106,13 @@ if name == 'bb':
         if state.get('bb_revoked'):
             print('Authentication failed (401) ' + secret, file=sys.stderr)
             sys.exit(1)
-        if state.get('bb_api_outage'):
+        if state.get('bb_api_outage') or state.get('bb_api_failure') == 'outage':
             print('Service unavailable ' + secret, file=sys.stderr)
             sys.exit(1)
-        print('[]')
+        if state.get('bb_api_failure') == 'forbidden':
+            print('Forbidden ' + secret, file=sys.stderr)
+            sys.exit(1)
+        print('{}' if state.get('bb_api_failure') == 'malformed' else '[]')
     elif args[:2] == ['auth', 'status']:
         if not state.get('bb_valid', True):
             print('Not logged in ' + secret, file=sys.stderr)
@@ -124,6 +127,7 @@ if name == 'bb':
         if state.get('bb_silent', False):
             state['bb_valid'] = True
             state['bb_minutes'] = 60
+            state['bb_api_failure'] = state.get('bb_api_after_silent')
             save()
         if not state.get('bb_valid', True):
             print('Authentication failed ' + secret, file=sys.stderr)

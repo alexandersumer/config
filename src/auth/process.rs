@@ -151,18 +151,18 @@ pub(crate) fn capture(
     label: &str,
     mut command: Command,
     timeout: u64,
-    login: bool,
+    login: Option<&str>,
 ) -> Result<Output, String> {
     // Acquire before launching any flow, and hold through descendant cleanup.
     // No command deadline runs while waiting for another interactive operation.
-    let _interaction = if login {
+    let _interaction = if login.is_some() {
         Some(session.interactive()?)
     } else {
         None
     };
-    if login {
+    if let Some(phase) = login {
         session.message(&format!(
-            "    {}: Complete browser sign-in or MFA if prompted ({timeout}s timeout).",
+            "    {}: {phase} (up to {timeout}s; may require sign-in or MFA).",
             super::inline(label)
         ))?;
     }
@@ -198,7 +198,7 @@ pub(crate) fn capture(
     let mut prompt_seen = false;
     loop {
         for url in receive.try_iter() {
-            if login && !prompt_seen {
+            if login.is_some() && !prompt_seen {
                 prompt_seen = true;
                 if session
                     .message(&format!(
@@ -327,7 +327,7 @@ mod tests {
                     .args(["-c", "printf started > \"$1\"; printf ready", "sh"])
                     .arg(&marker_path);
                 entered.send(()).unwrap();
-                capture(session, "test", command, 1, true)
+                capture(session, "test", command, 1, Some("Starting test login"))
             });
             waiting.recv().unwrap();
             // Longer than the command budget, but no provider may launch yet.

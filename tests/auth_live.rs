@@ -25,7 +25,7 @@ fn result(args: &[&str], expected: i32) -> Value {
 fn reuse_and_exec(options: &[&str], targets: usize) {
     let mut args = vec!["auth", "preflight"];
     args.extend_from_slice(options);
-    args.push("--json");
+    args.extend_from_slice(&["--force", "--json"]);
     let refresh = result(&args, 0);
     assert_eq!(refresh["status"], "completed");
     assert!(refresh["targets"]
@@ -35,7 +35,8 @@ fn reuse_and_exec(options: &[&str], targets: usize) {
         .all(|t| t["status"] == "refreshed"
             || (t["target"] == "twg-bitbucket" && t["status"] == "valid")));
     assert_eq!(refresh["targets"].as_array().unwrap().len(), targets);
-    args.push("--check");
+    args.retain(|arg| *arg != "--force");
+    args.push("--non-interactive");
     let cached = result(&args, 0);
     assert!(cached["targets"]
         .as_array()
@@ -45,7 +46,7 @@ fn reuse_and_exec(options: &[&str], targets: usize) {
     let mut args = vec!["auth", "exec"];
     args.extend_from_slice(options);
     args.extend_from_slice(&[
-        "--check",
+        "--non-interactive",
         "--",
         "/bin/sh",
         "-c",
