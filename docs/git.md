@@ -63,7 +63,10 @@ must match the tracking ref before reset. Cached fetch evidence cannot authorize
 a reset. In a partial clone, reset batches missing checkout blobs into a separate
 fetch before switching branches, setting the upstream, or writing recovery refs.
 It applies Git's sparse checkout rules and verifies the requested blobs locally
-before running checkout mutations with lazy fetching disabled. Sharing a directory
+before running checkout mutations with lazy fetching disabled. With multiple
+promisor remotes, the remote and local tips can use different object stores.
+An explicit refusal for a requested object allows another configured promisor
+to supply it. Sharing a directory
 with untracked or ignored files is safe when the
 individual paths do not collide; nested repositories and symlinks remain protected.
 Hooks are followed by branch, commit, and tracked-file verification. Other branches,

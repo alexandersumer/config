@@ -17,6 +17,11 @@ struct Operation {
     status: Status,
     status_path: PathBuf,
 }
+struct PromisorRemote {
+    name: String,
+    redirect: Option<String>,
+}
+
 impl Operation {
     fn stage(&mut self, stage: &'static str) -> Result<(), String> {
         self.status.stage = stage.into();
@@ -217,7 +222,11 @@ impl Operation {
             Err(e) => Err(format!("Cannot clear previous FETCH_HEAD: {e}")),
         }
     }
-    fn promisor_remote(&self, remote: &str) -> Result<Option<String>, String> {
+    fn promisor_remotes(
+        &self,
+        target_remote: &str,
+        target_redirect: Option<String>,
+    ) -> Result<Vec<PromisorRemote>, String> {
         if self
             .git
             .optional(&[
@@ -227,7 +236,7 @@ impl Operation {
             ])?
             .is_none()
         {
-            return Ok(None);
+            return Ok(Vec::new());
         }
         let flags = self.git.optional(&[
             "config",
@@ -239,22 +248,37 @@ impl Operation {
             .map(git::reference_text)
             .transpose()?
             .unwrap_or_default();
-        let names = || {
-            flags.lines().filter_map(|line| {
+        let legacy = self
+            .git
+            .optional(&["config", "--get", "extensions.partialClone"])?
+            .map(git::reference_text)
+            .transpose()?;
+        let mut seen = BTreeSet::new();
+        let mut names: Vec<_> = flags
+            .lines()
+            .filter_map(|line| {
                 line.strip_prefix("remote.")
                     .and_then(|line| line.strip_suffix(".promisor true"))
             })
-        };
-        if names().any(|name| name == remote) {
-            return Ok(Some(remote.to_owned()));
+            .chain(legacy.as_deref())
+            .filter(|name| seen.insert(*name))
+            .collect();
+        if let Some(index) = names.iter().position(|name| *name == target_remote) {
+            let selected = names.remove(index);
+            names.insert(0, selected);
         }
-        if let Some(name) = self
-            .git
-            .optional(&["config", "--get", "extensions.partialClone"])?
-        {
-            return git::reference_text(name).map(Some);
-        }
-        Ok(names().next().map(str::to_owned))
+        let mut target_redirect = target_redirect;
+        Ok(names
+            .into_iter()
+            .map(|name| PromisorRemote {
+                name: name.to_owned(),
+                redirect: if name == target_remote {
+                    target_redirect.take()
+                } else {
+                    None
+                },
+            })
+            .collect())
     }
 
     fn checkout_blobs(&self, trees: &[&str]) -> Result<Vec<u8>, String> {
@@ -326,54 +350,85 @@ impl Operation {
     fn hydrate_checkout(
         &mut self,
         trees: &[&str],
-        promisor: &str,
-        redirect: &mut Option<String>,
+        promisors: &mut [PromisorRemote],
         fetch_stderr: &fs::File,
     ) -> Result<(), String> {
         self.stage("fetch checkout objects")?;
-        let objects = self.checkout_blobs(trees)?;
-        let missing = self.git.missing_blobs(&objects)?;
-        if missing.is_empty() {
-            return Ok(());
+        // One server can serve both trees in the common case. With multiple
+        // servers the remote tip and old local tip may have different sources.
+        if promisors.len() == 1 {
+            return self.fetch_checkout_blobs(trees, promisors, fetch_stderr);
         }
-        let url = self.git.text(&["remote", "get-url", promisor])?;
-        let output = self.git.remote_call(
-            promisor,
-            &url,
-            redirect,
-            &[
-                "-c",
-                "maintenance.auto=false",
-                "-c",
-                "gc.auto=0",
-                "-c",
-                "fetch.negotiationAlgorithm=noop",
-                "fetch",
-                "--progress",
-                "--no-write-fetch-head",
-                "--no-tags",
-                "--no-prune",
-                "--no-prune-tags",
-                "--no-recurse-submodules",
-                "--refmap=",
-                "--filter=blob:none",
-                "--stdin",
-                "--",
-                promisor,
-            ],
-            Some(FetchIo {
-                stderr: fetch_stderr,
-                input: Some(&missing),
-            }),
-            || Ok(()),
-        )?;
-        print!("{}", git::redact(OsString::from_vec(output)));
-        if !self.git.missing_blobs(&missing)?.is_empty() {
-            return Err(
-                "Promisor fetch completed but required checkout objects are still missing".into(),
-            );
+        for tree in trees {
+            self.fetch_checkout_blobs(&[*tree], promisors, fetch_stderr)?;
         }
         Ok(())
+    }
+
+    fn fetch_checkout_blobs(
+        &self,
+        trees: &[&str],
+        promisors: &mut [PromisorRemote],
+        fetch_stderr: &fs::File,
+    ) -> Result<(), String> {
+        let objects = self.checkout_blobs(trees)?;
+        let mut missing = self.git.missing_blobs(&objects)?;
+        let mut refusal = None;
+        for promisor in promisors {
+            if missing.is_empty() {
+                return Ok(());
+            }
+            let name = &promisor.name;
+            let url = self.git.text(&["remote", "get-url", name])?;
+            match self.git.remote_call(
+                name,
+                &url,
+                &mut promisor.redirect,
+                &[
+                    "-c",
+                    "maintenance.auto=false",
+                    "-c",
+                    "gc.auto=0",
+                    "-c",
+                    "fetch.negotiationAlgorithm=noop",
+                    "fetch",
+                    "--progress",
+                    "--no-write-fetch-head",
+                    "--no-tags",
+                    "--no-prune",
+                    "--no-prune-tags",
+                    "--no-recurse-submodules",
+                    "--refmap=",
+                    "--filter=blob:none",
+                    "--stdin",
+                    "--",
+                    name,
+                ],
+                Some(FetchIo {
+                    stderr: fetch_stderr,
+                    input: Some(&missing),
+                }),
+                || Ok(()),
+            ) {
+                Ok(output) => print!("{}", git::redact(OsString::from_vec(output))),
+                Err(error) if git::remote_access_error(&error) => {
+                    return Err(format!(
+                        "{error}\nVerify access to promisor remote {}.",
+                        git::diagnostic(name)
+                    ));
+                }
+                Err(error) if object_refused(&error, &missing) => refusal = Some(error),
+                Err(error) => return Err(error),
+            }
+            missing = self.git.missing_blobs(&missing)?;
+        }
+        if missing.is_empty() {
+            Ok(())
+        } else {
+            Err(refusal.unwrap_or_else(|| {
+                "Promisor fetch completed but required checkout objects are still missing".into()
+            }))
+        }
     }
 
     fn reset(
@@ -552,18 +607,12 @@ impl Operation {
                 .transpose()
         };
         let old = local_tip()?;
-        let promisor = self.promisor_remote(remote)?;
-        if let Some(promisor) = &promisor {
+        let mut promisors = self.promisor_remotes(remote, redirect)?;
+        let partial = !promisors.is_empty();
+        if partial {
             let mut trees = vec![oid.as_str()];
             trees.extend(old.as_deref().filter(|old| *old != oid));
-            let mut promisor_redirect = None;
-            let rewrite = if promisor == remote {
-                &mut redirect
-            } else {
-                &mut promisor_redirect
-            };
-            self.hydrate_checkout(&trees, promisor, rewrite, fetch_stderr)
-                .map_err(remote_error)?;
+            self.hydrate_checkout(&trees, &mut promisors, fetch_stderr)?;
             if self
                 .git
                 .optional(&["rev-parse", "--verify", "--quiet", &local_ref])?
@@ -610,7 +659,7 @@ impl Operation {
         if old.is_some() {
             checkout_action(
                 &self.git,
-                promisor.is_some(),
+                partial,
                 &[
                     "switch",
                     "--no-recurse-submodules",
@@ -621,7 +670,7 @@ impl Operation {
         } else {
             checkout_action(
                 &self.git,
-                promisor.is_some(),
+                partial,
                 &[
                     "switch",
                     "--no-recurse-submodules",
@@ -648,7 +697,7 @@ impl Operation {
         self.stage("reset")?;
         checkout_action(
             &self.git,
-            promisor.is_some(),
+            partial,
             &["reset", "--no-recurse-submodules", "--hard", &oid],
         )?;
         self.stage("post-reset verification")?;
@@ -659,6 +708,22 @@ impl Operation {
         println!("State: reset completed at {oid}");
         Ok(())
     }
+}
+
+fn object_refused(error: &str, requested: &[u8]) -> bool {
+    // Only a refusal for a requested OID justifies trying another promisor.
+    // Transport and authentication errors keep their normal failure handling.
+    error.lines().any(|line| {
+        let Some((prefix, oid)) = line.trim_end().rsplit_once(' ') else {
+            return false;
+        };
+        (prefix.ends_with("upload-pack: not our ref")
+            || prefix.ends_with("Server does not allow request for unadvertised object"))
+            && !oid.is_empty()
+            && requested
+                .split(|b| *b == b'\n')
+                .any(|want| want == oid.as_bytes())
+    })
 }
 
 fn checkout_action(git: &Git, local_only: bool, args: &[&str]) -> Result<(), String> {

@@ -2334,6 +2334,144 @@ done
 }
 
 #[test]
+fn partial_clone_uses_each_promisor_for_its_checkout_objects() {
+    let f = Fixture::new();
+    git(&f.origin, &["config", "uploadpack.allowFilter", "true"]);
+    git(
+        &f.origin,
+        &["config", "uploadpack.allowAnySHA1InWant", "true"],
+    );
+    let partial = f.workspace.join("partial");
+    let origin_url = format!("file://{}", f.origin.display());
+    git(
+        &f.workspace,
+        &[
+            "clone",
+            "--filter=blob:none",
+            &origin_url,
+            origin_arg(&partial),
+        ],
+    );
+    git(&partial, &["switch", "-c", "topic"]);
+
+    let archive_seed = f.temp.path().join("archive-seed");
+    let archive = f.temp.path().join("archive.git");
+    git(
+        f.temp.path(),
+        &["clone", origin_arg(&f.origin), origin_arg(&archive_seed)],
+    );
+    fs::write(
+        archive_seed.join("archived-only"),
+        "only available from archive",
+    )
+    .unwrap();
+    git(&archive_seed, &["add", "archived-only"]);
+    git(&archive_seed, &["commit", "-m", "archive only"]);
+    let archived_tip = git(&archive_seed, &["rev-parse", "HEAD"]);
+    let archived_blob = git(&archive_seed, &["rev-parse", "HEAD:archived-only"]);
+    git(
+        f.temp.path(),
+        &[
+            "clone",
+            "--bare",
+            origin_arg(&archive_seed),
+            origin_arg(&archive),
+        ],
+    );
+    git(&archive, &["config", "uploadpack.allowFilter", "true"]);
+    git(
+        &archive,
+        &["config", "uploadpack.allowAnySHA1InWant", "true"],
+    );
+    git(
+        &partial,
+        &[
+            "remote",
+            "add",
+            "archive",
+            &format!("file://{}", archive.display()),
+        ],
+    );
+    git(&partial, &["config", "remote.archive.promisor", "true"]);
+    git(
+        &partial,
+        &["config", "remote.archive.partialclonefilter", "blob:none"],
+    );
+    git(&partial, &["fetch", "--filter=blob:none", "archive"]);
+    git(&partial, &["update-ref", "refs/heads/main", &archived_tip]);
+    f.push_file("origin-only");
+    let target = git(&f.seed, &["rev-parse", "HEAD"]);
+    let target_blob = git(&f.seed, &["rev-parse", "HEAD:origin-only"]);
+
+    for oid in [&archived_blob, &target_blob] {
+        let check = env(Command::new("git").current_dir(&partial))
+            .args(["--no-lazy-fetch", "cat-file", "-e", oid])
+            .output()
+            .unwrap();
+        assert!(
+            !check.status.success(),
+            "fixture must start with missing blobs"
+        );
+    }
+    let trace = f.temp.path().join("promisor-trace");
+    let shim = f.shim(&format!(
+        r#"
+case " $* " in
+  *" fetch "*" --stdin "*)
+    for last do :; done
+    printf '%s\n' "$last" >> '{}'
+    echo 'Permission denied (publickey)' >&2
+    exit 128
+    ;;
+esac
+"#,
+        trace.display()
+    ));
+    let mut command = f.cli(&partial, &[OsStr::new("--json")]);
+    f.with_shim(&mut command, &shim);
+    let denied = command.env("GIT_NO_LAZY_FETCH", "1").output().unwrap();
+    assert_eq!(denied.status.code(), Some(1));
+    let result: serde_json::Value = serde_json::from_slice(&denied.stdout).unwrap();
+    assert_eq!(result["results"][0]["failure_kind"], "remote_unavailable");
+    assert_eq!(result["results"][0]["needs_verification"], false);
+    assert_eq!(fs::read_to_string(&trace).unwrap(), "origin\n");
+    assert_eq!(git(&partial, &["symbolic-ref", "--short", "HEAD"]), "topic");
+    assert_eq!(git(&partial, &["rev-parse", "main"]), archived_tip);
+    assert!(git(&partial, &["for-each-ref", "refs/home-reset-backups"]).is_empty());
+
+    let out = f
+        .cli(&partial, &[OsStr::new("--json")])
+        .env("GIT_NO_LAZY_FETCH", "1")
+        .output()
+        .unwrap();
+    success(&out);
+    assert_eq!(git(&partial, &["rev-parse", "HEAD"]), target);
+    assert_eq!(git(&partial, &["rev-parse", "@{upstream}"]), target);
+    assert_eq!(git(&partial, &["rev-parse", "topic"]), f.new);
+    let backup = git(
+        &partial,
+        &[
+            "for-each-ref",
+            "--format=%(objectname)",
+            "refs/home-reset-backups",
+        ],
+    );
+    assert_eq!(backup, archived_tip);
+    assert_eq!(
+        fs::read_to_string(partial.join("origin-only")).unwrap(),
+        "remote"
+    );
+    assert!(!partial.join("archived-only").exists());
+    for oid in [&archived_blob, &target_blob] {
+        assert_eq!(
+            git(&partial, &["--no-lazy-fetch", "cat-file", "-t", oid]),
+            "blob"
+        );
+    }
+    assert!(git(&partial, &["status", "--porcelain"]).is_empty());
+}
+
+#[test]
 fn reset_throttles_new_attempts_after_transfer_failures_until_the_batch_recovers() {
     let f = Fixture::new();
     let mut repos = vec![f.repo.clone()];
