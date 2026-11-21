@@ -28,10 +28,12 @@ class Api(http.server.BaseHTTPRequestHandler):
         pass
 
     def respond(self, code, body):
+        payload = json.dumps(body).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
-        self.wfile.write(json.dumps(body).encode())
+        self.wfile.write(payload)
 
     def do_GET(self):
         self.route()
