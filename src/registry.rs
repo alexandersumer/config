@@ -43,6 +43,7 @@ const REQUIRED_CUSTOM_SKILL_NAMES: &[&str] = &[
     "branch-description",
     "design-review-deep",
     "design-review-solo",
+    "drive-to-completion",
     "execute-plan",
     "fix-failures",
     "git-publish",
