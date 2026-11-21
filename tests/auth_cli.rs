@@ -2432,10 +2432,10 @@ fn pr_approve_e2e_refreshes_and_approves_only_assigned_prs_across_pages_and_reru
         .output()
         .unwrap();
     assert!(human.status.success(), "{}", text(&human));
-    assert_eq!(
-        String::from_utf8(human.stdout).unwrap(),
-        "team/two #8  previously approved\n"
-    );
+    assert!(String::from_utf8_lossy(&human.stdout)
+        .starts_with("Approval preview · 0 eligible · 1 prior approval · "));
+    assert_eq!(String::from_utf8_lossy(&human.stdout).lines().count(), 1);
+    assert!(!String::from_utf8_lossy(&human.stderr).contains("Checking team/two #8"));
     assert_eq!(api.posts(), expected);
     assert!(api
         .requests()
@@ -2732,4 +2732,120 @@ fn pr_approve_e2e_uses_fresh_state_when_a_rate_limited_write_was_committed() {
         ["/2.0/repositories/team/two/pullrequests/8/approve"]
     );
     assert!(!api.requests().iter().any(|(method, _)| method == "EARLY"));
+}
+
+#[test]
+fn pr_approve_e2e_overlaps_repository_discovery() {
+    let fixture = Fixture::new(json!({}));
+    let api = PullRequestApi::new("discovery_overlap");
+    let result = approval_result(
+        api.command(&fixture, &["team/one", "team/two", "--dry-run"])
+            .output()
+            .unwrap(),
+        0,
+    );
+    assert_eq!(result["results"][0]["repository"], "team/one");
+    assert_eq!(
+        result["results"].as_array().unwrap().last().unwrap()["repository"],
+        "team/two"
+    );
+    assert!(api.posts().is_empty());
+}
+
+#[test]
+fn pr_approve_e2e_recovers_expired_oauth_and_rechecks_the_rejected_write() {
+    let fixture = Fixture::new(json!({"bb_rotate_during_approval":true}));
+    let api = PullRequestApi::new("auth_expiry");
+    let result = approval_result(api.command(&fixture, &["team/two"]).output().unwrap(), 0);
+    assert_eq!(result["results"][0]["status"], "approved");
+    let requests = api.requests();
+    let posts: Vec<_> = requests
+        .iter()
+        .enumerate()
+        .filter_map(|(index, (method, _))| (method == "POST").then_some(index))
+        .collect();
+    assert_eq!(posts.len(), 2);
+    let between = &requests[posts[0] + 1..posts[1]];
+    assert!(between.iter().any(|(_, path)| path == "/2.0/user"));
+    assert!(between
+        .iter()
+        .any(|(_, path)| path.ends_with("/8/activity")));
+    assert!(between.iter().any(|(_, path)| path.ends_with("/8")));
+    assert_eq!(
+        fixture
+            .calls()
+            .iter()
+            .filter(|call| call[1] == json!(["auth", "token", "--account", "office"]))
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn pr_approve_e2e_stops_if_oauth_cannot_verify_the_original_identity() {
+    for (mode, rotate, reason) in [
+        ("identity_change", true, "different Bitbucket identity"),
+        ("unchanged_token", false, "did not provide a new token"),
+    ] {
+        let fixture = Fixture::new(json!({"bb_rotate_during_approval":rotate}));
+        let api = PullRequestApi::new(mode);
+        let result = approval_result(api.command(&fixture, &["team/two"]).output().unwrap(), 1);
+        assert!(
+            result["error"].as_str().unwrap().contains(reason),
+            "{result}"
+        );
+        assert_eq!(
+            api.posts(),
+            ["/2.0/repositories/team/two/pullrequests/8/approve"]
+        );
+    }
+}
+
+#[test]
+fn pr_approve_e2e_coalesces_expiry_recovery_across_workers() {
+    let fixture = Fixture::new(json!({"bb_rotate_during_approval":true}));
+    let api = PullRequestApi::new("concurrent_expiry");
+    let result = approval_result(
+        api.command(&fixture, &["team/one", "--dry-run"])
+            .output()
+            .unwrap(),
+        0,
+    );
+    assert_eq!(result["results"][0]["status"], "would_approve");
+    assert_eq!(result["results"][1]["status"], "already_approved");
+    assert_eq!(
+        fixture
+            .calls()
+            .iter()
+            .filter(|call| call[1] == json!(["auth", "token", "--account", "office"]))
+            .count(),
+        2,
+        "one startup acquisition and one shared renewal"
+    );
+    assert!(api.posts().is_empty());
+}
+
+#[test]
+fn pr_approve_e2e_reports_a_compact_human_summary_and_actionable_errors() {
+    let fixture = Fixture::new(json!({}));
+    let api = PullRequestApi::new("partial");
+    let output = api
+        .invocation(
+            &fixture,
+            &["pull-request", "approve"],
+            &["team/one", "team/two"],
+        )
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1), "{}", text(&output));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(stdout.lines().count(), 1, "{stdout}");
+    assert!(stdout.starts_with("Approval incomplete · 1 approved · 2 prior approvals · 2 no longer eligible · 2 failed · "), "{stdout}");
+    assert!(stderr.contains("Discovering pull requests…"));
+    assert!(stderr.contains("Checking 7 pull requests…"));
+    assert!(stderr.contains("workctl: team/one #1: Approval could not be verified"));
+    assert!(stderr.contains("workctl: team/one #6: Bitbucket API returned HTTP 503"));
+    assert!(!stderr.contains("Checking team/"));
+    assert!(!text(&output).contains(SECRET));
 }

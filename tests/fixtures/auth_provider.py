@@ -132,7 +132,8 @@ if name == 'bb':
         if not state.get('bb_valid', True):
             print('Authentication failed ' + secret, file=sys.stderr)
             sys.exit(1)
-        print(secret)
+        expired = pathlib.Path(os.environ.get('PR_FIXTURE_CERT', '/dev/null')).with_name("oauth-expired")
+        print(secret + "-renewed" if state.get("bb_rotate_during_approval") and expired.exists() else secret)
     elif args[:2] == ['auth', 'login']:
         if state.get('refresh_fails'):
             print(secret, file=sys.stderr)

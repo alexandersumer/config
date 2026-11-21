@@ -13,11 +13,13 @@ use std::os::fd::OwnedFd;
 use std::os::unix::net::UnixStream;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 const API: &str = "https://api.bitbucket.org/2.0";
 const REQUEST_SECONDS: u64 = 30;
 const WORKERS: usize = 4;
+const IDENTITY_URL: &str = "https://api.bitbucket.org/2.0/user?fields=uuid";
 const MAX_ATTEMPTS: u32 = 3;
 
 #[derive(Debug, clap::Args)]
@@ -129,11 +131,20 @@ struct Activity {
     approval: Option<Approval>,
 }
 
+struct CredentialState {
+    token: Arc<str>,
+    renewed: bool,
+    failure: Option<String>,
+}
+
 struct Client {
-    token: String,
+    account: String,
+    owner: Option<String>,
+    credentials: Mutex<CredentialState>,
     session: process::Session,
     rate_limit: rate_limit::RateLimit,
     human: bool,
+    progress: Mutex<Option<(presentation::Progress, usize)>>,
 }
 
 enum RequestError {
@@ -160,7 +171,8 @@ impl RequestError {
             Self::Http(code) => format!("Bitbucket API returned HTTP {code}"),
             Self::RateLimited(_) => "Bitbucket rate limited the request (HTTP 429)".into(),
             Self::EligibilityExpired => {
-                "Approval eligibility must be rechecked after the rate limit cooldown".into()
+                "Approval eligibility must be rechecked after a cooldown or credential change"
+                    .into()
             }
             Self::Invalid(reason) => reason,
         }
@@ -169,13 +181,21 @@ impl RequestError {
 
 impl Client {
     fn request<T: DeserializeOwned>(&self, url: &str) -> Result<T, String> {
+        self.read_retry(|attempt| self.send("GET", url, attempt, None))
+    }
+
+    fn read_retry<T>(
+        &self,
+        mut issue: impl FnMut(u32) -> Result<T, RequestError>,
+    ) -> Result<T, String> {
         for attempt in 0..MAX_ATTEMPTS {
-            match self.send("GET", url, attempt) {
+            match issue(attempt) {
                 Err(RequestError::RateLimited(_)) => {
                     if let Some(reason) = self.rate_limit.stop_reason() {
                         return Err(reason);
                     }
                 }
+                Err(RequestError::EligibilityExpired) if attempt + 1 < MAX_ATTEMPTS => {}
                 Err(error)
                     if attempt + 1 < MAX_ATTEMPTS && error.retryable() && !runtime::cancelled() =>
                 {
@@ -187,19 +207,113 @@ impl Client {
         unreachable!("the final attempt returns its result")
     }
 
+    fn token(&self) -> Result<Arc<str>, String> {
+        let credentials = self.credentials.lock().expect("Bitbucket credentials");
+        if let Some(reason) = &credentials.failure {
+            return Err(reason.clone());
+        }
+        Ok(credentials.token.clone())
+    }
+
+    fn auth_failure(&self) -> Option<String> {
+        self.credentials
+            .lock()
+            .expect("Bitbucket credentials")
+            .failure
+            .clone()
+    }
+
+    fn renew(&self, used: &Arc<str>, owner: &str) -> Result<(), String> {
+        // Serialize recovery across workers. A 401 from an older in-flight
+        // request must never trigger a second refresh of an already replaced token.
+        let mut credentials = self.credentials.lock().expect("Bitbucket credentials");
+        if let Some(reason) = &credentials.failure {
+            return Err(reason.clone());
+        }
+        if !Arc::ptr_eq(used, &credentials.token) {
+            return Ok(());
+        }
+        let renew = || -> Result<String, String> {
+            if credentials.renewed {
+                return Err("Bitbucket rejected the renewed OAuth credential".into());
+            }
+            let token = auth::bitbucket_token(&self.account)?;
+            if token.as_str() == used.as_ref() {
+                return Err("Bitbucket CLI did not provide a new token".into());
+            }
+            let identity: User = self.read_retry(|attempt| {
+                self.rate_limit.wait().map_err(RequestError::Invalid)?;
+                self.send_with_token("GET", IDENTITY_URL, attempt, &token)
+            })?;
+            if identity.uuid != owner {
+                return Err(
+                    "Renewed OAuth credential belongs to a different Bitbucket identity".into(),
+                );
+            }
+            Ok(token)
+        };
+        match renew() {
+            Ok(token) => {
+                credentials.token = Arc::from(token);
+                credentials.renewed = true;
+                Ok(())
+            }
+            Err(reason) => {
+                let reason = format!("{reason}. Recheck Bitbucket authentication before rerunning");
+                credentials.failure = Some(reason.clone());
+                Err(reason)
+            }
+        }
+    }
+
     fn send<T: DeserializeOwned>(
         &self,
         method: &str,
         url: &str,
         attempt: u32,
+        verified_token: Option<&Arc<str>>,
     ) -> Result<T, RequestError> {
+        let token = self.token().map_err(RequestError::Invalid)?;
         let waited = self.rate_limit.wait().map_err(RequestError::Invalid)?;
-        if method == "POST" && waited {
+        if verified_token.is_some_and(|verified| waited || !Arc::ptr_eq(verified, &token)) {
             return Err(RequestError::EligibilityExpired);
         }
-        let result = self.request_once(method, url);
+        let result = self.send_with_token(method, url, attempt, &token);
+        if matches!(result, Err(RequestError::Http(401))) {
+            if let Some(owner) = &self.owner {
+                self.renew(&token, owner).map_err(RequestError::Invalid)?;
+                return Err(RequestError::EligibilityExpired);
+            }
+        }
+        result
+    }
+
+    fn send_with_token<T: DeserializeOwned>(
+        &self,
+        method: &str,
+        url: &str,
+        attempt: u32,
+        token: &str,
+    ) -> Result<T, RequestError> {
+        let result = self.request_once(method, url, token);
         if let Err(RequestError::RateLimited(header)) = &result {
-            self.rate_limit.limited(header, attempt, self.human);
+            if let Some(delay) = self.rate_limit.limited(header, attempt) {
+                if self.human {
+                    let wait = if delay < Duration::from_secs(1) {
+                        format!("{:.2}s", delay.as_secs_f64())
+                    } else {
+                        presentation::duration(delay)
+                    };
+                    let message =
+                        format!("Bitbucket rate limit reached. Waiting {wait} before continuing.");
+                    let progress = self.progress.lock().expect("approval progress");
+                    let _ = match progress.as_ref() {
+                        Some((progress, _)) => progress.message(&message),
+                        None => writeln!(io::stderr().lock(), "{message}")
+                            .map_err(|error| error.to_string()),
+                    };
+                }
+            }
         }
         result
     }
@@ -208,13 +322,14 @@ impl Client {
         &self,
         method: &str,
         url: &str,
+        token: &str,
     ) -> Result<T, RequestError> {
         let invalid = |reason: &str| RequestError::Invalid(reason.into());
         // Use a private socket for curl's config stdin. The bearer never enters
         // argv, the environment, a capture file, or a user-facing diagnostic.
         let (input, mut writer) =
             UnixStream::pair().map_err(|_| invalid("Cannot create HTTP input"))?;
-        writeln!(writer, "header = \"Authorization: Bearer {}\"", self.token)
+        writeln!(writer, "header = \"Authorization: Bearer {token}\"")
             .map_err(|_| invalid("Cannot prepare HTTP authentication"))?;
         drop(writer);
         let mut command = Command::new("curl");
@@ -374,6 +489,7 @@ impl Client {
     ) -> Result<&'static str, String> {
         let detail = format!("{endpoint}?fields=id,state,author.uuid,author.account_id,reviewers.uuid,participants.user.uuid,participants.approved");
         for attempt in 0..MAX_ATTEMPTS {
+            let verified_token = self.token()?;
             let approved_before = self.any_page(
                 &format!("{endpoint}/activity"),
                 "pagelen=50&fields=next,values.approval.user.uuid",
@@ -406,7 +522,12 @@ impl Client {
                 return Ok("would_approve");
             }
 
-            let write = self.send::<Participant>("POST", &format!("{endpoint}/approve"), attempt);
+            let write = self.send::<Participant>(
+                "POST",
+                &format!("{endpoint}/approve"),
+                attempt,
+                Some(&verified_token),
+            );
             if attempt + 1 < MAX_ATTEMPTS
                 && matches!(
                     write,
@@ -476,13 +597,22 @@ fn approve(
         return Ok(());
     }
 
-    let client = Client {
-        token: auth::bitbucket_token(options.non_interactive, human)?,
+    let account = auth::bitbucket_account(options.non_interactive, human)?;
+    let token = auth::bitbucket_token(&account)?;
+    let mut client = Client {
+        account,
+        owner: None,
+        credentials: Mutex::new(CredentialState {
+            token: Arc::from(token),
+            renewed: false,
+            failure: None,
+        }),
         session: process::Session::default(),
         rate_limit: rate_limit::RateLimit::default(),
         human,
+        progress: Mutex::new(None),
     };
-    let me: User = client.request(&format!("{API}/user?fields=uuid"))?;
+    let me: User = client.request(IDENTITY_URL)?;
     let uuid_pattern =
         regex::Regex::new(r"^\{[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\}$")
             .expect("static Bitbucket UUID pattern");
@@ -490,24 +620,67 @@ fn approve(
         return Err("Bitbucket did not return a valid UUID for the authenticated user".into());
     }
 
-    // Complete discovery for every explicit repository before issuing any POST.
-    let mut discovered = Vec::new();
-    for repo in repositories {
-        if human {
-            writeln!(
-                io::stderr().lock(),
-                "Checking open pull requests in {repo}…"
-            )
+    client.owner = Some(me.uuid.clone());
+
+    // Discover at most four repositories at a time. Every repository must
+    // finish discovery successfully before any worker can send an approval.
+    if human {
+        writeln!(io::stderr().lock(), "Discovering pull requests…")
             .map_err(|_| "Cannot report pull request discovery")?;
-        }
-        let collection = format!("{API}/repositories/{repo}/pullrequests");
-        let ids = client
-            .assigned_ids(&collection, &me.uuid, roster.as_ref())
-            .map_err(|reason| format!("{repo}: {reason}"))?;
-        discovered.extend(
-            ids.into_iter()
-                .map(|(id, approved)| (repo, format!("{collection}/{id}"), id, approved)),
-        );
+        *client.progress.lock().expect("approval progress") =
+            Some((presentation::Progress::new(repositories.len()), 0));
+    }
+    let collections: Vec<_> = repositories
+        .iter()
+        .map(|&repo| (repo, format!("{API}/repositories/{repo}/pullrequests")))
+        .collect();
+    let mut discovered = Vec::new();
+    for group in collections.chunks(WORKERS) {
+        std::thread::scope(|scope| -> Result<(), String> {
+            let workers: Vec<_> = group
+                .iter()
+                .map(|(repo, collection)| {
+                    let client = &client;
+                    let reviewer = &me.uuid;
+                    let roster = roster.as_ref();
+                    scope.spawn(move || {
+                        let ids = client
+                            .assigned_ids(collection, reviewer, roster)
+                            .map_err(|reason| format!("{repo}: {reason}"))?;
+                        Ok::<_, String>(
+                            ids.into_iter()
+                                .map(|(id, approved)| {
+                                    (*repo, format!("{collection}/{id}"), id, approved)
+                                })
+                                .collect::<Vec<_>>(),
+                        )
+                    })
+                })
+                .collect();
+            let active = workers.len();
+            for (index, worker) in workers.into_iter().enumerate() {
+                discovered.extend(worker.join().expect("repository discovery worker")?);
+                if let Some((display, completed)) =
+                    client.progress.lock().expect("approval progress").as_mut()
+                {
+                    *completed += 1;
+                    display.update(*completed, active - index - 1)?;
+                }
+            }
+            Ok(())
+        })?;
+    }
+    client.progress.lock().expect("approval progress").take();
+    if human && !discovered.is_empty() {
+        let suffix = if discovered.len() == 1 { "" } else { "s" };
+        writeln!(
+            io::stderr().lock(),
+            "Checking {} pull request{suffix}…",
+            discovered.len()
+        )
+        .map_err(|_| "Cannot report pull request progress")?;
+        *client.progress.lock().expect("approval progress") =
+            Some((presentation::Progress::new(discovered.len()), 0));
     }
     let next = AtomicUsize::new(0);
     let progress_failed = AtomicBool::new(false);
@@ -517,14 +690,10 @@ fn approve(
         for _ in 0..WORKERS.min(discovered.len()) {
             workers.push(scope.spawn(|| {
                 let mut outcomes = Vec::new();
-                while !runtime::cancelled() && !client.rate_limit.paused() && !progress_failed.load(Ordering::Relaxed) {
+                while !runtime::cancelled() && !client.rate_limit.paused() && client.auth_failure().is_none() && !progress_failed.load(Ordering::Relaxed) {
                     let index = next.fetch_add(1, Ordering::Relaxed);
                     let Some((repo, endpoint, id, already_approved)) = discovered.get(index) else { break };
                     let mut row = json!({"repository":repo,"id":id,"url":format!("https://bitbucket.org/{repo}/pull-requests/{id}")});
-                    if human && writeln!(io::stderr().lock(), "Checking {repo} #{id}…").is_err() {
-                        progress_failed.store(true, Ordering::Relaxed);
-                        break;
-                    }
                     if *already_approved {
                         row["status"] = json!("already_approved");
                     } else {
@@ -537,6 +706,16 @@ fn approve(
                         }
                     }
                     outcomes.push((index, row));
+                    if human {
+                        let mut progress = client.progress.lock().expect("approval progress");
+                        if let Some((display, completed)) = progress.as_mut() {
+                            *completed += 1;
+                            let active = next.load(Ordering::Relaxed).min(discovered.len()).saturating_sub(*completed);
+                            if display.update(*completed, active).is_err() {
+                                progress_failed.store(true, Ordering::Relaxed);
+                            }
+                        }
+                    }
                 }
                 outcomes
             }));
@@ -545,10 +724,15 @@ fn approve(
             indexed.extend(worker.join().expect("approval worker"));
         }
     });
+    client.progress.lock().expect("approval progress").take();
     indexed.sort_unstable_by_key(|(index, _)| *index);
     results.extend(indexed.into_iter().map(|(_, result)| result));
     let remaining = discovered.len() - results.len();
-    if let Some(reason) = client.rate_limit.stop_reason() {
+    if let Some(reason) = client
+        .rate_limit
+        .stop_reason()
+        .or_else(|| client.auth_failure())
+    {
         return Err(format!(
             "{reason}. {remaining} pull requests were left pending."
         ));
@@ -566,7 +750,69 @@ fn approve(
     Ok(())
 }
 
+fn report(
+    stdout: &mut impl Write,
+    stderr: &mut impl Write,
+    results: &[Value],
+    dry_run: bool,
+    status: &str,
+    error: Option<&str>,
+    elapsed: Duration,
+) -> io::Result<()> {
+    if let Some(reason) = error {
+        writeln!(stderr, "workctl: {}", presentation::safe_text(reason))?;
+    }
+    let (mut changed, mut prior, mut skipped, mut failed) = (0, 0, 0, 0);
+    for row in results {
+        let repository = row["repository"].as_str().unwrap_or_default();
+        let id = &row["id"];
+        match row["status"].as_str() {
+            Some("would_approve") => {
+                changed += 1;
+                writeln!(stdout, "{repository} #{id}  would approve")?;
+            }
+            Some("approved") => changed += 1,
+            Some("previously_approved" | "already_approved") => prior += 1,
+            Some("failed") => {
+                failed += 1;
+                let reason = row["reason"].as_str().unwrap_or("Approval failed");
+                writeln!(
+                    stderr,
+                    "workctl: {repository} #{id}: {}",
+                    presentation::safe_text(reason)
+                )?;
+            }
+            _ => skipped += 1,
+        }
+    }
+    let heading = match status {
+        "interrupted" => "Approval interrupted",
+        "failed" => "Approval incomplete",
+        _ if dry_run => "Approval preview",
+        _ => "Approval complete",
+    };
+    let changed_label = if dry_run { "eligible" } else { "approved" };
+    write!(stdout, "{heading} · {changed} {changed_label}")?;
+    if prior > 0 {
+        write!(
+            stdout,
+            " · {prior} prior approval{}",
+            if prior == 1 { "" } else { "s" }
+        )?;
+    }
+    if skipped > 0 {
+        write!(stdout, " · {skipped} no longer eligible")?;
+    }
+    if failed > 0 {
+        write!(stdout, " · {failed} failed")?;
+    }
+    writeln!(stdout, " · {}", presentation::duration(elapsed))?;
+    stderr.flush()?;
+    stdout.flush()
+}
+
 pub(crate) fn run(options: Options, json_output: bool) -> u8 {
+    let started = Instant::now();
     let repositories: BTreeSet<_> = options.repositories.iter().map(String::as_str).collect();
     let mut results = Vec::new();
     let outcome = approve(&options, !json_output, &repositories, &mut results);
@@ -588,41 +834,18 @@ pub(crate) fn run(options: Options, json_output: bool) -> u8 {
         }
         presentation::json(&report)
     } else {
-        let render = || -> io::Result<()> {
-            if let Some(reason) = error {
-                writeln!(
-                    io::stderr().lock(),
-                    "workctl: {}",
-                    presentation::safe_text(&reason)
-                )?;
-            }
-            let mut stdout = io::stdout().lock();
-            for row in &results {
-                write!(
-                    stdout,
-                    "{} #{}  {}",
-                    row["repository"].as_str().unwrap_or_default(),
-                    row["id"],
-                    row["status"].as_str().unwrap_or_default().replace('_', " ")
-                )?;
-                if let Some(reason) = row["reason"].as_str() {
-                    write!(stdout, " ({})", presentation::safe_text(reason))?;
-                }
-                writeln!(stdout)?;
-            }
-            if results.is_empty() && !failed && !interrupted {
-                if let Some(team_id) = &options.author_team {
-                    writeln!(
-                        stdout,
-                        "No open pull requests assigned to you from Atlassian team {team_id}."
-                    )?;
-                } else {
-                    writeln!(stdout, "No open pull requests assigned to you.")?;
-                }
-            }
-            Ok(())
-        };
-        u8::from(render().is_err())
+        u8::from(
+            report(
+                &mut io::stdout().lock(),
+                &mut io::stderr().lock(),
+                &results,
+                options.dry_run,
+                status,
+                error.as_deref(),
+                started.elapsed(),
+            )
+            .is_err(),
+        )
     };
     if interrupted {
         130

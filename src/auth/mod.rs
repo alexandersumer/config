@@ -307,13 +307,18 @@ pub(crate) fn prepare_profile(
     Ok(outcome)
 }
 
-/// Obtain an in-memory token for the account the preflight verified.
-pub(crate) fn bitbucket_token(non_interactive: bool, human: bool) -> Result<String, String> {
+/// Resolve the named account whose credentials passed preflight.
+pub(crate) fn bitbucket_account(non_interactive: bool, human: bool) -> Result<String, String> {
     let outcome = prepare_profile("bitbucket", non_interactive, human)?;
-    let timeout = 30;
-    let account = outcome["targets"][0]["account"]
+    outcome["targets"][0]["account"]
         .as_str()
-        .ok_or("Bitbucket preflight did not identify the account")?;
+        .map(str::to_owned)
+        .ok_or_else(|| "Bitbucket preflight did not identify the account".into())
+}
+
+/// Read or silently renew the native CLI's token for that specific account.
+pub(crate) fn bitbucket_token(account: &str) -> Result<String, String> {
+    let timeout = 30;
     let _lock = process::Lock::acquire(timeout)?;
     let mut command = std::process::Command::new("bb");
     command.args(["auth", "token", "--account", account]);

@@ -42,10 +42,10 @@ impl RateLimit {
         }
     }
 
-    pub(super) fn limited(&self, header: &str, attempt: u32, human: bool) {
+    pub(super) fn limited(&self, header: &str, attempt: u32) -> Option<Duration> {
         let mut state = self.0.lock().expect("rate-limit state");
         if state.stop_reason.is_some() {
-            return;
+            return None;
         }
         let delay = retry_after(header, SystemTime::now())
             .unwrap_or_else(|| Duration::from_secs(1 << attempt))
@@ -55,7 +55,7 @@ impl RateLimit {
         let Some(resume) = now.checked_add(delay) else {
             state.stop_reason =
                 Some("Bitbucket rate limit requested a wait beyond the cooldown budget".into());
-            return;
+            return None;
         };
         let added = resume.saturating_duration_since(previous);
         state.reserved_wait = state.reserved_wait.saturating_add(added);
@@ -68,15 +68,9 @@ impl RateLimit {
             state.stop_reason = Some("Bitbucket rate limit exhausted the retry budget".into());
         } else if !added.is_zero() {
             state.resume_at = Some(resume);
-            if human {
-                use std::io::Write;
-                let _ = writeln!(
-                    std::io::stderr().lock(),
-                    "Bitbucket rate limit reached. Waiting {} before continuing.",
-                    crate::presentation::duration(delay)
-                );
-            }
+            return Some(delay);
         }
+        None
     }
 
     pub(super) fn paused(&self) -> bool {

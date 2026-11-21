@@ -153,7 +153,8 @@ neither authored nor already approved it. Bitbucket does not expose a conditiona
 endpoint, so an external change can still occur between that check and the POST.
 
 `--dry-run` reads the same eligibility evidence without posting approvals.
-Verification uses up to four workers. Bitbucket narrows discovery by reviewer
+Repository discovery and pull request verification use up to four workers.
+Discovery finishes for every repository before any approval. Bitbucket narrows discovery by reviewer
 and, when the team filter fits in the query, author. The command checks both
 again before approval. Current approvals found during discovery need no further
 requests.
@@ -165,9 +166,17 @@ approval can retry after fresh eligibility checks. If the write outcome is
 uncertain, the command reads back the approval and reports any uncertainty.
 Rate-limit handling requires curl 7.84 or later.
 
-Failed or unverified items produce a nonzero exit status. The report includes a
-result for each pull request checked. A rerun uses fresh Bitbucket state. Add
-`--json` for a schema-versioned report.
+If Bitbucket rejects a credential during the run, the command attempts one
+silent renewal for the original account and verifies its Bitbucket UUID.
+Workers share the renewed credential and recheck eligibility before sending
+an approval. If renewal or verification fails, the command stops dispatching
+requests and reports the remaining work.
+
+The terminal report summarizes approvals, prior approvals, skipped items, and
+failures. A preview lists eligible pull requests, and errors identify the affected
+pull request on stderr. Add `--json` for a schema-versioned result for each pull
+request checked. Failed or unverified items produce a nonzero exit status. A rerun
+uses fresh Bitbucket state.
 
 ### Restrict approvals to an Atlassian team
 

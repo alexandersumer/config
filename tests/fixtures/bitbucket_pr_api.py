@@ -62,8 +62,11 @@ class Api(http.server.BaseHTTPRequestHandler):
 
     def route(self):
         global truncated_page, cooldown
-        if self.headers.get("Authorization") != "Bearer AUTH_SECRET_MUST_NEVER_APPEAR":
+        credential = self.headers.get("Authorization")
+        valid = "Bearer AUTH_SECRET_MUST_NEVER_APPEAR"
+        if credential not in {valid, valid + "-renewed"}:
             return self.respond(401, {})
+        renewed = credential.endswith("-renewed")
         url = urllib.parse.urlsplit(self.path)
         path, query = url.path, urllib.parse.parse_qs(url.query)
         log.write(json.dumps([self.command, path]) + "\n")
@@ -71,7 +74,19 @@ class Api(http.server.BaseHTTPRequestHandler):
             log.write(json.dumps(["EARLY", path]) + "\n")
             return self.respond(429, {}, 300)
         if path == "/2.0/user" and self.command == "GET":
-            return self.respond(200, me)
+            return self.respond(200, other if mode == "identity_change" and renewed else me)
+        if mode in {"auth_expiry", "identity_change", "unchanged_token"} and path.endswith("/8/approve") and not renewed:
+            (root / "oauth-expired").touch()
+            return self.respond(401, {})
+        if mode == "concurrent_expiry" and not renewed and re.search(r"/[12]/activity$", path):
+            try:
+                parallel_reads.wait()
+            except threading.BrokenBarrierError:
+                return self.respond(500, {})
+            (root / "oauth-expired").touch()
+            return self.respond(401, {})
+        if (root / "oauth-expired").exists() and not renewed:
+            return self.respond(401, {})
         route = re.fullmatch(base + r"team/(one|two|unlisted|bad)/pullrequests(?:/(\d+)(/activity|/approve)?)?", path)
         if not route:
             return self.respond(404, {})
@@ -90,6 +105,11 @@ class Api(http.server.BaseHTTPRequestHandler):
                     return self.respond(400, {})
             if repo == "unlisted":
                 return self.respond(200, {"values": [candidate(10)]})
+            if mode == "discovery_overlap" and repo in {"one", "two"} and "page" not in query:
+                try:
+                    parallel_reads.wait()
+                except threading.BrokenBarrierError:
+                    return self.respond(500, {})
             if repo == "bad":
                 return self.respond(403, {})
             if mode == "rate_long":
@@ -165,7 +185,7 @@ class Api(http.server.BaseHTTPRequestHandler):
         return self.respond(405, {})
 
 
-server_type = http.server.ThreadingHTTPServer if mode == "overlap" else http.server.HTTPServer
+server_type = http.server.ThreadingHTTPServer if mode in {"overlap", "discovery_overlap", "concurrent_expiry"} else http.server.HTTPServer
 with server_type(("127.0.0.1", 0), Api) as server:
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(root / "cert.pem", root / "key.pem")
