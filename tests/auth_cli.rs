@@ -1341,12 +1341,9 @@ impl RunningAuth {
             .unwrap()
             .read_to_string(&mut stdout)
             .unwrap();
-        self.0
-            .stderr
-            .take()
-            .unwrap()
-            .read_to_string(&mut stderr)
-            .unwrap();
+        if let Some(mut pipe) = self.0.stderr.take() {
+            pipe.read_to_string(&mut stderr).unwrap();
+        }
         assert_eq!(
             self.0.wait().unwrap().code(),
             Some(expected),
@@ -2539,6 +2536,88 @@ fn pr_approve_e2e_serializes_overlapping_runs() {
     ];
     statuses.sort_unstable();
     assert_eq!(statuses, ["approved", "previously_approved"]);
+    assert_eq!(
+        api.posts(),
+        ["/2.0/repositories/team/two/pullrequests/8/approve"]
+    );
+}
+
+#[test]
+fn pr_approve_e2e_waits_cancellably_and_previews_bypass_the_write_lock() {
+    use std::os::fd::AsRawFd;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let api = PullRequestApi::new("normal");
+    let fixture = Fixture::new(json!({}));
+    let uid = unsafe { libc::geteuid() };
+    let lock = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(
+            fixture
+                .root
+                .path()
+                .join(format!("workctl-pr-approve-{uid}.lock")),
+        )
+        .unwrap();
+    assert_eq!(
+        unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) },
+        0
+    );
+
+    let spawn = |args: &[&str]| {
+        RunningAuth(
+            api.command(&fixture, args)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap(),
+        )
+    };
+    let timed_out = spawn(&["team/two", "--lock-timeout", "1"]).finish(1);
+    assert!(timed_out["error"]
+        .as_str()
+        .unwrap()
+        .contains("coordination deadline"));
+    assert!(fixture.calls().is_empty());
+
+    let wait = |name: &str| {
+        let progress = fixture.root.path().join(name);
+        let child = RunningAuth(
+            api.command(&fixture, &["team/two"])
+                .stdout(Stdio::piped())
+                .stderr(fs::File::create(&progress).unwrap())
+                .spawn()
+                .unwrap(),
+        );
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !fs::read_to_string(&progress)
+            .unwrap()
+            .contains("Waiting for another pull request approval run")
+        {
+            assert!(Instant::now() < deadline, "approval wait was not reported");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        child
+    };
+    let cancelled = wait("cancelled-progress");
+    assert_eq!(
+        unsafe { libc::kill(cancelled.0.id() as i32, libc::SIGINT) },
+        0
+    );
+    assert_eq!(cancelled.finish(130)["status"], "interrupted");
+    assert!(fixture.calls().is_empty());
+
+    let mut queued = wait("queued-progress");
+    let preview = spawn(&["team/two", "--dry-run"]).finish(0);
+    assert_eq!(preview["results"][0]["status"], "would_approve");
+    assert!(api.posts().is_empty());
+    assert!(queued.0.try_wait().unwrap().is_none());
+
+    drop(lock);
+    let result = queued.finish(0);
+    assert_eq!(result["results"][0]["status"], "approved");
     assert_eq!(
         api.posts(),
         ["/2.0/repositories/team/two/pullrequests/8/approve"]

@@ -267,14 +267,33 @@ pub(crate) fn capture_with_stdin(
 pub(crate) struct Lock(std::fs::File);
 impl Lock {
     pub fn acquire(timeout: u64) -> Result<Self, String> {
-        Self::acquire_for("auth", timeout)
+        Self::acquire_for("auth", Some(timeout), || Ok(()))
     }
 
-    pub fn acquire_for(operation: &str, timeout: u64) -> Result<Self, String> {
+    pub fn acquire_approval(timeout: Option<u64>) -> Result<Self, String> {
+        Self::acquire_for("pr-approve", timeout, || {
+            writeln!(
+                std::io::stderr().lock(),
+                "Waiting for another pull request approval run (Ctrl-C to cancel)…"
+            )
+            .map_err(|_| "Cannot report pull request approval wait".into())
+        })
+    }
+
+    fn acquire_for(
+        operation: &str,
+        timeout: Option<u64>,
+        on_wait: impl FnOnce() -> Result<(), String>,
+    ) -> Result<Self, String> {
         use std::os::fd::AsRawFd;
         use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
         let uid = unsafe { libc::geteuid() };
         let path = std::env::temp_dir().join(format!("workctl-{operation}-{uid}.lock"));
+        let subject = if operation == "auth" {
+            "auth"
+        } else {
+            "pull request approval"
+        };
         let file = std::fs::OpenOptions::new()
             .read(true)
             .write(true)
@@ -282,32 +301,39 @@ impl Lock {
             .mode(0o600)
             .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
             .open(path)
-            .map_err(|_| "Cannot open auth coordination lock")?;
+            .map_err(|e| format!("Cannot open {subject} coordination lock: {e}"))?;
         let metadata = file
             .metadata()
-            .map_err(|_| "Cannot inspect auth coordination lock")?;
+            .map_err(|e| format!("Cannot inspect {subject} coordination lock: {e}"))?;
         if !metadata.is_file()
             || metadata.uid() != uid
             || metadata.nlink() != 1
             || metadata.mode() & 0o777 != 0o600
         {
-            return Err(
-                "Unsafe auth coordination lock; expected an owned private regular file".into(),
-            );
+            return Err(format!(
+                "Unsafe {subject} coordination lock; expected an owned private regular file"
+            ));
         }
-        let deadline = Instant::now() + Duration::from_secs(timeout);
+        let started = Instant::now();
+        let timeout = timeout.map(Duration::from_secs);
+        let mut on_wait = Some(on_wait);
         loop {
             if crate::runtime::cancelled() {
-                return Err("Interrupted waiting for auth coordination".into());
+                return Err(format!("Interrupted waiting for {subject} coordination"));
             }
             if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
                 return Ok(Self(file));
             }
             let error = std::io::Error::last_os_error();
-            if error.raw_os_error() != Some(libc::EWOULDBLOCK) {
-                return Err("Cannot acquire auth coordination lock".into());
+            if error.kind() == std::io::ErrorKind::Interrupted {
+                continue;
             }
-            if Instant::now() >= deadline {
+            if error.kind() != std::io::ErrorKind::WouldBlock {
+                return Err(format!(
+                    "Cannot acquire {subject} coordination lock: {error}"
+                ));
+            }
+            if timeout.is_some_and(|timeout| started.elapsed() >= timeout) {
                 return Err(match operation {
                     "auth" => "Auth refresh already running; coordination deadline exceeded".into(),
                     "pr-approve" => {
@@ -316,6 +342,9 @@ impl Lock {
                     }
                     _ => format!("{operation} already running; coordination deadline exceeded"),
                 });
+            }
+            if let Some(on_wait) = on_wait.take() {
+                on_wait()?;
             }
             std::thread::sleep(Duration::from_millis(20));
         }

@@ -152,7 +152,12 @@ that the pull request is open, you are still assigned as a reviewer, and you hav
 neither authored nor already approved it. Bitbucket does not expose a conditional approval
 endpoint, so an external change can still occur between that check and the POST.
 
-`--dry-run` reads the same eligibility evidence without posting approvals.
+`--dry-run` reads the same eligibility evidence without posting approvals and
+can run while another invocation holds the approval lock. Live runs share a
+local lock across repositories to prevent duplicate approvals. If the lock is
+held, the command reports the wait on stderr and continues once it acquires the
+lock. Press Ctrl-C to cancel, or use `--lock-timeout SECONDS` to bound the wait.
+Use `--lock-timeout 0` to fail immediately if another run holds the lock.
 Repository discovery and pull request verification use up to four workers.
 Discovery finishes for every repository before any approval. Bitbucket narrows discovery by reviewer
 and, when the team filter fits in the query, author. The command checks both

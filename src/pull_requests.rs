@@ -37,6 +37,9 @@ pub(crate) struct Options {
     /// Report eligible pull requests without sending approvals
     #[arg(long)]
     dry_run: bool,
+    /// Maximum seconds to wait for another approval run (default: wait until it finishes)
+    #[arg(long, value_name = "SECONDS")]
+    lock_timeout: Option<u64>,
     /// Allow silent OAuth refresh without browser login
     #[arg(long)]
     non_interactive: bool,
@@ -579,8 +582,10 @@ fn approve(
 ) -> Result<(), String> {
     let _signals =
         runtime::Signals::install().map_err(|_| "Cannot install cancellation handlers")?;
-    // Retain the same lock across versions so old and new invocations coordinate.
-    let _lock = process::Lock::acquire_for("pr-approve", 30)?;
+    // Live runs use the same lock as older releases to prevent duplicate approvals.
+    let _lock = (!options.dry_run)
+        .then(|| process::Lock::acquire_approval(options.lock_timeout))
+        .transpose()?;
     // Check the transport before any credential refresh or browser interaction.
     let mut curl = Command::new("curl");
     curl.args(["--disable", "--version"]);
