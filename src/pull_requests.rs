@@ -1,4 +1,5 @@
 //! Repository-scoped Bitbucket Cloud approvals using the native bb OAuth cache.
+mod author;
 mod rate_limit;
 mod team;
 
@@ -23,7 +24,7 @@ const IDENTITY_URL: &str = "https://api.bitbucket.org/2.0/user?fields=uuid";
 const MAX_ATTEMPTS: u32 = 3;
 
 #[derive(Debug, clap::Args)]
-#[command(group(clap::ArgGroup::new("author_scope").required(true).args(["author_team", "all_authors"])))]
+#[command(group(clap::ArgGroup::new("author_scope").required(true).args(["author_team", "author_email", "author_account_id", "all_authors"])))]
 pub(crate) struct Options {
     /// Bitbucket Cloud repositories as WORKSPACE/REPOSITORY or https://bitbucket.org/WORKSPACE/REPOSITORY
     #[arg(required = true, num_args = 1.., value_parser = repository)]
@@ -31,6 +32,12 @@ pub(crate) struct Options {
     /// Limit approvals to authors who are full members of this Atlassian team
     #[arg(long, value_name = "TEAM_ID", value_parser = team::team_id)]
     author_team: Option<String>,
+    /// Limit approvals to one author by exact Atlassian account email (resolved through TWG)
+    #[arg(long, value_name = "EMAIL", value_parser = author::email_address)]
+    author_email: Option<String>,
+    /// Limit approvals to one author by Atlassian account ID
+    #[arg(long, value_name = "ACCOUNT_ID", value_parser = author::account_id)]
+    author_account_id: Option<String>,
     /// Explicitly allow pull requests from any author
     #[arg(long)]
     all_authors: bool,
@@ -96,12 +103,35 @@ struct ListedPullRequest {
     participants: Vec<Participant>,
 }
 
-fn author_matches(author: Option<&User>, team: Option<&BTreeSet<String>>) -> bool {
-    team.is_none_or(|members| {
-        author
-            .and_then(|user| user.account_id.as_ref())
-            .is_some_and(|id| members.contains(id))
-    })
+enum AuthorScope {
+    Any,
+    Team(BTreeSet<String>),
+    Account(String),
+}
+
+impl AuthorScope {
+    fn matches(&self, author: Option<&User>) -> bool {
+        let id = author.and_then(|user| user.account_id.as_deref());
+        match self {
+            Self::Any => true,
+            Self::Team(members) => id.is_some_and(|id| members.contains(id)),
+            Self::Account(expected) => id == Some(expected),
+        }
+    }
+
+    fn selector(&self) -> Option<String> {
+        match self {
+            Self::Any => None,
+            Self::Team(members) => {
+                let ids = members
+                    .iter()
+                    .map(|id| json!(id).to_string())
+                    .collect::<Vec<_>>();
+                Some(format!("author.account_id IN ({})", ids.join(",")))
+            }
+            Self::Account(id) => Some(format!("author.account_id={}", json!(id))),
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -431,19 +461,14 @@ impl Client {
         &self,
         collection: &str,
         me: &str,
-        team: Option<&BTreeSet<String>>,
+        scope: &AuthorScope,
     ) -> Result<BTreeMap<u64, bool>, String> {
         let mut ids = BTreeMap::new();
         let reviewer = format!("reviewers.uuid=\"{me}\"");
         // Keep the URL bounded. Large teams still get the same local author filter.
-        let selector = team
-            .map(|members| {
-                let ids = members
-                    .iter()
-                    .map(|id| json!(id).to_string())
-                    .collect::<Vec<_>>();
-                format!("{reviewer} AND author.account_id IN ({})", ids.join(","))
-            })
+        let selector = scope
+            .selector()
+            .map(|author| format!("{reviewer} AND {author}"))
             .filter(|selector| selector.len() <= 900)
             .unwrap_or(reviewer);
         let mut encoded = String::new();
@@ -455,7 +480,7 @@ impl Client {
                 write!(&mut encoded, "%{byte:02X}").expect("encode Bitbucket query");
             }
         }
-        let author_fields = if team.is_some() {
+        let author_fields = if !matches!(scope, AuthorScope::Any) {
             ",values.author.uuid,values.author.account_id"
         } else {
             ""
@@ -470,7 +495,7 @@ impl Client {
             }
             if pr.state == "OPEN"
                 && pr.reviewers.iter().any(|user| user.uuid == me)
-                && author_matches(listed.author.as_ref(), team)
+                && scope.matches(listed.author.as_ref())
             {
                 let already_approved = approved_by(&listed.participants, me);
                 ids.entry(pr.id)
@@ -488,7 +513,7 @@ impl Client {
         id: u64,
         me: &str,
         dry_run: bool,
-        team: Option<&BTreeSet<String>>,
+        scope: &AuthorScope,
     ) -> Result<&'static str, String> {
         let detail = format!("{endpoint}?fields=id,state,author.uuid,author.account_id,reviewers.uuid,participants.user.uuid,participants.approved");
         for attempt in 0..MAX_ATTEMPTS {
@@ -518,8 +543,11 @@ impl Client {
             if approved_by(&pr.participants, me) {
                 return Ok("already_approved");
             }
-            if !author_matches(Some(&pr.author), team) {
-                return Ok("author_outside_team");
+            if !scope.matches(Some(&pr.author)) {
+                return Ok(match scope {
+                    AuthorScope::Team(_) => "author_outside_team",
+                    _ => "author_mismatch",
+                });
             }
             if dry_run {
                 return Ok("would_approve");
@@ -579,6 +607,7 @@ fn approve(
     human: bool,
     repositories: &BTreeSet<&str>,
     results: &mut Vec<Value>,
+    resolved_author: &mut Option<String>,
 ) -> Result<(), String> {
     let _signals =
         runtime::Signals::install().map_err(|_| "Cannot install cancellation handlers")?;
@@ -593,14 +622,29 @@ fn approve(
     if code != 0 || !supported_curl(&version) {
         return Err("curl 7.84 or later is required for Bitbucket rate-limit handling".into());
     }
-    let roster = options
-        .author_team
-        .as_deref()
-        .map(|id| team::member_accounts(id, options.non_interactive, human))
-        .transpose()?;
-    if roster.as_ref().is_some_and(BTreeSet::is_empty) {
-        return Ok(());
-    }
+    let author_scope = if let Some(id) = &options.author_team {
+        let members = team::member_accounts(id, options.non_interactive, human)?;
+        if members.is_empty() {
+            return Ok(());
+        }
+        AuthorScope::Team(members)
+    } else if let Some(email) = &options.author_email {
+        let id = author::resolve_email(email, options.non_interactive, human)?;
+        if human {
+            writeln!(
+                io::stderr().lock(),
+                "Resolved author {email} to Atlassian account ID {id}"
+            )
+            .map_err(|_| "Cannot report the resolved author")?;
+        }
+        *resolved_author = Some(id.clone());
+        AuthorScope::Account(id)
+    } else if let Some(id) = &options.author_account_id {
+        *resolved_author = Some(id.clone());
+        AuthorScope::Account(id.clone())
+    } else {
+        AuthorScope::Any
+    };
 
     let account = auth::bitbucket_account(options.non_interactive, human)?;
     let token = auth::bitbucket_token(&account)?;
@@ -647,10 +691,10 @@ fn approve(
                 .map(|(repo, collection)| {
                     let client = &client;
                     let reviewer = &me.uuid;
-                    let roster = roster.as_ref();
+                    let author_scope = &author_scope;
                     scope.spawn(move || {
                         let ids = client
-                            .assigned_ids(collection, reviewer, roster)
+                            .assigned_ids(collection, reviewer, author_scope)
                             .map_err(|reason| format!("{repo}: {reason}"))?;
                         Ok::<_, String>(
                             ids.into_iter()
@@ -702,7 +746,7 @@ fn approve(
                     if *already_approved {
                         row["status"] = json!("already_approved");
                     } else {
-                        match client.approval_status(endpoint, *id, &me.uuid, options.dry_run, roster.as_ref()) {
+                        match client.approval_status(endpoint, *id, &me.uuid, options.dry_run, &author_scope) {
                             Ok(status) => row["status"] = json!(status),
                             Err(reason) => {
                                 row["status"] = json!("failed");
@@ -820,7 +864,14 @@ pub(crate) fn run(options: Options, json_output: bool) -> u8 {
     let started = Instant::now();
     let repositories: BTreeSet<_> = options.repositories.iter().map(String::as_str).collect();
     let mut results = Vec::new();
-    let outcome = approve(&options, !json_output, &repositories, &mut results);
+    let mut resolved_author = None;
+    let outcome = approve(
+        &options,
+        !json_output,
+        &repositories,
+        &mut results,
+        &mut resolved_author,
+    );
     let interrupted = runtime::interrupted();
     let failed = outcome.is_err() || results.iter().any(|row| row["status"] == "failed");
     let status = if interrupted {
@@ -836,6 +887,9 @@ pub(crate) fn run(options: Options, json_output: bool) -> u8 {
         let mut report = json!({"schema_version":1,"operation":"pr.approve","status":status,"dry_run":options.dry_run,"repositories":repositories,"results":results,"error":error});
         if let Some(team_id) = &options.author_team {
             report["author_team"] = json!(team_id);
+        }
+        if let Some(id) = resolved_author {
+            report["author_account_id"] = json!(id);
         }
         presentation::json(&report)
     } else {

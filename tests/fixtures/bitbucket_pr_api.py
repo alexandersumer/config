@@ -33,7 +33,7 @@ def author(pr, detail=False):
 
 def candidate(pr, state="OPEN", reviewers=None):
     result = dict(id=pr, state=state, reviewers=[me] if reviewers is None else reviewers)
-    if mode == "author_team":
+    if mode in {"author_team", "author_account"}:
         result["author"] = author(pr)
         if pr == 2:
             result["participants"] = [{"user": me, "approved": True}]
@@ -98,9 +98,11 @@ class Api(http.server.BaseHTTPRequestHandler):
                 selector = 'reviewers.uuid="' + me["uuid"] + '"'
                 if mode == "author_team":
                     selector += ' AND author.account_id IN ("first-member","second-member")'
+                if mode == "author_account":
+                    selector += ' AND author.account_id="first-member"'
                 if query.get("q") != [selector]:
                     return self.respond(400, {})
-            if mode == "author_team" and "page" not in query:
+            if mode in {"author_team", "author_account"} and "page" not in query:
                 if "values.author.account_id" not in query.get("fields", [""])[0].split(","):
                     return self.respond(400, {})
             if repo == "unlisted":
@@ -130,7 +132,7 @@ class Api(http.server.BaseHTTPRequestHandler):
                     return
                 # Duplicate across pages and more than the native bb CLI's 50 entries.
                 values = [candidate(1), candidate(6), candidate(7)]
-                if mode == "author_team":
+                if mode in {"author_team", "author_account"}:
                     values += [candidate(11), candidate(12)]
                 return self.respond(200, {"values": values})
             values = [candidate(1), candidate(2), candidate(3), candidate(4, "MERGED"),
@@ -180,7 +182,7 @@ class Api(http.server.BaseHTTPRequestHandler):
             body = candidate(pr, "DECLINED" if pr == 9 else "OPEN",
                              [other] if pr == 7 else [me])
             participant = {"user": me, "approved": pr in approved}
-            return self.respond(200, dict(body, author=author(pr, True) if mode == "author_team" else other,
+            return self.respond(200, dict(body, author=author(pr, True) if mode in {"author_team", "author_account"} else other,
                                           participants=[participant]))
         return self.respond(405, {})
 

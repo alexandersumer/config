@@ -2297,7 +2297,12 @@ exec /usr/bin/curl --disable --noproxy '*' --cacert "$PR_FIXTURE_CERT" --connect
             fs::set_permissions(&wrapper, fs::Permissions::from_mode(0o755)).unwrap();
         }
         let mut command = fixture.command(command);
-        if !args.contains(&"--author-team") {
+        if !args.iter().any(|arg| {
+            matches!(
+                *arg,
+                "--author-team" | "--author-email" | "--author-account-id"
+            )
+        }) {
             command.arg("--all-authors");
         }
         command
@@ -2734,10 +2739,128 @@ fn pr_approve_e2e_fails_closed_when_team_membership_is_incomplete() {
     }
 }
 
+fn author_directory_response() -> Value {
+    json!({
+        "apiVersion": "v2",
+        "command": "user.get",
+        "data": {"accountId":"first-member","accountStatus":"active","email":"author@example.com"},
+        "meta": {"resultCount":1}
+    })
+}
+
+#[test]
+fn pr_approve_e2e_targets_one_author_by_email_or_account_id() {
+    let api = PullRequestApi::new("author_account");
+    let fixture = Fixture::new(json!({"author_directory_response":author_directory_response()}));
+    let preview = approval_result(
+        api.command(
+            &fixture,
+            &[
+                "--author-account-id",
+                "first-member",
+                "--dry-run",
+                "team/one",
+                "team/two",
+            ],
+        )
+        .output()
+        .unwrap(),
+        0,
+    );
+    assert!(fixture.calls().iter().all(|call| call[0] != "twg"));
+    assert!(api.posts().is_empty());
+    assert_eq!(preview["author_account_id"], "first-member");
+    assert_eq!(preview["results"][0]["status"], "would_approve");
+
+    let args = [
+        "--author-email",
+        "Author@Example.com",
+        "team/one",
+        "team/two",
+    ];
+    let result = approval_result(api.command(&fixture, &args).output().unwrap(), 0);
+    let rows = result["results"].as_array().unwrap();
+    assert_eq!(result["author_account_id"], "first-member");
+    assert_eq!(
+        rows.iter()
+            .filter(|row| row["status"] == "approved")
+            .count(),
+        1
+    );
+    assert!(rows
+        .iter()
+        .any(|row| row["id"] == 11 && row["status"] == "author_mismatch"));
+    assert!(rows
+        .iter()
+        .all(|row| row["id"] != 6 && row["id"] != 8 && row["id"] != 12));
+    assert_eq!(
+        api.posts(),
+        ["/2.0/repositories/team/one/pullrequests/1/approve"]
+    );
+    approval_result(api.command(&fixture, &args).output().unwrap(), 0);
+    assert_eq!(
+        api.posts(),
+        ["/2.0/repositories/team/one/pullrequests/1/approve"]
+    );
+}
+
+#[test]
+fn pr_approve_e2e_requires_an_exact_unambiguous_active_email_match() {
+    let api = PullRequestApi::new("author_account");
+    let fixture = Fixture::new(json!({}));
+    let response = author_directory_response();
+    let mut cases = vec![Value::Null];
+    for (field, value) in [
+        ("/data/email", json!("another.author@example.com")),
+        ("/data/accountStatus", json!("inactive")),
+        ("/data/accountId", Value::Null),
+        ("/meta/resultCount", json!(2)),
+        ("/meta/resultCount", json!(0)),
+    ] {
+        let mut invalid = response.clone();
+        *invalid.pointer_mut(field).unwrap() = value;
+        cases.push(invalid);
+    }
+    let mut partial = response;
+    partial["meta"]["partial"] = json!(true);
+    cases.push(partial);
+    for invalid in cases {
+        fixture.state(json!({"author_directory_response":invalid}));
+        let result = approval_result(
+            api.command(
+                &fixture,
+                &["--author-email", "Author@Example.com", "team/one"],
+            )
+            .output()
+            .unwrap(),
+            1,
+        );
+        assert!(result["error"].as_str().unwrap().contains("exact email"));
+        assert!(result.get("author_account_id").is_none());
+    }
+    assert!(api.requests().is_empty());
+    assert!(fixture.calls().iter().all(|call| call[0] != "bb"));
+}
+
 #[test]
 fn pr_approve_e2e_requires_an_explicit_author_scope_before_authentication() {
     let fixture = Fixture::new(json!({}));
-    for flags in [vec![], vec!["--all-authors", "--author-team", AUTHOR_TEAM]] {
+    for flags in [
+        vec![],
+        vec!["--all-authors", "--author-team", AUTHOR_TEAM],
+        vec![
+            "--author-team",
+            AUTHOR_TEAM,
+            "--author-account-id",
+            "first-member",
+        ],
+        vec![
+            "--author-email",
+            "Author@Example.com",
+            "--author-account-id",
+            "first-member",
+        ],
+    ] {
         let mut command = fixture.command(&["pull-request", "approve", "team/one"]);
         let output = command.args(flags).output().unwrap();
         assert_eq!(output.status.code(), Some(2), "{}", text(&output));

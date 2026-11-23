@@ -137,8 +137,9 @@ workctl pull-request approve --author-team TEAM_ID workspace/repository https://
 Pass one or more Bitbucket Cloud repositories as `WORKSPACE/REPOSITORY` or as
 repository URLs. The command deduplicates arguments and reads every page in those
 repositories before posting any approvals. The `pr` alias remains available for
-existing invocations. Choose exactly one author scope. Use `--author-team TEAM_ID`
-for team members, or explicitly pass `--all-authors` to allow any author.
+existing invocations. Choose exactly one author scope. Use `--author-email EMAIL` or
+`--author-account-id ACCOUNT_ID` for one author, `--author-team TEAM_ID` for
+team members, or `--all-authors` to allow any author.
 
 The command uses `curl` for the Bitbucket Cloud API and native `bb` OAuth through
 the `bitbucket` preflight. It reuses valid credentials, refreshes them when needed,
@@ -182,6 +183,24 @@ failures. A preview lists eligible pull requests, and errors identify the affect
 pull request on stderr. Add `--json` for a schema-versioned result for each pull
 request checked. Failed or unverified items produce a nonzero exit status. A rerun
 uses fresh Bitbucket state.
+
+### Restrict approvals to one author
+
+```sh
+workctl pull-request approve --author-email jane.doe@example.com --dry-run workspace/repository
+workctl pull-request approve --author-account-id ACCOUNT_ID --dry-run workspace/repository
+```
+
+Use the author's full Atlassian account email. TWG must return one active
+account with that exact email, ignoring case. If the lookup can't verify a
+single account, the command stops before contacting Bitbucket. Use the exact
+Atlassian account ID to skip directory lookup and TWG authentication. The JSON
+report includes the selected ID as `author_account_id` once it is known.
+
+If you only know the person's name, run `twg user search "Jane Doe"` and check
+the candidate's email or account ID before proceeding. Names and Bitbucket
+nicknames can be shared by multiple accounts. Use `--dry-run` to preview the
+matching pull requests, then remove it to approve eligible requests.
 
 ### Restrict approvals to an Atlassian team
 

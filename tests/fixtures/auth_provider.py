@@ -162,6 +162,13 @@ elif name == 'twg':
         if page is None:
             sys.exit(1)
         print(json.dumps(page))
+    elif args[:2] == ['user', 'get']:
+        assert args[2:9] == ['--mode', 'user', '-o', 'json', '--output-summary', 'none', '--']
+        assert args[9:] == ['Author@Example.com']
+        response = state['author_directory_response']
+        if response is None:
+            sys.exit(1)
+        print(json.dumps(response))
     elif args[0] == 'doctor':
         print(json.dumps({'data': {'connectivity': state.get('twg_connectivity_response', {'ok': state.get('twg_valid', True)}),
                                  'auth': {'resolved': {'tokenPresent': state.get('twg_token_present', state.get('twg_valid', True))}},
