@@ -87,6 +87,8 @@ enum Auth {
 enum PullRequest {
     /// Approve open pull requests assigned to you in the supplied repositories
     Approve(crate::pull_requests::Options),
+    /// Print a review request using the current titles of open Bitbucket pull requests
+    PrintReviewRequest(crate::pull_requests::print_review_request::Options),
 }
 #[derive(Subcommand, Debug)]
 enum Git {
@@ -185,6 +187,9 @@ pub(crate) fn run(args: Vec<OsString>) -> u8 {
         Operation::PullRequest {
             command: PullRequest::Approve(options),
         } => crate::pull_requests::run(options, cli.json),
+        Operation::PullRequest {
+            command: PullRequest::PrintReviewRequest(options),
+        } => crate::pull_requests::print_review_request::run(options, cli.json),
         Operation::Git {
             command: Git::Reset(args),
         } => crate::git_domain::run(args, cli.json),

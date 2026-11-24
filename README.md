@@ -27,7 +27,7 @@ individual checks, and skill updates.
 
 ## Everyday commands
 
-`workctl` handles Git maintenance and authentication readiness. Use `--help`
+`workctl` handles Git maintenance, authentication readiness, and Bitbucket pull requests. Use `--help`
 after any command to see its options.
 
 | Task | Command |
@@ -42,6 +42,7 @@ after any command to see its options.
 | Inspect credential requirements offline | `workctl auth inspect --profile code --json` |
 | Verify work credentials and renew as needed | `workctl auth preflight` |
 | Check code credentials, then run a command | `workctl auth exec --profile code -- bb pr list` |
+| Print a review request from open pull request titles | `workctl pull-request print-review-request 'workspace/repo#123'` |
 | Check CLI prerequisites | `workctl doctor` |
 
 Replace `~/src` with a repository or workspace directory. With no path, Git

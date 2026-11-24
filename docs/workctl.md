@@ -55,6 +55,7 @@ and functions and refreshes command hashes when loaded.
 | `workctl auth preflight` | Verify credentials and renew those that need it |
 | `workctl auth inspect --profile code` | Resolve credential requirements without provider calls |
 | `workctl auth exec -- COMMAND` | Run preflight, then launch a command |
+| `workctl pull-request print-review-request PULL_REQUEST ...` | Print a review request using the current titles of open Bitbucket Cloud pull requests |
 | `workctl pull-request approve --author-team TEAM_ID WORKSPACE/REPOSITORY ...` | Approve open Bitbucket Cloud pull requests assigned to you in the specified repositories |
 | `workctl git reset [PATH ...]` | Reset primary checkouts to a verified remote branch |
 | `workctl git worktree clean [PATH ...]` | Preview linked-worktree removal; `--apply` removes eligible worktrees |
@@ -128,6 +129,29 @@ goes to stderr. It does not monitor or renew credentials during child execution.
 credential ownership, custom profiles, and failure handling.
 
 ## Pull requests
+
+### Print a review request
+
+```sh
+workctl pull-request print-review-request \
+  https://bitbucket.org/workspace/repository/pull-requests/123 \
+  'workspace/another-repository#456'
+```
+
+Pass one or more open Bitbucket Cloud pull requests as URLs or quoted
+`WORKSPACE/REPOSITORY#ID` references. The command prints
+`Could someone please review these?` followed by one `#ID: Title` line per pull
+request in argument order. Repeated references to the same pull request are
+deduplicated. Titles come from Bitbucket, with whitespace collapsed to keep each
+title on one line. The command makes no Bitbucket writes and uses no LLM.
+
+The command uses native `bb` OAuth and curl 7.84 or later. Use
+`--non-interactive` to allow silent refresh without browser login. If a pull
+request is closed, inaccessible, or has no usable title, the command reports
+the failed reference and prints no message. With `--json`, the completed message is
+in `message`.
+
+### Approve pull requests
 
 ```sh
 workctl pull-request approve --author-team TEAM_ID --dry-run workspace/repository workspace/another-repository
@@ -419,6 +443,7 @@ to the relevant command's reference.
 | --- | --- |
 | `auth preflight`, `auth inspect` | 1 |
 | `pull-request approve`, `git reset` | 1 |
+| `pull-request print-review-request` | 1; review request text in `message` |
 | `git worktree clean` | 2 |
 | `git worktree inventory` | 1 |
 | `history` (listing or stored run) | 1 |

@@ -1,5 +1,6 @@
-//! Repository-scoped Bitbucket Cloud approvals using the native bb OAuth cache.
+//! Bitbucket Cloud pull request commands using the native bb OAuth cache.
 mod author;
+pub(crate) mod print_review_request;
 mod rate_limit;
 mod team;
 
@@ -213,6 +214,34 @@ impl RequestError {
 }
 
 impl Client {
+    fn connect(non_interactive: bool, human: bool) -> Result<Self, String> {
+        let account = auth::bitbucket_account(non_interactive, human)?;
+        let token = auth::bitbucket_token(&account)?;
+        let mut client = Self {
+            account,
+            owner: None,
+            credentials: Mutex::new(CredentialState {
+                token: Arc::from(token),
+                renewed: false,
+                failure: None,
+            }),
+            session: process::Session::default(),
+            rate_limit: rate_limit::RateLimit::default(),
+            human,
+            progress: Mutex::new(None),
+        };
+        let me: User = client.request(IDENTITY_URL)?;
+        let uuid_pattern =
+            regex::Regex::new(r"^\{[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\}$")
+                .expect("static Bitbucket UUID pattern");
+        if !uuid_pattern.is_match(&me.uuid) {
+            return Err("Bitbucket did not return a valid UUID for the authenticated user".into());
+        }
+
+        client.owner = Some(me.uuid);
+        Ok(client)
+    }
+
     fn request<T: DeserializeOwned>(&self, url: &str) -> Result<T, String> {
         self.read_retry(|attempt| self.send("GET", url, attempt, None))
     }
@@ -588,6 +617,17 @@ impl Client {
     }
 }
 
+fn check_curl() -> Result<(), String> {
+    // Check the transport before any credential refresh or browser interaction.
+    let mut curl = Command::new("curl");
+    curl.args(["--disable", "--version"]);
+    let (code, version, _) = runtime::capture(curl, Duration::from_secs(5), true)?;
+    if code != 0 || !supported_curl(&version) {
+        return Err("curl 7.84 or later is required for Bitbucket rate-limit handling".into());
+    }
+    Ok(())
+}
+
 fn supported_curl(output: &[u8]) -> bool {
     let text = String::from_utf8_lossy(output);
     let Some(version) = text.split_whitespace().nth(1) else {
@@ -615,13 +655,7 @@ fn approve(
     let _lock = (!options.dry_run)
         .then(|| process::Lock::acquire_approval(options.lock_timeout))
         .transpose()?;
-    // Check the transport before any credential refresh or browser interaction.
-    let mut curl = Command::new("curl");
-    curl.args(["--disable", "--version"]);
-    let (code, version, _) = runtime::capture(curl, Duration::from_secs(5), true)?;
-    if code != 0 || !supported_curl(&version) {
-        return Err("curl 7.84 or later is required for Bitbucket rate-limit handling".into());
-    }
+    check_curl()?;
     let author_scope = if let Some(id) = &options.author_team {
         let members = team::member_accounts(id, options.non_interactive, human)?;
         if members.is_empty() {
@@ -646,30 +680,11 @@ fn approve(
         AuthorScope::Any
     };
 
-    let account = auth::bitbucket_account(options.non_interactive, human)?;
-    let token = auth::bitbucket_token(&account)?;
-    let mut client = Client {
-        account,
-        owner: None,
-        credentials: Mutex::new(CredentialState {
-            token: Arc::from(token),
-            renewed: false,
-            failure: None,
-        }),
-        session: process::Session::default(),
-        rate_limit: rate_limit::RateLimit::default(),
-        human,
-        progress: Mutex::new(None),
-    };
-    let me: User = client.request(IDENTITY_URL)?;
-    let uuid_pattern =
-        regex::Regex::new(r"^\{[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\}$")
-            .expect("static Bitbucket UUID pattern");
-    if !uuid_pattern.is_match(&me.uuid) {
-        return Err("Bitbucket did not return a valid UUID for the authenticated user".into());
-    }
-
-    client.owner = Some(me.uuid.clone());
+    let client = Client::connect(options.non_interactive, human)?;
+    let reviewer = client
+        .owner
+        .as_deref()
+        .expect("verified Bitbucket identity");
 
     // Discover at most four repositories at a time. Every repository must
     // finish discovery successfully before any worker can send an approval.
@@ -690,7 +705,6 @@ fn approve(
                 .iter()
                 .map(|(repo, collection)| {
                     let client = &client;
-                    let reviewer = &me.uuid;
                     let author_scope = &author_scope;
                     scope.spawn(move || {
                         let ids = client
@@ -746,7 +760,7 @@ fn approve(
                     if *already_approved {
                         row["status"] = json!("already_approved");
                     } else {
-                        match client.approval_status(endpoint, *id, &me.uuid, options.dry_run, &author_scope) {
+                        match client.approval_status(endpoint, *id, reviewer, options.dry_run, &author_scope) {
                             Ok(status) => row["status"] = json!(status),
                             Err(reason) => {
                                 row["status"] = json!("failed");

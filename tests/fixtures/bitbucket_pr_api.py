@@ -145,6 +145,23 @@ class Api(http.server.BaseHTTPRequestHandler):
                 pagination = origin + path + "?" + url.query
             return self.respond(200, {"values": values, "next": pagination})
         pr = int(pr)
+        if mode == "print_review_request" and suffix is None and self.command == "GET":
+            if query.get("fields") != ["id,state,title"]:
+                return self.respond(400, {})
+            if pr == 404:
+                return self.respond(404, {})
+            if pr == 9:
+                return self.respond(200, dict(id=pr, state="MERGED", title="Already merged"))
+            if pr == 10:
+                return self.respond(200, dict(id=11, state="OPEN", title="Wrong pull request"))
+            if pr == 11:
+                return self.respond(200, dict(id=pr, state="OPEN", title=" \t\n"))
+            title = {
+                ("two", 8): "Logs the request and trace IDs",
+                ("one", 1): "Reuses the owner’s lease\nwithout an extra Redis round trip",
+                ("one", 8): "Handles \u001b control characters",
+            }[(repo, pr)]
+            return self.respond(200, dict(id=pr, state="OPEN", title=title))
         if suffix == "/activity" and self.command == "GET":
             if mode == "overlap" and pr in {1, 2}:
                 try:

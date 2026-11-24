@@ -2282,7 +2282,7 @@ impl PullRequestApi {
         self.invocation(fixture, &["pull-request", "approve", "--json"], args)
     }
 
-    fn invocation(&self, fixture: &Fixture, command: &[&str], args: &[&str]) -> Command {
+    fn invocation(&self, fixture: &Fixture, subcommand: &[&str], args: &[&str]) -> Command {
         let wrapper = fixture.root.path().join("bin/curl");
         if !wrapper.exists() {
             fs::write(
@@ -2296,13 +2296,15 @@ exec /usr/bin/curl --disable --noproxy '*' --cacert "$PR_FIXTURE_CERT" --connect
         .unwrap();
             fs::set_permissions(&wrapper, fs::Permissions::from_mode(0o755)).unwrap();
         }
-        let mut command = fixture.command(command);
-        if !args.iter().any(|arg| {
-            matches!(
-                *arg,
-                "--author-team" | "--author-email" | "--author-account-id"
-            )
-        }) {
+        let mut command = fixture.command(subcommand);
+        if subcommand.get(1) == Some(&"approve")
+            && !args.iter().any(|arg| {
+                matches!(
+                    *arg,
+                    "--author-team" | "--author-email" | "--author-account-id"
+                )
+            })
+        {
             command.arg("--all-authors");
         }
         command
@@ -2344,6 +2346,125 @@ fn approval_result(output: Output, code: i32) -> Value {
     assert!(!printable.contains(SECRET), "credential exposed");
     assert_eq!(output.status.code(), Some(code), "{printable}");
     serde_json::from_slice(&output.stdout).expect("one JSON result")
+}
+
+#[test]
+fn print_review_request_e2e_prints_current_titles_in_input_order_without_writes() {
+    let api = PullRequestApi::new("print_review_request");
+    let fixture = Fixture::new(json!({"bb_valid":true}));
+    let out = api
+        .invocation(
+            &fixture,
+            &["pull-request", "print-review-request"],
+            &[
+                "https://bitbucket.org/team/two/pull-requests/8/?a=b#comment",
+                "TEAM/ONE#1",
+                "team/one#8",
+                "team/two#008",
+            ],
+        )
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out));
+    assert_eq!(
+        String::from_utf8(out.stdout).unwrap(),
+        concat!(
+            "Could someone please review these?\n",
+            "#8: Logs the request and trace IDs\n",
+            "#1: Reuses the owner’s lease without an extra Redis round trip\n",
+            "#8: Handles \\u{1b} control characters\n",
+        )
+    );
+    assert_eq!(
+        api.requests(),
+        [
+            ("GET".into(), "/2.0/user".into()),
+            (
+                "GET".into(),
+                "/2.0/repositories/team/two/pullrequests/8".into()
+            ),
+            (
+                "GET".into(),
+                "/2.0/repositories/team/one/pullrequests/1".into()
+            ),
+            (
+                "GET".into(),
+                "/2.0/repositories/team/one/pullrequests/8".into()
+            ),
+        ]
+    );
+}
+
+#[test]
+fn print_review_request_e2e_refuses_incomplete_messages_and_invalid_references() {
+    let api = PullRequestApi::new("print_review_request");
+    let fixture = Fixture::new(json!({"bb_valid":true}));
+    let command = &["pull-request", "print-review-request"];
+    let invalid = api
+        .invocation(
+            &fixture,
+            command,
+            &[
+                "team/one#1",
+                "https://bitbucket.org.example/team/one/pull-requests/9",
+            ],
+        )
+        .output()
+        .unwrap();
+    assert_eq!(invalid.status.code(), Some(2), "{}", text(&invalid));
+    assert!(invalid.stdout.is_empty());
+    let closed = api
+        .invocation(&fixture, command, &["team/one#1", "team/one#9"])
+        .output()
+        .unwrap();
+    assert_eq!(closed.status.code(), Some(1), "{}", text(&closed));
+    assert!(closed.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&closed.stderr)
+        .contains("team/one#9: pull request is no longer open"));
+
+    for (reference, reason) in [
+        ("team/one#10", "different pull request ID"),
+        ("team/one#11", "empty pull request title"),
+        ("team/one#404", "HTTP 404"),
+    ] {
+        let failed = api
+            .invocation(
+                &fixture,
+                &["pull-request", "print-review-request", "--json"],
+                &["team/one#1", reference],
+            )
+            .output()
+            .unwrap();
+        assert_eq!(failed.status.code(), Some(1), "{}", text(&failed));
+        let failed: Value = serde_json::from_slice(&failed.stdout).unwrap();
+        assert_eq!(failed["status"], "failed");
+        assert!(failed["message"].is_null());
+        let error = failed["error"].as_str().unwrap();
+        assert!(
+            error.contains(reference) && error.contains(reason),
+            "{error}"
+        );
+    }
+
+    let success = api
+        .invocation(
+            &fixture,
+            &["pull-request", "print-review-request", "--json"],
+            &["team/two#8"],
+        )
+        .output()
+        .unwrap();
+    assert_eq!(success.status.code(), Some(0), "{}", text(&success));
+    let success: Value = serde_json::from_slice(&success.stdout).unwrap();
+    assert_eq!(success["schema_version"], 1);
+    assert_eq!(success["operation"], "pr.print-review-request");
+    assert_eq!(success["status"], "completed");
+    assert_eq!(
+        success["message"],
+        "Could someone please review these?\n#8: Logs the request and trace IDs"
+    );
+    assert!(success["error"].is_null());
+    assert!(api.posts().is_empty());
 }
 
 #[test]
