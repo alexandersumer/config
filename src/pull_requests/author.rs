@@ -19,6 +19,16 @@ pub(super) fn account_id(value: &str) -> Result<String, String> {
 }
 
 pub(super) fn email_address(value: &str) -> Result<String, String> {
+    if value.len() <= 64
+        && value.split('.').all(|part| {
+            !part.is_empty()
+                && part
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b"_+-".contains(&b))
+        })
+    {
+        return Ok(format!("{value}@atlassian.com"));
+    }
     if value.len() <= 254
         && value.bytes().all(|b| b.is_ascii_graphic())
         && value.split_once('@').is_some_and(|(local, domain)| {
@@ -34,7 +44,7 @@ pub(super) fn email_address(value: &str) -> Result<String, String> {
     {
         Ok(value.to_owned())
     } else {
-        Err("expected a full Atlassian account email address".into())
+        Err("expected a full email address or the part before @atlassian.com".into())
     }
 }
 

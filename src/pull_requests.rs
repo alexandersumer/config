@@ -32,8 +32,8 @@ pub(crate) struct Options {
     /// Limit approvals to authors who are full members of this Atlassian team
     #[arg(long, value_name = "TEAM_ID", value_parser = team::team_id)]
     author_team: Option<String>,
-    /// Limit approvals to one author by exact Atlassian account email (resolved through TWG)
-    #[arg(long, value_name = "EMAIL", value_parser = author::email_address)]
+    /// Select one author by full email or the part before @atlassian.com (verified through TWG)
+    #[arg(long, value_name = "EMAIL_OR_HANDLE", value_parser = author::email_address)]
     author_email: Option<String>,
     /// Limit approvals to one author by Atlassian account ID
     #[arg(long, value_name = "ACCOUNT_ID", value_parser = author::account_id)]

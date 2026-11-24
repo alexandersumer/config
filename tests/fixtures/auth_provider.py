@@ -164,7 +164,7 @@ elif name == 'twg':
         print(json.dumps(page))
     elif args[:2] == ['user', 'get']:
         assert args[2:9] == ['--mode', 'user', '-o', 'json', '--output-summary', 'none', '--']
-        assert args[9:] == ['Author@Example.com']
+        assert args[9:] == [state.get('author_directory_email', 'Author@Example.com')]
         response = state['author_directory_response']
         if response is None:
             sys.exit(1)

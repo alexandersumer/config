@@ -2805,6 +2805,32 @@ fn pr_approve_e2e_targets_one_author_by_email_or_account_id() {
 }
 
 #[test]
+fn pr_approve_e2e_expands_author_email_shorthand_before_verifying_identity() {
+    let api = PullRequestApi::new("author_account");
+    let mut response = author_directory_response();
+    let fixture = Fixture::new(json!({
+        "author_directory_email": "author@atlassian.com",
+        "author_directory_response": response,
+    }));
+    let args = ["--author-email", "author", "team/one"];
+    let rejected = approval_result(api.command(&fixture, &args).output().unwrap(), 1);
+    assert!(rejected["error"].as_str().unwrap().contains("exact email"));
+    assert!(api.requests().is_empty());
+
+    response["data"]["email"] = json!("author@atlassian.com");
+    fixture.state(json!({
+        "author_directory_email": "author@atlassian.com",
+        "author_directory_response": response,
+    }));
+    let result = approval_result(api.command(&fixture, &args).output().unwrap(), 0);
+    assert_eq!(result["author_account_id"], "first-member");
+    assert_eq!(
+        api.posts(),
+        ["/2.0/repositories/team/one/pullrequests/1/approve"]
+    );
+}
+
+#[test]
 fn pr_approve_e2e_requires_an_exact_unambiguous_active_email_match() {
     let api = PullRequestApi::new("author_account");
     let fixture = Fixture::new(json!({}));

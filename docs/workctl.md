@@ -187,12 +187,14 @@ uses fresh Bitbucket state.
 ### Restrict approvals to one author
 
 ```sh
+workctl pull-request approve --author-email jane.doe --dry-run workspace/repository
 workctl pull-request approve --author-email jane.doe@example.com --dry-run workspace/repository
 workctl pull-request approve --author-account-id ACCOUNT_ID --dry-run workspace/repository
 ```
 
-Use the author's full Atlassian account email. TWG must return one active
-account with that exact email, ignoring case. If the lookup can't verify a
+A short value such as `jane.doe` expands to `jane.doe@atlassian.com`. A full
+address uses its supplied domain. TWG must return one active account with that
+exact email, ignoring case. If the lookup can't verify a
 single account, the command stops before contacting Bitbucket. Use the exact
 Atlassian account ID to skip directory lookup and TWG authentication. The JSON
 report includes the selected ID as `author_account_id` once it is known.
