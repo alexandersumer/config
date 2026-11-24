@@ -3,7 +3,6 @@ use crate::{presentation, runtime};
 use serde::Deserialize;
 use serde_json::json;
 use std::collections::BTreeSet;
-use std::fmt::Write as _;
 use std::io::{self, Write as _};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -90,19 +89,37 @@ fn append_pull_request(
     title: &str,
 ) -> Result<(), String> {
     let Reference { repository, id } = reference;
-    let title = title.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut title = title.trim();
     if title.is_empty() {
         return Err(format!(
             "{repository}#{id}: Bitbucket returned an empty pull request title"
         ));
     }
-    let url = pull_request_url(repository, *id);
-    write!(
-        message,
-        "\n#{id}: {} {url}",
-        presentation::safe_text(&title)
-    )
-    .expect("write to String");
+
+    while let Some((badge, rest)) = title.strip_prefix('[').and_then(|s| s.split_once(']')) {
+        let risk_badges = [
+            "no-risk",
+            "low-risk",
+            "medium-risk",
+            "high-risk",
+            "critical-risk",
+        ];
+        if !risk_badges
+            .iter()
+            .any(|risk| badge.trim().eq_ignore_ascii_case(risk))
+        {
+            break;
+        }
+        title = rest.trim_start();
+    }
+
+    message.push('\n');
+    if !title.is_empty() {
+        let title = title.split_whitespace().collect::<Vec<_>>().join(" ");
+        message.push_str(&presentation::safe_text(&title));
+        message.push(' ');
+    }
+    message.push_str(&pull_request_url(repository, *id));
     Ok(())
 }
 

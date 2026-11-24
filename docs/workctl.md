@@ -144,10 +144,11 @@ their Bitbucket Cloud URLs or quoted `WORKSPACE/REPOSITORY#ID` references in the
 order you want them printed.
 
 The command prints `Could someone please review these?` followed by one
-`#ID: Title URL` line per pull request. The full Bitbucket URL stays clickable
-when pasted into Slack. The command deduplicates repeated references and
-collapses title whitespace to keep each title on one line. It reads titles from
-Bitbucket, makes no Bitbucket writes, and uses no LLM.
+`Title URL` line per pull request. The command removes leading risk badges such
+as `[low-risk]`, `[medium-risk]`, and `[high-risk]` and collapses title whitespace.
+If a title contains only risk badges, the line contains just the URL. Full
+Bitbucket URLs stay clickable when pasted into Slack. The command deduplicates
+repeated references, makes no Bitbucket writes, and uses no LLM.
 
 The command uses native `bb` OAuth and curl 7.84 or later. Use
 `--non-interactive` to allow silent refresh without browser login. If discovery
