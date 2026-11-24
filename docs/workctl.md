@@ -137,7 +137,8 @@ workctl pull-request print-review-request
 ```
 
 With no arguments, the command finds all open Bitbucket Cloud pull requests
-authored by your signed-in account across its workspaces. If there are none,
+authored by your signed-in account across its workspaces. It checks up to 12
+workspaces concurrently and shares one rate-limit cooldown. If there are none,
 it prints `No open pull requests found.` To select specific pull requests, pass
 their Bitbucket Cloud URLs or quoted `WORKSPACE/REPOSITORY#ID` references in the
 order you want them printed.

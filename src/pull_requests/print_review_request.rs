@@ -1,10 +1,13 @@
-use super::{check_curl, pull_request_url, repository, valid_slug, Client, User, API, WORKERS};
+use super::{check_curl, pull_request_url, repository, valid_slug, Client, User, API};
 use crate::{presentation, runtime};
 use serde::Deserialize;
 use serde_json::json;
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
 use std::io::{self, Write as _};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+const WORKSPACE_WORKERS: usize = 12;
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Options {
@@ -162,21 +165,53 @@ fn append_authored(client: &Client, message: &mut String) -> Result<(), String> 
         .owner
         .as_deref()
         .expect("verified Bitbucket identity");
-    for group in workspaces.chunks(WORKERS) {
-        std::thread::scope(|scope| {
-            let workers: Vec<_> = group
-                .iter()
-                .map(|workspace| scope.spawn(move || workspace_titles(client, workspace, author)))
-                .collect();
-            for worker in workers {
-                message.push_str(
-                    &worker
-                        .join()
-                        .map_err(|_| "Bitbucket discovery worker failed")??,
-                );
-            }
-            Ok::<(), String>(())
-        })?;
+    let next = AtomicUsize::new(0);
+    let stop = AtomicBool::new(false);
+    let workspaces = workspaces.as_slice();
+    let mut results = std::thread::scope(|scope| {
+        let mut workers = Vec::new();
+        for _ in 0..WORKSPACE_WORKERS.min(workspaces.len()) {
+            let worker = std::thread::Builder::new()
+                .spawn_scoped(scope, || {
+                    let mut completed = Vec::new();
+                    while !stop.load(Ordering::Relaxed) && !runtime::cancelled() {
+                        let index = next.fetch_add(1, Ordering::Relaxed);
+                        let Some(workspace) = workspaces.get(index) else {
+                            break;
+                        };
+                        let result = workspace_titles(client, workspace, author);
+                        if result.is_err() {
+                            stop.store(true, Ordering::Relaxed);
+                        }
+                        completed.push((index, result));
+                    }
+                    completed
+                })
+                .map_err(|error| {
+                    stop.store(true, Ordering::Relaxed);
+                    format!("Cannot start Bitbucket discovery worker: {error}")
+                })?;
+            workers.push(worker);
+        }
+
+        let mut results = Vec::with_capacity(workspaces.len());
+        for worker in workers {
+            results.extend(
+                worker
+                    .join()
+                    .map_err(|_| "Bitbucket discovery worker failed")?,
+            );
+        }
+        Ok::<_, String>(results)
+    })?;
+
+    let checked = results.len();
+    results.sort_unstable_by_key(|(index, _)| *index);
+    for (_, result) in results {
+        message.push_str(&result?);
+    }
+    if checked != workspaces.len() {
+        return Err("Bitbucket discovery stopped before checking all workspaces".into());
     }
     Ok(())
 }

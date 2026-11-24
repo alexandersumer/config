@@ -2386,6 +2386,33 @@ fn print_review_request_e2e_discovers_authored_open_prs_across_all_pages_and_wor
 }
 
 #[test]
+fn print_review_request_e2e_advances_past_slow_workspaces_and_retries_rate_limits() {
+    let api = PullRequestApi::new("workspace_pool");
+    let fixture = Fixture::new(json!({"bb_valid":true}));
+    let out = api
+        .invocation(&fixture, &["pull-request", "print-review-request"], &[])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out));
+    let expected = (0..13).fold("Could someone please review these?\n".to_owned(), |mut output, index| {
+        use std::fmt::Write;
+        writeln!(output, "#1: workspace-{index:02} https://bitbucket.org/workspace-{index:02}/repo/pull-requests/1").unwrap();
+        output
+    });
+    assert_eq!(String::from_utf8(out.stdout).unwrap(), expected);
+    let requests = api.requests();
+    assert!(requests.iter().all(|(method, _)| method == "GET"));
+    assert_eq!(requests.len(), 16);
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|(_, path)| path.contains("/workspace-01/"))
+            .count(),
+        2
+    );
+}
+
+#[test]
 fn print_review_request_e2e_distinguishes_empty_results_from_failed_discovery() {
     let fixture = Fixture::new(json!({"bb_valid":true}));
     let command = &["pull-request", "print-review-request"];

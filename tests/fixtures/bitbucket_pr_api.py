@@ -21,6 +21,7 @@ truncated_page = False
 limits = set()
 cooldown = 0
 parallel_reads = threading.Barrier(2, timeout=5)
+pool_advanced = threading.Event()
 log = (root / "http.jsonl").open("w", buffering=1)
 
 
@@ -87,6 +88,27 @@ class Api(http.server.BaseHTTPRequestHandler):
             return self.respond(401, {})
         if (root / "oauth-expired").exists() and not renewed:
             return self.respond(401, {})
+        if mode == "workspace_pool" and self.command == "GET":
+            if path == "/2.0/user/workspaces":
+                return self.respond(200, {"values": [
+                    {"workspace": {"slug": f"workspace-{i:02d}"}} for i in range(13)
+                ]})
+            match = re.fullmatch(r"/2.0/workspaces/(workspace-(\d{2}))/pullrequests/(%7B.+%7D)", path)
+            if match:
+                workspace, index, user = match.groups()
+                if urllib.parse.unquote(user) != me["uuid"] or query.get("state") != ["OPEN"]:
+                    return self.respond(400, {})
+                if index == "00" and not pool_advanced.wait(5):
+                    return self.respond(409, {})
+                if index == "01" and index not in limits:
+                    limits.add(index)
+                    return self.respond(429, {}, 1)
+                if index == "12":
+                    pool_advanced.set()
+                return self.respond(200, {"values": [{
+                    "id": 1, "title": workspace, "state": "OPEN", "author": me,
+                    "destination": {"repository": {"full_name": f"{workspace}/repo"}},
+                }]})
         if mode.startswith("discover_review_requests") and self.command == "GET":
             if path == "/2.0/user/workspaces":
                 if query.get("fields") != ["next,values.workspace.slug"]:
@@ -245,7 +267,9 @@ class Api(http.server.BaseHTTPRequestHandler):
         return self.respond(405, {})
 
 
-server_type = http.server.ThreadingHTTPServer if mode in {"overlap", "discovery_overlap", "concurrent_expiry", "discover_review_requests"} else http.server.HTTPServer
+server_type = http.server.ThreadingHTTPServer if mode in {"overlap", "discovery_overlap", "concurrent_expiry", "discover_review_requests", "workspace_pool"} else http.server.HTTPServer
+if mode == "workspace_pool":
+    server_type.request_queue_size = 32
 with server_type(("127.0.0.1", 0), Api) as server:
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(root / "cert.pem", root / "key.pem")
