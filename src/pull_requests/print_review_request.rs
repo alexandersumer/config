@@ -1,4 +1,4 @@
-use super::{check_curl, repository, valid_slug, Client, User, API, WORKERS};
+use super::{check_curl, pull_request_url, repository, valid_slug, Client, User, API, WORKERS};
 use crate::{presentation, runtime};
 use serde::Deserialize;
 use serde_json::json;
@@ -81,7 +81,11 @@ struct Repository {
     full_name: String,
 }
 
-fn append_title(message: &mut String, reference: &Reference, title: &str) -> Result<(), String> {
+fn append_pull_request(
+    message: &mut String,
+    reference: &Reference,
+    title: &str,
+) -> Result<(), String> {
     let Reference { repository, id } = reference;
     let title = title.split_whitespace().collect::<Vec<_>>().join(" ");
     if title.is_empty() {
@@ -89,7 +93,13 @@ fn append_title(message: &mut String, reference: &Reference, title: &str) -> Res
             "{repository}#{id}: Bitbucket returned an empty pull request title"
         ));
     }
-    write!(message, "\n#{id}: {}", presentation::safe_text(&title)).expect("write to String");
+    let url = pull_request_url(repository, *id);
+    write!(
+        message,
+        "\n#{id}: {} {url}",
+        presentation::safe_text(&title)
+    )
+    .expect("write to String");
     Ok(())
 }
 
@@ -117,7 +127,7 @@ fn append_selected(
         if details.state != "OPEN" {
             return Err(format!("{repository}#{id}: pull request is no longer open"));
         }
-        append_title(message, reference, &details.title)?;
+        append_pull_request(message, reference, &details.title)?;
     }
     Ok(())
 }
@@ -195,7 +205,7 @@ fn workspace_titles(client: &Client, workspace: &str, author: &str) -> Result<St
                     id: pr.details.id,
                 };
                 if !seen.contains(&reference) {
-                    append_title(&mut message, &reference, &pr.details.title)?;
+                    append_pull_request(&mut message, &reference, &pr.details.title)?;
                     seen.insert(reference);
                 }
                 Ok(false)

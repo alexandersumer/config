@@ -77,6 +77,10 @@ fn valid_slug(part: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
 }
 
+fn pull_request_url(repository: &str, id: u64) -> String {
+    format!("https://bitbucket.org/{repository}/pull-requests/{id}")
+}
+
 #[derive(Deserialize)]
 struct User {
     uuid: String,
@@ -754,14 +758,27 @@ fn approve(
         for _ in 0..WORKERS.min(discovered.len()) {
             workers.push(scope.spawn(|| {
                 let mut outcomes = Vec::new();
-                while !runtime::cancelled() && !client.rate_limit.paused() && client.auth_failure().is_none() && !progress_failed.load(Ordering::Relaxed) {
+                while !runtime::cancelled()
+                    && !client.rate_limit.paused()
+                    && client.auth_failure().is_none()
+                    && !progress_failed.load(Ordering::Relaxed)
+                {
                     let index = next.fetch_add(1, Ordering::Relaxed);
-                    let Some((repo, endpoint, id, already_approved)) = discovered.get(index) else { break };
-                    let mut row = json!({"repository":repo,"id":id,"url":format!("https://bitbucket.org/{repo}/pull-requests/{id}")});
+                    let Some((repo, endpoint, id, already_approved)) = discovered.get(index) else {
+                        break;
+                    };
+                    let mut row =
+                        json!({"repository":repo,"id":id,"url":pull_request_url(repo, *id)});
                     if *already_approved {
                         row["status"] = json!("already_approved");
                     } else {
-                        match client.approval_status(endpoint, *id, reviewer, options.dry_run, &author_scope) {
+                        match client.approval_status(
+                            endpoint,
+                            *id,
+                            reviewer,
+                            options.dry_run,
+                            &author_scope,
+                        ) {
                             Ok(status) => row["status"] = json!(status),
                             Err(reason) => {
                                 row["status"] = json!("failed");
@@ -774,7 +791,10 @@ fn approve(
                         let mut progress = client.progress.lock().expect("approval progress");
                         if let Some((display, completed)) = progress.as_mut() {
                             *completed += 1;
-                            let active = next.load(Ordering::Relaxed).min(discovered.len()).saturating_sub(*completed);
+                            let active = next
+                                .load(Ordering::Relaxed)
+                                .min(discovered.len())
+                                .saturating_sub(*completed);
                             if display.update(*completed, active).is_err() {
                                 progress_failed.store(true, Ordering::Relaxed);
                             }

@@ -143,7 +143,8 @@ their Bitbucket Cloud URLs or quoted `WORKSPACE/REPOSITORY#ID` references in the
 order you want them printed.
 
 The command prints `Could someone please review these?` followed by one
-`#ID: Title` line per pull request. It deduplicates repeated references and
+`#ID: Title URL` line per pull request. The full Bitbucket URL stays clickable
+when pasted into Slack. The command deduplicates repeated references and
 collapses title whitespace to keep each title on one line. It reads titles from
 Bitbucket, makes no Bitbucket writes, and uses no LLM.
 

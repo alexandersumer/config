@@ -2361,9 +2361,9 @@ fn print_review_request_e2e_discovers_authored_open_prs_across_all_pages_and_wor
         String::from_utf8(out.stdout).unwrap(),
         concat!(
             "Could someone please review these?\n",
-            "#8: Checks the other workspace\n",
-            "#8: Preserves the current title\n",
-            "#8: Preserves the second repository\n",
+            "#8: Checks the other workspace https://bitbucket.org/other-team/three/pull-requests/8\n",
+            "#8: Preserves the current title https://bitbucket.org/team/one/pull-requests/8\n",
+            "#8: Preserves the second repository https://bitbucket.org/team/two/pull-requests/8\n",
         )
     );
     let requests = api.requests();
@@ -2432,9 +2432,9 @@ fn print_review_request_e2e_prints_current_titles_in_input_order_without_writes(
         String::from_utf8(out.stdout).unwrap(),
         concat!(
             "Could someone please review these?\n",
-            "#8: Logs the request and trace IDs\n",
-            "#1: Reuses the owner’s lease without an extra Redis round trip\n",
-            "#8: Handles \\u{1b} control characters\n",
+            "#8: Logs the request and trace IDs https://bitbucket.org/team/two/pull-requests/8\n",
+            "#1: Reuses the owner’s lease without an extra Redis round trip https://bitbucket.org/team/one/pull-requests/1\n",
+            "#8: Handles \\u{1b} control characters https://bitbucket.org/team/one/pull-requests/8\n",
         )
     );
     assert_eq!(
@@ -2523,7 +2523,7 @@ fn print_review_request_e2e_refuses_incomplete_messages_and_invalid_references()
     assert_eq!(success["status"], "completed");
     assert_eq!(
         success["message"],
-        "Could someone please review these?\n#8: Logs the request and trace IDs"
+        "Could someone please review these?\n#8: Logs the request and trace IDs https://bitbucket.org/team/two/pull-requests/8"
     );
     assert!(success["error"].is_null());
     assert!(api.posts().is_empty());
