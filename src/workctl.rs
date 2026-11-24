@@ -87,7 +87,7 @@ enum Auth {
 enum PullRequest {
     /// Approve open pull requests assigned to you in the supplied repositories
     Approve(crate::pull_requests::Options),
-    /// Print a review request using the current titles of open Bitbucket pull requests
+    /// Print a review request for all your open Bitbucket PRs or the specific PRs you supply
     PrintReviewRequest(crate::pull_requests::print_review_request::Options),
 }
 #[derive(Subcommand, Debug)]

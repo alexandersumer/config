@@ -42,7 +42,7 @@ after any command to see its options.
 | Inspect credential requirements offline | `workctl auth inspect --profile code --json` |
 | Verify work credentials and renew as needed | `workctl auth preflight` |
 | Check code credentials, then run a command | `workctl auth exec --profile code -- bb pr list` |
-| Print a review request from open pull request titles | `workctl pull-request print-review-request 'workspace/repo#123'` |
+| Print a review request for your open Bitbucket PRs | `workctl pull-request print-review-request` |
 | Check CLI prerequisites | `workctl doctor` |
 
 Replace `~/src` with a repository or workspace directory. With no path, Git

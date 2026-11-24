@@ -55,7 +55,7 @@ and functions and refreshes command hashes when loaded.
 | `workctl auth preflight` | Verify credentials and renew those that need it |
 | `workctl auth inspect --profile code` | Resolve credential requirements without provider calls |
 | `workctl auth exec -- COMMAND` | Run preflight, then launch a command |
-| `workctl pull-request print-review-request PULL_REQUEST ...` | Print a review request using the current titles of open Bitbucket Cloud pull requests |
+| `workctl pull-request print-review-request [PULL_REQUEST ...]` | Print a review request for all your open Bitbucket Cloud pull requests or the PRs you supply |
 | `workctl pull-request approve --author-team TEAM_ID WORKSPACE/REPOSITORY ...` | Approve open Bitbucket Cloud pull requests assigned to you in the specified repositories |
 | `workctl git reset [PATH ...]` | Reset primary checkouts to a verified remote branch |
 | `workctl git worktree clean [PATH ...]` | Preview linked-worktree removal; `--apply` removes eligible worktrees |
@@ -133,23 +133,25 @@ credential ownership, custom profiles, and failure handling.
 ### Print a review request
 
 ```sh
-workctl pull-request print-review-request \
-  https://bitbucket.org/workspace/repository/pull-requests/123 \
-  'workspace/another-repository#456'
+workctl pull-request print-review-request
 ```
 
-Pass one or more open Bitbucket Cloud pull requests as URLs or quoted
-`WORKSPACE/REPOSITORY#ID` references. The command prints
-`Could someone please review these?` followed by one `#ID: Title` line per pull
-request in argument order. Repeated references to the same pull request are
-deduplicated. Titles come from Bitbucket, with whitespace collapsed to keep each
-title on one line. The command makes no Bitbucket writes and uses no LLM.
+With no arguments, the command finds all open Bitbucket Cloud pull requests
+authored by your signed-in account across its workspaces. If there are none,
+it prints `No open pull requests found.` To select specific pull requests, pass
+their Bitbucket Cloud URLs or quoted `WORKSPACE/REPOSITORY#ID` references in the
+order you want them printed.
+
+The command prints `Could someone please review these?` followed by one
+`#ID: Title` line per pull request. It deduplicates repeated references and
+collapses title whitespace to keep each title on one line. It reads titles from
+Bitbucket, makes no Bitbucket writes, and uses no LLM.
 
 The command uses native `bb` OAuth and curl 7.84 or later. Use
-`--non-interactive` to allow silent refresh without browser login. If a pull
-request is closed, inaccessible, or has no usable title, the command reports
-the failed reference and prints no message. With `--json`, the completed message is
-in `message`.
+`--non-interactive` to allow silent refresh without browser login. If discovery
+fails, or a specified pull request is closed, inaccessible, or missing its
+title, the command reports the failure without printing a partial message.
+With `--json`, the completed message is in `message`.
 
 ### Approve pull requests
 

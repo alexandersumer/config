@@ -58,22 +58,23 @@ fn repository(value: &str) -> Result<String, String> {
         .strip_prefix("https://bitbucket.org/")
         .unwrap_or(value);
     let value = value.strip_suffix('/').unwrap_or(value);
-    let slug = |part: &str| {
-        part.as_bytes()
-            .first()
-            .is_some_and(u8::is_ascii_alphanumeric)
-            && part
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
-    };
     if value
         .split_once('/')
-        .is_some_and(|(workspace, repo)| slug(workspace) && slug(repo))
+        .is_some_and(|(workspace, repo)| valid_slug(workspace) && valid_slug(repo))
     {
         Ok(value.to_ascii_lowercase())
     } else {
         Err("expected WORKSPACE/REPOSITORY or a Bitbucket Cloud repository URL".into())
     }
+}
+
+fn valid_slug(part: &str) -> bool {
+    part.as_bytes()
+        .first()
+        .is_some_and(u8::is_ascii_alphanumeric)
+        && part
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
 }
 
 #[derive(Deserialize)]

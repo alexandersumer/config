@@ -87,6 +87,47 @@ class Api(http.server.BaseHTTPRequestHandler):
             return self.respond(401, {})
         if (root / "oauth-expired").exists() and not renewed:
             return self.respond(401, {})
+        if mode.startswith("discover_review_requests") and self.command == "GET":
+            if path == "/2.0/user/workspaces":
+                if query.get("fields") != ["next,values.workspace.slug"]:
+                    return self.respond(400, {})
+                page_two = query.get("page") == ["2"]
+                workspace = "other-team" if page_two else "team"
+                body = {"values": [{"workspace": {"slug": workspace}}]}
+                if not page_two:
+                    body["next"] = origin + path + "?page=2&fields=next,values.workspace.slug"
+                return self.respond(200, body)
+            match = re.fullmatch(r"/2.0/workspaces/(team|other-team)/pullrequests/(%7B.+%7D)", path)
+            if match:
+                workspace, user = match.groups()
+                if urllib.parse.unquote(user) != me["uuid"] or query.get("state") != ["OPEN"]:
+                    return self.respond(400, {})
+                fields = "next,values.id,values.state,values.title,values.author.uuid,values.destination.repository.full_name"
+                if query.get("fields") != [fields]:
+                    return self.respond(400, {})
+                if mode == "discover_review_requests_empty":
+                    return self.respond(200, {"values": []})
+                if mode == "discover_review_requests" and "page" not in query:
+                    try:
+                        parallel_reads.wait()
+                    except threading.BrokenBarrierError:
+                        return self.respond(500, {})
+                def row(repo, number, title, author=me, state="OPEN"):
+                    return {"id": number, "title": title, "state": state, "author": author,
+                            "destination": {"repository": {"full_name": repo}}}
+                if workspace == "other-team":
+                    return self.respond(200, {"values": [row("other-team/three", 8, "Checks the other workspace")]})
+                first = row("team/one", 8, "Preserves the current title")
+                if query.get("page") == ["2"]:
+                    return self.respond(200, {"values": [
+                        first, row("team/two", 8, "Preserves the second repository"),
+                        row("team/one", 9, "Closed", state="MERGED"),
+                        row("team/one", 10, "Someone else's", author=other),
+                    ]})
+                next_page = origin + path + "?state=OPEN&page=2&fields=" + fields
+                if mode == "discover_review_requests_bad_page":
+                    next_page = origin + "/2.0/user/workspaces?page=2"
+                return self.respond(200, {"values": [first], "next": next_page})
         route = re.fullmatch(base + r"team/(one|two|unlisted|bad)/pullrequests(?:/(\d+)(/activity|/approve)?)?", path)
         if not route:
             return self.respond(404, {})
@@ -204,7 +245,7 @@ class Api(http.server.BaseHTTPRequestHandler):
         return self.respond(405, {})
 
 
-server_type = http.server.ThreadingHTTPServer if mode in {"overlap", "discovery_overlap", "concurrent_expiry"} else http.server.HTTPServer
+server_type = http.server.ThreadingHTTPServer if mode in {"overlap", "discovery_overlap", "concurrent_expiry", "discover_review_requests"} else http.server.HTTPServer
 with server_type(("127.0.0.1", 0), Api) as server:
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(root / "cert.pem", root / "key.pem")

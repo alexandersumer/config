@@ -2349,6 +2349,68 @@ fn approval_result(output: Output, code: i32) -> Value {
 }
 
 #[test]
+fn print_review_request_e2e_discovers_authored_open_prs_across_all_pages_and_workspaces() {
+    let api = PullRequestApi::new("discover_review_requests");
+    let fixture = Fixture::new(json!({"bb_valid":true}));
+    let out = api
+        .invocation(&fixture, &["pull-request", "print-review-request"], &[])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out));
+    assert_eq!(
+        String::from_utf8(out.stdout).unwrap(),
+        concat!(
+            "Could someone please review these?\n",
+            "#8: Checks the other workspace\n",
+            "#8: Preserves the current title\n",
+            "#8: Preserves the second repository\n",
+        )
+    );
+    let requests = api.requests();
+    assert!(requests.iter().all(|(method, _)| method == "GET"));
+    assert_eq!(requests.len(), 6);
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|(_, path)| path == "/2.0/user/workspaces")
+            .count(),
+        2
+    );
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|(_, path)| path.starts_with("/2.0/workspaces/team/pullrequests/"))
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn print_review_request_e2e_distinguishes_empty_results_from_failed_discovery() {
+    let fixture = Fixture::new(json!({"bb_valid":true}));
+    let command = &["pull-request", "print-review-request"];
+    let empty = PullRequestApi::new("discover_review_requests_empty");
+    let out = empty.invocation(&fixture, command, &[]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out));
+    assert_eq!(out.stdout, b"No open pull requests found.\n");
+
+    let broken = PullRequestApi::new("discover_review_requests_bad_page");
+    let out = broken.invocation(&fixture, command, &[]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+    assert!(out.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&out.stderr)
+        .contains("team: Bitbucket pagination escaped the requested collection"));
+    assert_eq!(
+        broken
+            .requests()
+            .iter()
+            .filter(|(_, path)| path == "/2.0/user/workspaces")
+            .count(),
+        2
+    );
+}
+
+#[test]
 fn print_review_request_e2e_prints_current_titles_in_input_order_without_writes() {
     let api = PullRequestApi::new("print_review_request");
     let fixture = Fixture::new(json!({"bb_valid":true}));

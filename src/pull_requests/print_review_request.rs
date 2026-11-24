@@ -1,4 +1,4 @@
-use super::{check_curl, repository, Client, API};
+use super::{check_curl, repository, valid_slug, Client, User, API, WORKERS};
 use crate::{presentation, runtime};
 use serde::Deserialize;
 use serde_json::json;
@@ -8,8 +8,8 @@ use std::io::{self, Write as _};
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Options {
-    /// Bitbucket Cloud pull request URLs or WORKSPACE/REPOSITORY#ID references
-    #[arg(required = true, num_args = 1.., value_name = "PULL_REQUEST", value_parser = pull_request)]
+    /// Bitbucket pull request URLs or WORKSPACE/REPOSITORY#ID references (default: all open PRs you authored)
+    #[arg(value_name = "PULL_REQUEST", value_parser = pull_request)]
     pull_requests: Vec<Reference>,
     /// Allow silent OAuth refresh without browser login
     #[arg(long)]
@@ -53,12 +53,53 @@ struct Details {
     title: String,
 }
 
-fn build_message(options: Options, human: bool) -> Result<String, String> {
-    check_curl()?;
-    let client = Client::connect(options.non_interactive, human)?;
+#[derive(Deserialize)]
+struct Membership {
+    workspace: Workspace,
+}
+
+#[derive(Deserialize)]
+struct Workspace {
+    slug: String,
+}
+
+#[derive(Deserialize)]
+struct AuthoredPullRequest {
+    #[serde(flatten)]
+    details: Details,
+    author: User,
+    destination: Destination,
+}
+
+#[derive(Deserialize)]
+struct Destination {
+    repository: Repository,
+}
+
+#[derive(Deserialize)]
+struct Repository {
+    full_name: String,
+}
+
+fn append_title(message: &mut String, reference: &Reference, title: &str) -> Result<(), String> {
+    let Reference { repository, id } = reference;
+    let title = title.split_whitespace().collect::<Vec<_>>().join(" ");
+    if title.is_empty() {
+        return Err(format!(
+            "{repository}#{id}: Bitbucket returned an empty pull request title"
+        ));
+    }
+    write!(message, "\n#{id}: {}", presentation::safe_text(&title)).expect("write to String");
+    Ok(())
+}
+
+fn append_selected(
+    client: &Client,
+    references: &[Reference],
+    message: &mut String,
+) -> Result<(), String> {
     let mut seen = BTreeSet::new();
-    let mut message = String::from("Could someone please review these?");
-    for reference in &options.pull_requests {
+    for reference in references {
         if !seen.insert(reference) {
             continue;
         }
@@ -76,19 +117,108 @@ fn build_message(options: Options, human: bool) -> Result<String, String> {
         if details.state != "OPEN" {
             return Err(format!("{repository}#{id}: pull request is no longer open"));
         }
-        let title = details
-            .title
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
-        if title.is_empty() {
-            return Err(format!(
-                "{repository}#{id}: Bitbucket returned an empty pull request title"
-            ));
-        }
-        write!(message, "\n#{id}: {}", presentation::safe_text(&title)).expect("write to String");
+        append_title(message, reference, &details.title)?;
     }
+    Ok(())
+}
+
+fn append_authored(client: &Client, message: &mut String) -> Result<(), String> {
+    let mut workspaces = BTreeSet::new();
+    client
+        .any_page(
+            &format!("{API}/user/workspaces"),
+            "pagelen=50&fields=next,values.workspace.slug",
+            |membership: Membership| {
+                let slug = membership.workspace.slug;
+                if !valid_slug(&slug) {
+                    return Err("Bitbucket returned an invalid workspace slug".into());
+                }
+                workspaces.insert(slug.to_ascii_lowercase());
+                Ok(false)
+            },
+        )
+        .map_err(|error| format!("Cannot list Bitbucket workspaces: {error}"))?;
+
+    let workspaces: Vec<_> = workspaces.into_iter().collect();
+    if client.human && !workspaces.is_empty() {
+        writeln!(
+            io::stderr().lock(),
+            "Finding your open pull requests across {} Bitbucket workspaces…",
+            workspaces.len()
+        )
+        .map_err(|error| format!("Cannot report workspace discovery: {error}"))?;
+    }
+    let author = client
+        .owner
+        .as_deref()
+        .expect("verified Bitbucket identity");
+    for group in workspaces.chunks(WORKERS) {
+        std::thread::scope(|scope| {
+            let workers: Vec<_> = group
+                .iter()
+                .map(|workspace| scope.spawn(move || workspace_titles(client, workspace, author)))
+                .collect();
+            for worker in workers {
+                message.push_str(
+                    &worker
+                        .join()
+                        .map_err(|_| "Bitbucket discovery worker failed")??,
+                );
+            }
+            Ok::<(), String>(())
+        })?;
+    }
+    Ok(())
+}
+
+fn workspace_titles(client: &Client, workspace: &str, author: &str) -> Result<String, String> {
+    let uuid = author.trim_matches(['{', '}']);
+    let mut message = String::new();
+    let mut seen = BTreeSet::new();
+    client
+        .any_page(
+            &format!("{API}/workspaces/{workspace}/pullrequests/%7B{uuid}%7D"),
+            "state=OPEN&pagelen=50&fields=next,values.id,values.state,values.title,values.author.uuid,values.destination.repository.full_name",
+            |pr: AuthoredPullRequest| {
+                if pr.details.state != "OPEN" || pr.author.uuid != author {
+                    return Ok(false);
+                }
+                let full_name = pr.destination.repository.full_name;
+                let same_workspace = full_name
+                    .split_once('/')
+                    .is_some_and(|(slug, _)| slug.eq_ignore_ascii_case(workspace));
+                if !same_workspace || pr.details.id == 0 {
+                    return Err("Bitbucket returned an invalid pull request reference".into());
+                }
+                let reference = Reference {
+                    repository: repository(&full_name)?,
+                    id: pr.details.id,
+                };
+                if !seen.contains(&reference) {
+                    append_title(&mut message, &reference, &pr.details.title)?;
+                    seen.insert(reference);
+                }
+                Ok(false)
+            },
+        )
+        .map_err(|error| format!("{workspace}: {error}"))?;
     Ok(message)
+}
+
+fn build_message(options: Options, human: bool) -> Result<String, String> {
+    check_curl()?;
+    let client = Client::connect(options.non_interactive, human)?;
+    let mut message = String::new();
+    if options.pull_requests.is_empty() {
+        append_authored(&client, &mut message)?;
+    } else {
+        append_selected(&client, &options.pull_requests, &mut message)?;
+    }
+    Ok(if message.is_empty() {
+        "No open pull requests found.".into()
+    } else {
+        format!("Could someone please review these?{message}")
+    })
 }
 
 pub(crate) fn run(options: Options, json_output: bool) -> u8 {
