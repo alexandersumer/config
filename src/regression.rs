@@ -55,7 +55,7 @@ pub(crate) fn run_regression_tests() -> Result<()> {
     test_delivery_skills_keep_working_until_done()?;
     test_deep_review_skills_require_portable_managed_reviewer_contract()?;
     test_custom_skills_reject_accidental_environment_coupling()?;
-    test_study_skills_resolve_portable_collection_roots()?;
+    test_removed_skills_leave_no_references()?;
     test_install_command()?;
     test_link_safety()?;
     test_command_failures()?;
@@ -190,10 +190,6 @@ fn test_pr_writing_skills_use_branch_description() -> Result<()> {
             ],
         ),
         (
-            "address-comments",
-            &["regenerate its title and description with `branch-description`"],
-        ),
-        (
             "clear-merge-blockers",
             &["regenerate its title and description with `branch-description`"],
         ),
@@ -229,13 +225,6 @@ fn test_mutating_skill_write_boundaries() -> Result<()> {
             ],
         ),
         (
-            "prove-check",
-            &[
-                "Restore the exact pre-proof state",
-                "only when the user also asked to fix or harden the check",
-            ],
-        ),
-        (
             "resolve-conflict",
             &[
                 "marker search is an additional content check",
@@ -254,7 +243,8 @@ fn test_mutating_skill_write_boundaries() -> Result<()> {
             "strengthen-tests",
             &[
                 "explicitly scoped existing behavior",
-                "safe fail-then-pass proof under `prove-check`",
+                "safe fail-then-pass proof",
+                "Restore the exact pre-proof state",
                 "do not claim the test catches the bug",
             ],
         ),
@@ -296,7 +286,6 @@ fn test_delivery_skills_keep_working_until_done() -> Result<()> {
             &["Defer a requirement only when the user descoped it or a concrete blocker prevents it"],
         ),
         ("fix-failures", &["wait for it inside the turn"]),
-        ("address-comments", &["wait for them inside the turn"]),
         ("clear-merge-blockers", &["Ending the turn is not a wait"]),
     ];
 
@@ -406,6 +395,59 @@ fn test_deep_review_skills_require_portable_managed_reviewer_contract() -> Resul
     Ok(())
 }
 
+/// Skills removed from this repository. A leftover mention would send an agent
+/// to a skill that no longer exists.
+const REMOVED_SKILL_NAMES: &[&str] = &[
+    "address-comments",
+    "grill-me",
+    "prove-check",
+    "study-code",
+    "understand-system",
+    "update-agi-essay",
+];
+
+fn test_removed_skills_leave_no_references() -> Result<()> {
+    let config_root = config_root_from_exe()?;
+    let mut documents = vec![config_root.join("README.md"), config_root.join("AGENTS.md")];
+    for directory in ["skills", "docs"] {
+        for entry in walkdir::WalkDir::new(config_root.join(directory)) {
+            let entry = entry.map_err(|err| format!("cannot walk {directory}: {err}"))?;
+            if entry.file_type().is_file()
+                && entry.path().extension().is_some_and(|ext| ext == "md")
+            {
+                documents.push(entry.into_path());
+            }
+        }
+    }
+    for name in REMOVED_SKILL_NAMES {
+        let directory = config_root.join("skills").join(name);
+        if directory.exists() {
+            return Err(format!(
+                "{}: removed skill is back; drop it from REMOVED_SKILL_NAMES if that is intended",
+                directory.display()
+            ));
+        }
+        // A whole name only: `review-solo` must not match inside `design-review-solo`.
+        let mention = Regex::new(&format!(
+            "(^|[^a-z0-9-]){}([^a-z0-9-]|$)",
+            regex::escape(name)
+        ))
+        .map_err(|err| format!("invalid removed-skill pattern: {err}"))?;
+        for document in &documents {
+            let text = fs::read_to_string(document)
+                .map_err(|err| format!("{}: cannot read document: {err}", document.display()))?;
+            if let Some(line) = text.lines().position(|line| mention.is_match(line)) {
+                return Err(format!(
+                    "{}:{}: mentions the removed skill {name:?}; replace the pointer with the guidance it relied on",
+                    document.display(),
+                    line + 1
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn test_custom_skills_reject_accidental_environment_coupling() -> Result<()> {
     let config_root = config_root_from_exe()?;
     let skills_root = config_root.join("skills");
@@ -452,37 +494,6 @@ fn test_custom_skills_reject_accidental_environment_coupling() -> Result<()> {
                 "{}:{}: custom skills must resolve local resources instead of embedding a personal absolute home path; use a placeholder such as /Users/<username> in documentation",
                 skill_path.display(),
                 line_index + 1
-            ));
-        }
-    }
-
-    Ok(())
-}
-
-fn test_study_skills_resolve_portable_collection_roots() -> Result<()> {
-    let config_root = config_root_from_exe()?;
-    let skill_path = config_root
-        .join("skills")
-        .join("study-code")
-        .join("SKILL.md");
-    let text = fs::read_to_string(&skill_path)
-        .map_err(|err| format!("{}: cannot read study skill: {err}", skill_path.display()))?;
-
-    for expected in [
-        "Resolve candidate repositories in this order:",
-        "1. Explicit repository paths or names",
-        "2. The active workspace or current repository",
-        "3. Locally evidenced or configured bounded collection roots",
-        "4. Other bounded source collections explicitly exposed by the current environment.",
-        "Do not assume a named home-directory layout or recursively crawl the home directory.",
-        "If no bounded candidate location can be resolved, ask for",
-        "up to seven high-quality patterns",
-        "One or two is correct when only one or two survive the filter",
-    ] {
-        if !text.contains(expected) {
-            return Err(format!(
-                "{}: study skill must resolve repository collections portably; missing {expected:?}",
-                skill_path.display()
             ));
         }
     }
@@ -898,7 +909,7 @@ pub(crate) fn test_install_command() -> Result<()> {
         home.path().display().to_string(),
     ])?;
 
-    let missing_source_skill = fixture.path().join("skills/address-comments");
+    let missing_source_skill = fixture.path().join("skills/auth-preflight");
     fs::remove_dir_all(&missing_source_skill).map_err(|err| {
         format!(
             "{}: cannot remove required source skill fixture: {err}",
@@ -914,7 +925,7 @@ pub(crate) fn test_install_command() -> Result<()> {
     .expect_err(
         "Codex skill drift check should fail when source registry is missing a required skill",
     );
-    if !invalid_source_check.contains("missing required custom skills: address-comments") {
+    if !invalid_source_check.contains("missing required custom skills: auth-preflight") {
         return Err(format!(
             "Codex skill drift check did not reject invalid source registry: {invalid_source_check}"
         ));
@@ -928,7 +939,7 @@ pub(crate) fn test_install_command() -> Result<()> {
     .expect_err(
         "install should fail before mutating when source registry is missing a required skill",
     );
-    if !invalid_source_install.contains("missing required custom skills: address-comments") {
+    if !invalid_source_install.contains("missing required custom skills: auth-preflight") {
         return Err(format!(
             "install did not reject invalid source registry: {invalid_source_install}"
         ));
@@ -1812,14 +1823,14 @@ fn mutate_missing_skill_file(config_root: &Path) -> Result<&'static str> {
 }
 
 fn mutate_missing_required_custom_skill(config_root: &Path) -> Result<&'static str> {
-    let skill_dir = config_root.join("skills/address-comments");
+    let skill_dir = config_root.join("skills/auth-preflight");
     fs::remove_dir_all(&skill_dir).map_err(|err| {
         format!(
             "{}: cannot remove required fixture skill directory: {err}",
             skill_dir.display()
         )
     })?;
-    Ok("missing required custom skills: address-comments")
+    Ok("missing required custom skills: auth-preflight")
 }
 
 fn mutate_front_matter_name_mismatch(config_root: &Path) -> Result<&'static str> {

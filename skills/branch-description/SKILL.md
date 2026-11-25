@@ -1,6 +1,6 @@
 ---
 name: branch-description
-description: Write or refresh a PR title and description in the canonical tight format and check it. Use whenever a pull request title or description is created, updated, or drafted, including inside git-publish, address-comments, clear-merge-blockers, or an ad hoc PR command, and for Conventional Commit branch summaries.
+description: Write or refresh a PR title and description in the canonical tight format and check it. Use whenever a pull request title or description is created, updated, or drafted, including inside git-publish, clear-merge-blockers, or an ad hoc PR command, and for Conventional Commit branch summaries.
 ---
 
 Write the canonical PR title and description for the current branch. Every workflow that creates or updates a PR title or description uses this checked output. Other skills and repository instructions may add title tags or footers; they do not loosen the format.

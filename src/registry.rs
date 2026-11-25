@@ -32,7 +32,6 @@ const REQUIRED_PROOF_POLICY_PHRASES: &[&str] = &[
     "Final reports must separate reused proof, new commands, and checks not run",
 ];
 const REQUIRED_CUSTOM_SKILL_NAMES: &[&str] = &[
-    "address-comments",
     "auth-preflight",
     "browser-use",
     "feature-flag-clean-up",
@@ -48,10 +47,8 @@ const REQUIRED_CUSTOM_SKILL_NAMES: &[&str] = &[
     "fix-failures",
     "git-publish",
     "git-publish-to-origin",
-    "grill-me",
     "one-clear-sentence",
     "plain-edit",
-    "prove-check",
     "e2e-automated-tests",
     "e2e-live-check",
     "reconcile-plan",
@@ -59,7 +56,6 @@ const REQUIRED_CUSTOM_SKILL_NAMES: &[&str] = &[
     "review-deep",
     "review-solo",
     "strengthen-tests",
-    "study-code",
     "surgical-edit",
     "sync-main",
     "twg",
@@ -76,8 +72,6 @@ const REQUIRED_CUSTOM_SKILL_NAMES: &[&str] = &[
     "twg-setup",
     "twg-space-creation",
     "twg-status-rollups",
-    "understand-system",
-    "update-agi-essay",
     "workctl",
     "write-review-request",
 ];

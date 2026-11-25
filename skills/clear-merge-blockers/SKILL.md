@@ -1,6 +1,6 @@
 ---
 name: clear-merge-blockers
-description: "Clear PR merge blockers by persistently driving one concrete blocker at a time until provider-proven green CI or an exact human/policy/tooling blocker: failed CI, actionable review comments/tasks, conflicts, branch update requirements, or pending gates."
+description: "Clear PR merge blockers by persistently driving one concrete blocker at a time until provider-proven green CI or an exact human/policy/tooling blocker: failed CI, actionable review comments/tasks, conflicts, branch update requirements, or pending gates. Use also when asked to address or fix review comments on a pull request."
 ---
 
 ## Proof policy
@@ -101,7 +101,16 @@ Pick the first blocker in this order unless the user named a narrower focus: con
 
 ### Review comment or task
 
-Apply the `address-comments` classification and fix rules, but publish through this loop. Fetch unresolved comments once per source SHA. Classify from evidence (`correct`, `unclear`, `subjective`, `wrong`, `YAGNI`, `already-addressed`); fix `correct` ones in the smallest coherent batch, ask one concise question for `unclear` ones, and leave the rest unless the user chooses otherwise. Do not resolve threads, reply, or dismiss reviews unless asked.
+Fetch unresolved comments once per source SHA and classify each from evidence:
+
+- `correct`: a real defect, missing requirement, broken contract, repo convention violation, or meaningful test gap.
+- `unclear`: the requested change is ambiguous after reading the code, diff, tests, and requirements.
+- `subjective`: a preference without a repo rule, product requirement, or concrete risk.
+- `wrong`: contradicted by code, tests, requirements, accepted branch intent, or a newer change.
+- `YAGNI`: ceremony, options, abstraction, or polish this change does not need.
+- `already-addressed`: the effective diff or a later commit already satisfies it.
+
+Fix `correct` comments in the smallest coherent batch, grouped by root cause, with correctness, test, build, and API-contract problems first. Add or update a targeted test when a comment identifies a realistic regression that existing coverage misses. Ask one concise question for `unclear` ones. Leave the rest unless the user chooses otherwise: no appeasement changes, unrelated refactors, or style churn. Do not resolve threads, reply, or dismiss reviews unless asked.
 
 ### Missing, skipped, canceled, or pending gate
 
