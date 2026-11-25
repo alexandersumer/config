@@ -106,7 +106,7 @@ class Api(http.server.BaseHTTPRequestHandler):
                 if index == "12":
                     pool_advanced.set()
                 return self.respond(200, {"values": [{
-                    "id": 1, "title": workspace, "state": "OPEN", "author": me,
+                    "id": 1, "title": workspace, "state": "OPEN", "queued": False, "author": me,
                     "destination": {"repository": {"full_name": f"{workspace}/repo"}},
                 }]})
         if mode.startswith("discover_review_requests") and self.command == "GET":
@@ -124,7 +124,7 @@ class Api(http.server.BaseHTTPRequestHandler):
                 workspace, user = match.groups()
                 if urllib.parse.unquote(user) != me["uuid"] or query.get("state") != ["OPEN"]:
                     return self.respond(400, {})
-                fields = "next,values.id,values.state,values.title,values.author.uuid,values.destination.repository.full_name"
+                fields = "next,values.id,values.state,values.title,values.queued,values.author.uuid,values.destination.repository.full_name"
                 if query.get("fields") != [fields]:
                     return self.respond(400, {})
                 if mode == "discover_review_requests_empty":
@@ -134,8 +134,8 @@ class Api(http.server.BaseHTTPRequestHandler):
                         parallel_reads.wait()
                     except threading.BrokenBarrierError:
                         return self.respond(500, {})
-                def row(repo, number, title, author=me, state="OPEN"):
-                    return {"id": number, "title": title, "state": state, "author": author,
+                def row(repo, number, title, author=me, state="OPEN", queued=False):
+                    return {"id": number, "title": title, "state": state, "queued": queued, "author": author,
                             "destination": {"repository": {"full_name": repo}}}
                 if workspace == "other-team":
                     return self.respond(200, {"values": [row("other-team/three", 8, "[HIGH-RISK] [noissue] Checks the other workspace")]})
@@ -144,6 +144,7 @@ class Api(http.server.BaseHTTPRequestHandler):
                     return self.respond(200, {"values": [
                         first, row("team/two", 8, "Preserves the second repository [low-risk] [NOISSUE]"),
                         row("team/one", 9, "Closed", state="MERGED"),
+                        row("team/one", 11, "Waiting for merge", queued=True),
                         row("team/one", 10, "Someone else's", author=other),
                     ]})
                 next_page = origin + path + "?state=OPEN&page=2&fields=" + fields
@@ -209,23 +210,29 @@ class Api(http.server.BaseHTTPRequestHandler):
             return self.respond(200, {"values": values, "next": pagination})
         pr = int(pr)
         if mode == "print_review_request" and suffix is None and self.command == "GET":
-            if query.get("fields") != ["id,state,title"]:
+            if query.get("fields") != ["id,state,title,queued"]:
                 return self.respond(400, {})
             if pr == 404:
                 return self.respond(404, {})
             if pr == 9:
-                return self.respond(200, dict(id=pr, state="MERGED", title="Already merged"))
+                return self.respond(200, dict(id=pr, state="MERGED", title="Already merged", queued=False))
             if pr == 10:
-                return self.respond(200, dict(id=11, state="OPEN", title="Wrong pull request"))
+                return self.respond(200, dict(id=11, state="OPEN", title="Wrong pull request", queued=False))
             if pr == 11:
-                return self.respond(200, dict(id=pr, state="OPEN", title=" \t\n"))
+                return self.respond(200, dict(id=pr, state="OPEN", title=" \t\n", queued=False))
+            if pr == 13:
+                return self.respond(200, dict(id=pr, state="OPEN", title="Waiting for merge", queued=True))
+            if pr == 14:
+                return self.respond(200, dict(id=pr, state="OPEN", title="Queue status missing"))
+            if pr == 15:
+                return self.respond(200, dict(id=pr, state="OPEN", title="Invalid queue status", queued="false"))
             title = {
                 ("two", 8): " [low-risk] [MEDIUM-RISK] Logs the request and trace IDs [NOISSUE]",
                 ("two", 12): "[no-risk]",
                 ("one", 1): "[high-risk] Reuses the owner’s lease\nwithout an extra Redis round trip",
                 ("one", 8): "Handles \u001b control characters",
             }[(repo, pr)]
-            return self.respond(200, dict(id=pr, state="OPEN", title=title))
+            return self.respond(200, dict(id=pr, state="OPEN", title=title, queued=False))
         if suffix == "/activity" and self.command == "GET":
             if mode == "overlap" and pr in {1, 2}:
                 try:

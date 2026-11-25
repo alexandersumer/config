@@ -136,12 +136,15 @@ credential ownership, custom profiles, and failure handling.
 workctl pull-request print-review-request
 ```
 
-With no arguments, the command finds all open Bitbucket Cloud pull requests
-authored by your signed-in account across its workspaces. It checks up to 12
-workspaces concurrently and shares one rate-limit cooldown. If there are none,
-it prints `No open pull requests found.` To select specific pull requests, pass
-their Bitbucket Cloud URLs or quoted `WORKSPACE/REPOSITORY#ID` references in the
-order you want them printed.
+With no arguments, the command finds open Bitbucket Cloud pull requests authored
+by your signed-in account across its workspaces. It checks up to 12 workspaces
+concurrently and shares one rate-limit cooldown. To select specific pull
+requests, pass their Bitbucket Cloud URLs or quoted `WORKSPACE/REPOSITORY#ID`
+references in the order you want them printed.
+
+Both modes skip pull requests already in the merge queue, even when Bitbucket
+still reports them as open. If none are eligible, the command prints
+`No open pull requests available for review.`
 
 The command prints only the copyable message on success. It starts with
 `Could someone please review these?` and includes one `Title URL` line per pull

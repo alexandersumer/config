@@ -2420,7 +2420,15 @@ fn print_review_request_e2e_distinguishes_empty_results_from_failed_discovery() 
     let empty = PullRequestApi::new("discover_review_requests_empty");
     let out = empty.invocation(&fixture, command, &[]).output().unwrap();
     assert_eq!(out.status.code(), Some(0), "{}", text(&out));
-    assert_eq!(out.stdout, b"No open pull requests found.\n");
+    assert_eq!(out.stdout, b"No open pull requests available for review.\n");
+
+    let queued = PullRequestApi::new("print_review_request");
+    let out = queued
+        .invocation(&fixture, command, &["team/one#13"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out));
+    assert_eq!(out.stdout, b"No open pull requests available for review.\n");
 
     let broken = PullRequestApi::new("discover_review_requests_bad_page");
     let out = broken.invocation(&fixture, command, &[]).output().unwrap();
@@ -2448,6 +2456,7 @@ fn print_review_request_e2e_prints_current_titles_in_input_order_without_writes(
             &["pull-request", "print-review-request"],
             &[
                 "https://bitbucket.org/team/two/pull-requests/8/?a=b#comment",
+                "team/one#13",
                 "TEAM/ONE#1",
                 "team/one#8",
                 "team/two#008",
@@ -2473,6 +2482,10 @@ fn print_review_request_e2e_prints_current_titles_in_input_order_without_writes(
             (
                 "GET".into(),
                 "/2.0/repositories/team/two/pullrequests/8".into()
+            ),
+            (
+                "GET".into(),
+                "/2.0/repositories/team/one/pullrequests/13".into()
             ),
             (
                 "GET".into(),
@@ -2516,6 +2529,8 @@ fn print_review_request_e2e_refuses_incomplete_messages_and_invalid_references()
     for (reference, reason) in [
         ("team/one#10", "different pull request ID"),
         ("team/one#11", "empty pull request title"),
+        ("team/one#14", "expected JSON schema"),
+        ("team/one#15", "expected JSON schema"),
         ("team/one#404", "HTTP 404"),
     ] {
         let failed = api
@@ -2541,7 +2556,7 @@ fn print_review_request_e2e_refuses_incomplete_messages_and_invalid_references()
         .invocation(
             &fixture,
             &["pull-request", "print-review-request", "--json"],
-            &["team/two#8", "team/two#12"],
+            &["team/two#8", "team/one#13", "team/two#12"],
         )
         .output()
         .unwrap();

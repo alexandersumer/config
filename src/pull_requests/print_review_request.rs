@@ -10,7 +10,7 @@ const WORKSPACE_WORKERS: usize = 12;
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Options {
-    /// Bitbucket pull request URLs or WORKSPACE/REPOSITORY#ID references (default: all open PRs you authored)
+    /// Bitbucket pull request URLs or WORKSPACE/REPOSITORY#ID references (default: all open, unqueued PRs you authored)
     #[arg(value_name = "PULL_REQUEST", value_parser = pull_request)]
     pull_requests: Vec<Reference>,
     /// Allow silent OAuth refresh without browser login
@@ -53,6 +53,7 @@ struct Details {
     id: u64,
     state: String,
     title: String,
+    queued: bool,
 }
 
 #[derive(Deserialize)]
@@ -144,7 +145,7 @@ fn append_selected(
         let Reference { repository, id } = reference;
         let details: Details = client
             .request(&format!(
-                "{API}/repositories/{repository}/pullrequests/{id}?fields=id,state,title"
+                "{API}/repositories/{repository}/pullrequests/{id}?fields=id,state,title,queued"
             ))
             .map_err(|error| format!("{repository}#{id}: {error}"))?;
         if details.id != *id {
@@ -155,7 +156,9 @@ fn append_selected(
         if details.state != "OPEN" {
             return Err(format!("{repository}#{id}: pull request is no longer open"));
         }
-        append_pull_request(message, reference, &details.title)?;
+        if !details.queued {
+            append_pull_request(message, reference, &details.title)?;
+        }
     }
     Ok(())
 }
@@ -240,9 +243,9 @@ fn workspace_titles(client: &Client, workspace: &str, author: &str) -> Result<St
     client
         .any_page(
             &format!("{API}/workspaces/{workspace}/pullrequests/%7B{uuid}%7D"),
-            "state=OPEN&pagelen=50&fields=next,values.id,values.state,values.title,values.author.uuid,values.destination.repository.full_name",
+            "state=OPEN&pagelen=50&fields=next,values.id,values.state,values.title,values.queued,values.author.uuid,values.destination.repository.full_name",
             |pr: AuthoredPullRequest| {
-                if pr.details.state != "OPEN" || pr.author.uuid != author {
+                if pr.details.state != "OPEN" || pr.details.queued || pr.author.uuid != author {
                     return Ok(false);
                 }
                 let full_name = pr.destination.repository.full_name;
@@ -277,7 +280,7 @@ fn build_message(options: Options) -> Result<String, String> {
         append_selected(&client, &options.pull_requests, &mut message)?;
     }
     Ok(if message.is_empty() {
-        "No open pull requests found.".into()
+        "No open pull requests available for review.".into()
     } else {
         format!("Could someone please review these?{message}")
     })
