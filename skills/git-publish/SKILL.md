@@ -36,6 +36,7 @@ Choose tools by the provider of the sole push URL: Bitbucket flows only for Bitb
 
 Never use Bitbucket MCP to create, list, inspect, or update pull requests during publish. Only nominate individual reviewers when the user requests them. Preserve Bitbucket's repository-configured default reviewers and review groups during creation and subsequent edits. Leave reviewer fields unset on metadata-only updates, and never clear provider-assigned reviewers to satisfy a publishing convention.
 Do not create a new PR with a missing body or one that fails the `branch-description` check.
+For Bitbucket, apply the creation and verification rules below before choosing any managed, CLI, or browser path.
 
 ### Provider-compatible managed PR path, when available
 
@@ -47,9 +48,15 @@ Use a harness-provided PR facility for the detected provider only when it can in
 4. If the tool reports an existing PR for the branch, report it and stop. Do not create a duplicate.
 5. If it reports stale or wrong-repo metadata, regenerate metadata for the shell-reported root and retry once; then stop with the exact blocker.
 
+### Bitbucket creation and verification
+
+Before creating a PR, establish whether the destination has a default native review group. Use Bitbucket's normal PR creation form in the signed-in Chrome Work profile when a group applies or the group settings are unknown, unless the chosen client explicitly supports populating native Bitbucket review groups on creation. An individual default-reviewer lookup or a CLI flag for default reviewers does not establish native group support. If the Chrome Work profile is required and inaccessible, report the access blocker with the pushed branch. Do not create through a client that could omit the group.
+
+Check for an existing PR for the same source and destination before opening the creation form. In the form, verify repository, source and destination, use the frozen title and description, keep the prefilled review groups and reviewers selected, and submit ready for review. Check the saved PR for the expected group and assigned reviewers. A nonempty reviewer list alone does not verify a native group. If creation returns an unexpected result, inspect the existing PR before attempting repair.
+
 ### Bitbucket CLI fallback path
 
-Verify the resulting reviewer list for each newly created Bitbucket PR. When the repository is known to assign people by default and the list is empty, check the PR's review-group state in Bitbucket before calling the handoff complete.
+Use the CLI creation commands below only when the chosen client can preserve the automatic assignments that apply to the destination. Verify the resulting reviewer list and, when applicable, the native review group on each newly created PR.
 
 Pass the verified push workspace and repository explicitly on every call. Prefer `twg`; if it is unavailable or its credentials fail, use an authenticated `bb` client after inspecting its installed help. Do not switch providers or rely on remote auto-detection.
 
@@ -74,7 +81,7 @@ If creation fails without returning a PR, query the same source/destination once
 With the separate BB CLI:
 
 - Query `bb pr list --workspace <workspace> --repository <repo> --state open --limit 50 --json` and match source/destination in the records; it has no branch filter. If the limit is reached with no match, absence is unproven; use another supported lookup or report the coverage blocker.
-- When absent, pass explicit `--workspace`, `--repository`, `--head`, `--base`, `--title`, `--body`, and `--ready` to `bb pr create`. Pass the body as one safely quoted argument. Leave defaults enabled. If the user requested reviewers, use `--reviewer` with `--add-default-reviewers` when supported. If a client suppresses configured assignments, use Bitbucket's creation UI with its prefilled selections.
+- When absent, pass explicit `--workspace`, `--repository`, `--head`, `--base`, `--title`, `--body`, and `--ready` to `bb pr create`. Pass the body as one safely quoted argument. Leave defaults enabled. If the user requested reviewers, use `--reviewer` with `--add-default-reviewers` when supported. Use the Bitbucket creation path above if the applicable defaults cannot be preserved by this client.
 - Verify with `bb pr view <id> --workspace <workspace> --repository <repo> --json`. On an uncertain create result, repeat the bounded lookup once; never retry creation without proof of absence.
 
 ### GitHub CLI fallback path
