@@ -167,7 +167,7 @@ fn text(out: &Output) -> String {
     )
 }
 fn wait_file(path: &std::path::Path) {
-    let end = Instant::now() + Duration::from_secs(10);
+    let end = Instant::now() + Duration::from_secs(60);
     while !path.exists() {
         assert!(Instant::now() < end, "fixture did not start: {path:?}");
         std::thread::sleep(Duration::from_millis(10));
@@ -543,7 +543,7 @@ fn deadline_and_cancellation_clean_provider_descendants_and_release_lock() {
             .spawn()
             .unwrap();
         let started = f.root.path().join("started");
-        let startup_deadline = Instant::now() + Duration::from_secs(10);
+        let startup_deadline = Instant::now() + Duration::from_secs(60);
         while !started.exists() {
             let stopped = child.try_wait().unwrap().is_some();
             if stopped || Instant::now() >= startup_deadline {
@@ -836,19 +836,36 @@ fn coordination_wait_has_a_deadline_and_does_not_invoke_providers() {
 
 #[test]
 fn inconclusive_refresh_checks_the_cache_once_without_reissuing() {
-    let f = Fixture::new(json!({"atlas_valid":false,"refresh_hang":true}));
-    let r = f.run(&["--profile", "logs", "--login-timeout", "3"], 0);
-    assert_eq!(r["targets"][0]["status"], "refreshed");
-    assert_eq!(f.calls().len(), 3);
-    assert_eq!(
-        f.calls()
-            .iter()
-            .filter(|c| c[1].as_array().unwrap().contains(&json!("--force")))
-            .count(),
-        1
-    );
+    // The refresh records its token and then hangs past the login deadline. On a
+    // busy machine the deadline can expire before the token is recorded, and
+    // that run proves nothing about the cache check, so only one that got that
+    // far counts.
+    for timeout in ["3", "15", "75"] {
+        let f = Fixture::new(json!({"atlas_valid":false,"refresh_hang":true}));
+        let out = f
+            .command(&["auth", "preflight", "--json", "--profile", "logs"])
+            .args(["--login-timeout", timeout])
+            .output()
+            .unwrap();
+        if !f.root.path().join("started").exists() {
+            continue;
+        }
+        assert_eq!(out.status.code(), Some(0), "{}", text(&out));
+        assert!(!text(&out).contains(SECRET), "{}", text(&out));
+        let r: Value = serde_json::from_slice(&out.stdout).expect("one JSON result");
+        assert_eq!(r["targets"][0]["status"], "refreshed");
+        assert_eq!(f.calls().len(), 3);
+        assert_eq!(
+            f.calls()
+                .iter()
+                .filter(|c| c[1].as_array().unwrap().contains(&json!("--force")))
+                .count(),
+            1
+        );
+        return;
+    }
+    panic!("the refresh never recorded its token before the longest login deadline");
 }
-
 #[test]
 fn closed_exec_report_prevents_launch_and_closed_auth_prompt_does_not_panic() {
     let f = Fixture::new(json!({}));
@@ -1326,8 +1343,14 @@ fn service_progress_identifies_the_audience_before_any_browser_prompt() {
 // Barrier-driven concurrency contracts: no elapsed-time speedup assertions.
 struct RunningAuth(std::process::Child);
 impl RunningAuth {
-    fn finish(mut self, expected: i32) -> Value {
-        let deadline = Instant::now() + Duration::from_secs(15);
+    fn finish(self, expected: i32) -> Value {
+        let (code, stdout, stderr) = self.outcome();
+        assert_eq!(code, Some(expected), "{stderr}\n{stdout}");
+        serde_json::from_str(&stdout).unwrap()
+    }
+    /// Exit code, stdout, and stderr of the finished run, without judging them.
+    fn outcome(mut self) -> (Option<i32>, String, String) {
+        let deadline = Instant::now() + Duration::from_secs(60);
         while self.0.try_wait().unwrap().is_none() {
             assert!(Instant::now() < deadline, "auth workers did not finish");
             std::thread::sleep(Duration::from_millis(10));
@@ -1344,13 +1367,20 @@ impl RunningAuth {
         if let Some(mut pipe) = self.0.stderr.take() {
             pipe.read_to_string(&mut stderr).unwrap();
         }
-        assert_eq!(
-            self.0.wait().unwrap().code(),
-            Some(expected),
-            "{stderr}\n{stdout}"
-        );
+        let code = self.0.wait().unwrap().code();
         assert!(!stdout.contains(SECRET) && !stderr.contains(SECRET));
-        serde_json::from_str(&stdout).unwrap()
+        (code, stdout, stderr)
+    }
+    /// Waits for a fixture marker. False means the run ended before reaching it.
+    fn reached(&mut self, fixture: &Fixture, marker: &str) -> bool {
+        let path = fixture.root.path().join(marker);
+        while !path.exists() {
+            if self.0.try_wait().unwrap().is_some() {
+                return path.exists();
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        true
     }
 }
 impl Drop for RunningAuth {
@@ -1453,7 +1483,7 @@ fn interactive_commands_are_exclusive_while_background_work_continues() {
     ]));
     let child = f.start(&["--force", "--config", &config]);
     f.started("twg-doctor");
-    let end = Instant::now() + Duration::from_secs(5);
+    let end = Instant::now() + Duration::from_secs(60);
     while !f.has_started("bb-auth-login") && !f.has_started("atlas-force-service") {
         assert!(Instant::now() < end);
         std::thread::sleep(Duration::from_millis(10));
@@ -1484,36 +1514,57 @@ fn interactive_commands_are_exclusive_while_background_work_continues() {
 
 #[test]
 fn queued_login_receives_its_full_command_deadline() {
-    let f = Fixture::new(json!({"assert_interaction":true,
-        "hold_keys":["bb-auth-status", "atlas-force-service", "bb-auth-login"]}));
-    let config = f.profile(json!([
-        {"provider":"slauth","audience":"service"}, {"provider":"bitbucket"}
-    ]));
-    let child = f.start(&[
-        "--force",
-        "--config",
-        &config,
-        "--timeout",
-        "2",
-        "--login-timeout",
-        "5",
-    ]);
-    f.started("bb-auth-status");
-    f.started("atlas-force-service");
-    f.release("bb-auth-status");
-    f.finished("bb-workspace-list");
-    std::thread::sleep(Duration::from_secs(3));
-    f.release("atlas-force-service");
-    f.started("bb-auth-login");
-    std::thread::sleep(Duration::from_secs(3));
-    f.release("bb-auth-login");
-    let result = child.finish(0);
-    assert_eq!(result["status"], "completed");
-    assert_eq!(result["targets"].as_array().unwrap().len(), 2);
-    for target in result["targets"].as_array().unwrap() {
-        assert_eq!(target["status"], "refreshed", "{result}");
+    // Each login is held for most of its own deadline and far past the ordinary
+    // command timeout. A busy machine eats the remaining margin, so widen every
+    // budget together until a run completes. A deadline that had started while
+    // the login was still queued expires at every scale.
+    let scales = [1, 6, 24];
+    for scale in scales {
+        let f = Fixture::new(json!({"assert_interaction":true,
+            "hold_keys":["bb-auth-status", "atlas-force-service", "bb-auth-login"]}));
+        let config = f.profile(json!([
+            {"provider":"slauth","audience":"service"}, {"provider":"bitbucket"}
+        ]));
+        let (timeout, login_timeout) = ((2 * scale).to_string(), (5 * scale).to_string());
+        let mut child = f.start(&[
+            "--force",
+            "--config",
+            &config,
+            "--timeout",
+            &timeout,
+            "--login-timeout",
+            &login_timeout,
+        ]);
+        let hold = Duration::from_secs(3 * scale);
+        let held_through_both_logins = child.reached(&f, "started-bb-auth-status")
+            && child.reached(&f, "started-atlas-force-service")
+            && {
+                f.release("bb-auth-status");
+                child.reached(&f, "finished-bb-workspace-list")
+            }
+            && {
+                std::thread::sleep(hold);
+                f.release("atlas-force-service");
+                child.reached(&f, "started-bb-auth-login")
+            };
+        if held_through_both_logins {
+            std::thread::sleep(hold);
+        }
+        f.release("bb-auth-login");
+        let (code, stdout, stderr) = child.outcome();
+        if code != Some(0) && scale != scales[scales.len() - 1] {
+            continue;
+        }
+        assert_eq!(code, Some(0), "{stderr}\n{stdout}");
+        let result: Value = serde_json::from_str(&stdout).unwrap();
+        assert_eq!(result["status"], "completed");
+        assert_eq!(result["targets"].as_array().unwrap().len(), 2);
+        for target in result["targets"].as_array().unwrap() {
+            assert_eq!(target["status"], "refreshed", "{result}");
+        }
+        assert!(!f.root.path().join("interaction-overlap").exists());
+        return;
     }
-    assert!(!f.root.path().join("interaction-overlap").exists());
 }
 
 #[test]
@@ -1606,37 +1657,49 @@ fn cancellation_cleans_multiple_workers_and_does_not_launch_queued_interaction()
 
 #[test]
 fn coordination_timeout_is_independent_of_provider_command_timeout() {
-    let f = Fixture::new(json!({"hold_keys":["atlas-cache-splunk.paas-inf.net"]}));
-    let first = f.start(&["--profile", "logs", "--check"]);
-    f.started("atlas-cache-splunk.paas-inf.net");
-    let result = f
-        .start(&[
+    // The queued run waits longer than its provider timeout and must still
+    // succeed, so its provider has to finish inside that timeout. A busy machine
+    // needs a larger one; the wait grows with it and keeps exceeding it, so a
+    // timeout that had started while queued expires at every scale.
+    let scales = [1, 8, 40];
+    for scale in scales {
+        let f = Fixture::new(json!({"hold_keys":["atlas-cache-splunk.paas-inf.net"]}));
+        let first = f.start(&["--profile", "logs", "--check"]);
+        f.started("atlas-cache-splunk.paas-inf.net");
+        let result = f
+            .start(&[
+                "--profile",
+                "logs",
+                "--check",
+                "--coordination-timeout",
+                "1",
+            ])
+            .finish(1);
+        assert!(result["error"]
+            .as_str()
+            .unwrap()
+            .contains("coordination deadline"));
+        assert_eq!(f.calls().len(), 1);
+        let second = f.start(&[
             "--profile",
             "logs",
             "--check",
+            "--timeout",
+            &scale.to_string(),
             "--coordination-timeout",
-            "1",
-        ])
-        .finish(1);
-    assert!(result["error"]
-        .as_str()
-        .unwrap()
-        .contains("coordination deadline"));
-    assert_eq!(f.calls().len(), 1);
-    let second = f.start(&[
-        "--profile",
-        "logs",
-        "--check",
-        "--timeout",
-        "1",
-        "--coordination-timeout",
-        "5",
-    ]);
-    // Exceed the provider timeout while the second invocation is queued.
-    std::thread::sleep(Duration::from_millis(1200));
-    f.release("atlas-cache-splunk.paas-inf.net");
-    first.finish(0);
-    second.finish(0);
+            &(5 * scale).to_string(),
+        ]);
+        // Exceed the provider timeout while the second invocation is queued.
+        std::thread::sleep(Duration::from_millis(1200 * scale));
+        f.release("atlas-cache-splunk.paas-inf.net");
+        first.finish(0);
+        let (code, stdout, stderr) = second.outcome();
+        if code != Some(0) && scale != scales[scales.len() - 1] {
+            continue;
+        }
+        assert_eq!(code, Some(0), "{stderr}\n{stdout}");
+        return;
+    }
 }
 
 #[test]

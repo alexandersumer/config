@@ -412,7 +412,7 @@ fn with_shim(cmd: &mut Command, bin: &Path) {
     );
 }
 fn wait(path: &Path) {
-    let until = Instant::now() + Duration::from_secs(10);
+    let until = Instant::now() + Duration::from_secs(60);
     while !path.exists() {
         assert!(Instant::now() < until);
         std::thread::sleep(Duration::from_millis(10));

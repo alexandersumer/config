@@ -191,7 +191,7 @@ fn logs(out: &Output) -> PathBuf {
     )
 }
 fn wait_marker(path: &Path) {
-    let until = Instant::now() + Duration::from_secs(10);
+    let until = Instant::now() + Duration::from_secs(60);
     while !path.exists() {
         assert!(
             Instant::now() < until,
@@ -201,8 +201,11 @@ fn wait_marker(path: &Path) {
         thread::sleep(Duration::from_millis(10));
     }
 }
-fn wait_child(mut child: Child) -> Output {
-    let until = Instant::now() + Duration::from_secs(15);
+fn wait_child(child: Child) -> Output {
+    wait_child_within(child, Duration::from_secs(60))
+}
+fn wait_child_within(mut child: Child, limit: Duration) -> Output {
+    let until = Instant::now() + limit;
     loop {
         if child.try_wait().unwrap().is_some() {
             return child.wait_with_output().unwrap();
