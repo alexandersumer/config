@@ -138,11 +138,11 @@ class Api(http.server.BaseHTTPRequestHandler):
                     return {"id": number, "title": title, "state": state, "author": author,
                             "destination": {"repository": {"full_name": repo}}}
                 if workspace == "other-team":
-                    return self.respond(200, {"values": [row("other-team/three", 8, "[HIGH-RISK] Checks the other workspace")]})
+                    return self.respond(200, {"values": [row("other-team/three", 8, "[HIGH-RISK] [noissue] Checks the other workspace")]})
                 first = row("team/one", 8, "[RFC] Preserves the current title")
                 if query.get("page") == ["2"]:
                     return self.respond(200, {"values": [
-                        first, row("team/two", 8, "Preserves the second repository [low-risk]"),
+                        first, row("team/two", 8, "Preserves the second repository [low-risk] [NOISSUE]"),
                         row("team/one", 9, "Closed", state="MERGED"),
                         row("team/one", 10, "Someone else's", author=other),
                     ]})
@@ -220,7 +220,7 @@ class Api(http.server.BaseHTTPRequestHandler):
             if pr == 11:
                 return self.respond(200, dict(id=pr, state="OPEN", title=" \t\n"))
             title = {
-                ("two", 8): " [low-risk] [MEDIUM-RISK] Logs the request and trace IDs",
+                ("two", 8): " [low-risk] [MEDIUM-RISK] Logs the request and trace IDs [NOISSUE]",
                 ("two", 12): "[no-risk]",
                 ("one", 1): "[high-risk] Reuses the owner’s lease\nwithout an extra Redis round trip",
                 ("one", 8): "Handles \u001b control characters",

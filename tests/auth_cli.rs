@@ -2357,6 +2357,7 @@ fn print_review_request_e2e_discovers_authored_open_prs_across_all_pages_and_wor
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(0), "{}", text(&out));
+    assert!(out.stderr.is_empty(), "{}", text(&out));
     assert_eq!(
         String::from_utf8(out.stdout).unwrap(),
         concat!(
@@ -2455,6 +2456,7 @@ fn print_review_request_e2e_prints_current_titles_in_input_order_without_writes(
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(0), "{}", text(&out));
+    assert!(out.stderr.is_empty(), "{}", text(&out));
     assert_eq!(
         String::from_utf8(out.stdout).unwrap(),
         concat!(

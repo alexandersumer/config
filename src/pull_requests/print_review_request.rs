@@ -97,20 +97,28 @@ fn append_pull_request(
     }
 
     while let Some((badge, rest)) = title.strip_prefix('[').and_then(|s| s.split_once(']')) {
-        let risk_badges = [
+        let metadata_badges = [
             "no-risk",
             "low-risk",
             "medium-risk",
             "high-risk",
             "critical-risk",
+            "noissue",
         ];
-        if !risk_badges
+        if !metadata_badges
             .iter()
-            .any(|risk| badge.trim().eq_ignore_ascii_case(risk))
+            .any(|metadata| badge.trim().eq_ignore_ascii_case(metadata))
         {
             break;
         }
         title = rest.trim_start();
+    }
+
+    while let Some((rest, badge)) = title.strip_suffix(']').and_then(|s| s.rsplit_once('[')) {
+        if !badge.trim().eq_ignore_ascii_case("noissue") {
+            break;
+        }
+        title = rest.trim_end();
     }
 
     message.push('\n');
@@ -170,14 +178,6 @@ fn append_authored(client: &Client, message: &mut String) -> Result<(), String> 
         .map_err(|error| format!("Cannot list Bitbucket workspaces: {error}"))?;
 
     let workspaces: Vec<_> = workspaces.into_iter().collect();
-    if client.human && !workspaces.is_empty() {
-        writeln!(
-            io::stderr().lock(),
-            "Finding your open pull requests across {} Bitbucket workspaces…",
-            workspaces.len()
-        )
-        .map_err(|error| format!("Cannot report workspace discovery: {error}"))?;
-    }
     let author = client
         .owner
         .as_deref()
@@ -267,9 +267,9 @@ fn workspace_titles(client: &Client, workspace: &str, author: &str) -> Result<St
     Ok(message)
 }
 
-fn build_message(options: Options, human: bool) -> Result<String, String> {
+fn build_message(options: Options) -> Result<String, String> {
     check_curl()?;
-    let client = Client::connect(options.non_interactive, human)?;
+    let client = Client::connect(options.non_interactive, false)?;
     let mut message = String::new();
     if options.pull_requests.is_empty() {
         append_authored(&client, &mut message)?;
@@ -287,7 +287,7 @@ pub(crate) fn run(options: Options, json_output: bool) -> u8 {
     let outcome = (|| {
         let _signals =
             runtime::Signals::install().map_err(|_| "Cannot install cancellation handlers")?;
-        let outcome = build_message(options, !json_output);
+        let outcome = build_message(options);
         if runtime::interrupted() {
             Err("Interrupted while preparing the review request".into())
         } else {

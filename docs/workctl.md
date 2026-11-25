@@ -143,10 +143,11 @@ it prints `No open pull requests found.` To select specific pull requests, pass
 their Bitbucket Cloud URLs or quoted `WORKSPACE/REPOSITORY#ID` references in the
 order you want them printed.
 
-The command prints `Could someone please review these?` followed by one
-`Title URL` line per pull request. The command removes leading risk badges such
-as `[low-risk]`, `[medium-risk]`, and `[high-risk]` and collapses title whitespace.
-If a title contains only risk badges, the line contains just the URL. Full
+The command prints only the copyable message on success. It starts with
+`Could someone please review these?` and includes one `Title URL` line per pull
+request. It removes leading risk badges and leading or trailing `[NOISSUE]`
+markers, then collapses title whitespace. If a title contains only these
+markers, the line contains just the URL. Full
 Bitbucket URLs stay clickable when pasted into Slack. The command deduplicates
 repeated references, makes no Bitbucket writes, and uses no LLM.
 
@@ -154,7 +155,8 @@ The command uses native `bb` OAuth and curl 7.84 or later. Use
 `--non-interactive` to allow silent refresh without browser login. If discovery
 fails, or a specified pull request is closed, inaccessible, or missing its
 title, the command reports the failure without printing a partial message.
-With `--json`, the completed message is in `message`.
+Any sign-in prompts go to stderr. With `--json`, the completed message is in
+`message`.
 
 ### Approve pull requests
 
