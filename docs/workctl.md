@@ -106,7 +106,7 @@ sessions, and registry credentials require their own checks; see the
 
 | Mode | Behavior |
 | --- | --- |
-| Default | Request one renewal per renewable target, check manual tokens, then verify access; failed renewal remains a failure even if an older credential works |
+| Default | Reuse credentials that pass their checks; renew missing, rejected, or short-lived ones, check manual tokens, then verify access; a failed renewal remains a failure |
 | `--force` | Explicitly renew supported credentials even when current access is valid |
 | `--reuse-valid` | Compatibility flag for default reuse |
 | `--check` | Check access without explicit refresh or login calls; providers may still renew transparently |

@@ -143,10 +143,12 @@ beneath it. A primary checkout selects all its registered linked worktrees, incl
 paths outside the checkout directory; those full paths are shown. An explicit linked
 worktree selects only itself. Primary checkouts always remain protected.
 
-Cleanup protects tracked changes, untracked files, masked tracked paths, ongoing Git
-operations, locked worktrees, and unverifiable ownership. These are signs of work
-that must stay in place. These worktrees are reported as `protected`; leaving active
-work in place is a successful cleanup outcome, not an error. Ignored files do not block an otherwise idle worktree:
+Cleanup protects tracked changes, untracked files, and masked tracked paths. These
+are signs of work that must stay in place. These worktrees are reported as
+`protected`; leaving active work in place is a successful cleanup outcome, not an
+error. Ongoing Git operations, locked worktrees, and unverifiable ownership also
+stay in place, but are reported as `blocked` and exit 1 because each needs a
+decision. Ignored files do not block an otherwise idle worktree:
 `--apply` removes them with the worktree. Preview reports their counts and full
 worktree paths. Ignored files can include local configuration and secrets; inspect
 the preview before applying a container-wide cleanup.

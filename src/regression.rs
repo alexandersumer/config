@@ -63,6 +63,8 @@ pub(crate) fn run_regression_tests() -> Result<()> {
     test_get_default_branch_refreshes_stale_remote_head()?;
     test_reset_executable()?;
     test_project_alias_zsh_wiring()?;
+    test_history_pruner_removes_only_the_failed_command()?;
+    test_git_helpers_use_the_remote_base_and_run_a_rejecting_hook_once()?;
     test_pure_prompt_syncs_git_branch_after_cd()?;
     Ok(())
 }
@@ -1399,6 +1401,122 @@ expect_alias convo-ai "cd $HOME/atlassian/convo-ai && sdk use java 21.0.8-amzn"
         ));
     }
     Ok(())
+}
+
+fn run_zsh_regression(name: &str, home: &Path, script: &str) -> Result<()> {
+    let output = Command::new("zsh")
+        .env("HOME", home)
+        .args(["-c", script])
+        .output()
+        .map_err(|err| format!("cannot run zsh {name} test: {err}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "zsh {name} test failed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        ));
+    }
+    Ok(())
+}
+
+fn test_history_pruner_removes_only_the_failed_command() -> Result<()> {
+    let config_root = std::env::current_dir()
+        .map_err(|err| format!("cannot determine config root for zsh history test: {err}"))?;
+    let home = tempfile::Builder::new()
+        .prefix("tmp_config_zsh_history_")
+        .tempdir()
+        .map_err(|err| format!("cannot create temp HOME for zsh history test: {err}"))?;
+    for dir in [".oh-my-zsh", ".zsh"] {
+        fs::create_dir_all(home.path().join(dir))
+            .map_err(|err| format!("cannot create zsh history fixture dir {dir}: {err}"))?;
+    }
+    for shim in [".oh-my-zsh/oh-my-zsh.sh", ".zsh/git-functions.zsh"] {
+        fs::write(home.path().join(shim), "")
+            .map_err(|err| format!("cannot write zsh history fixture {shim}: {err}"))?;
+    }
+
+    // One prompt cycle: the command text reaches preexec only when a command
+    // ran, and precmd then sees its exit status.
+    let script = format!(
+        r#"source "{}" 2>/dev/null
+fail() {{ print -u2 -- "$1"; print -u2 -- "history:"; cat "$HISTFILE" >&2; exit 1 }}
+HISTFILE="$HOME/history"
+enter() {{
+  [[ -n $1 ]] && __hist_note_command "$1"
+  (exit $2); __hist_capture_exit; __hist_remove_notfound
+}}
+print -r -- ": 1700000000:0;git status" > "$HISTFILE"
+print -r -- ": 1700000001:0;make test" >> "$HISTFILE"
+print -r -- ": 1700000002:0;nosuchcmd" >> "$HISTFILE"
+kept=": 1700000000:0;git status"$'\n'": 1700000001:0;make test"
+enter nosuchcmd 127; enter "" 127; enter "" 127
+[[ "$(<"$HISTFILE")" == "$kept" ]] || fail "an empty Enter after a typo removed unrelated history"
+enter nosuchcmd 127
+[[ "$(<"$HISTFILE")" == "$kept" ]] || fail "a deduplicated repeat removed unrelated history"
+print -r -- "ls" > "$HISTFILE"; print -r -- "nosuchcmd --flag" >> "$HISTFILE"
+enter "nosuchcmd --flag" 127
+[[ "$(<"$HISTFILE")" == "ls" ]] || fail "the command that was not found stayed in history"
+print -r -- "false" >> "$HISTFILE"; enter false 1
+[[ "$(tail -n 1 "$HISTFILE")" == "false" ]] || fail "a command that ran and failed was removed"
+"#,
+        config_root.join("zsh/zshrc").display()
+    );
+    run_zsh_regression("history", home.path(), &script)
+}
+
+fn test_git_helpers_use_the_remote_base_and_run_a_rejecting_hook_once() -> Result<()> {
+    let config_root = std::env::current_dir()
+        .map_err(|err| format!("cannot determine config root for zsh git helper test: {err}"))?;
+    let home = tempfile::Builder::new()
+        .prefix("tmp_config_zsh_git_")
+        .tempdir()
+        .map_err(|err| format!("cannot create temp HOME for zsh git helper test: {err}"))?;
+
+    let script = format!(
+        r#"fail() {{ print -u2 -- "$1"; exit 1 }}
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+export GIT_AUTHOR_NAME=Test GIT_AUTHOR_EMAIL=test@example.com
+export GIT_COMMITTER_NAME=Test GIT_COMMITTER_EMAIL=test@example.com
+unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE
+source "{}"
+root="$HOME"
+
+# The local default branch is stale: origin/main moved after the clone.
+git init -q --bare -b main "$root/remote.git"
+git init -q -b main "$root/seed" && cd "$root/seed" || fail "cannot create seed"
+echo one > base.txt && git add . && git commit -qm one
+git remote add origin "$root/remote.git" && git push -q origin main
+git clone -q "$root/remote.git" "$root/work"
+echo upstream > upstream.txt && git add . && git commit -qm upstream && git push -q origin main
+cd "$root/work" && git fetch -q origin && git switch -q -c feature origin/main
+echo mine > mine.txt && git add . && git commit -qm first
+echo more >> mine.txt && git commit -qam second
+soft_reset_origin >/dev/null 2>&1 || fail "soft_reset_origin failed"
+[[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]] \
+  || fail "soft reset used the stale local default branch as the base"
+[[ "$(git diff --cached --name-only)" == "mine.txt" ]] \
+  || fail "soft reset staged upstream changes as local work"
+
+# A hook that rejects the commit runs once; one that reformats files earns one retry.
+git commit -qm squashed
+export HOOK_LOG="$root/hook.log"
+print -r -- '#!/bin/sh
+echo run >> "$HOOK_LOG"; exit 1' > .git/hooks/pre-commit
+chmod +x .git/hooks/pre-commit
+echo change > rejected.txt
+gsc "reject me" >/dev/null 2>&1
+[[ "$(wc -l < "$HOOK_LOG" | tr -d ' ')" == 1 ]] || fail "a rejected commit ran its hook again"
+print -r -- '#!/bin/sh
+echo run >> "$HOOK_LOG"
+if [ ! -e formatted ]; then echo formatted > formatted; echo fixed >> rejected.txt; exit 1; fi' > .git/hooks/pre-commit
+: > "$HOOK_LOG"
+gsc "format me" >/dev/null 2>&1 || fail "gsc did not retry after its hook changed files"
+[[ "$(wc -l < "$HOOK_LOG" | tr -d ' ')" == 2 ]] || fail "expected exactly one retry"
+[[ -z "$(git status --porcelain)" ]] || fail "the retry left changes uncommitted"
+"#,
+        config_root.join("zsh/git-functions.zsh").display()
+    );
+    run_zsh_regression("git helper", home.path(), &script)
 }
 
 fn test_pure_prompt_syncs_git_branch_after_cd() -> Result<()> {

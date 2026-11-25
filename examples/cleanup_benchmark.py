@@ -81,7 +81,9 @@ def main():
                 if jobs is not None:
                     command += ["--jobs", str(jobs)]
                 started = time.monotonic()
-                run = subprocess.run(command, env=env, capture_output=True, text=True, timeout=300)
+                # Keep benchmark runs out of the user's permanent operation history.
+                run = subprocess.run(command, env=dict(env, WORKCTL_STATE_DIR=str(root / "state")),
+                                     capture_output=True, text=True, timeout=300)
                 elapsed = time.monotonic() - started
                 assert run.returncode == 0, run.stdout + run.stderr
                 result = json.loads(run.stdout)

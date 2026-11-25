@@ -273,13 +273,25 @@ fi
 # Remove "command not found" from history
 ########################################
 typeset -gi __hist_last_exit=0
+typeset -g __hist_ran_command=""
+__hist_note_command() { __hist_ran_command=$1 }
 __hist_capture_exit() { __hist_last_exit=$? }
 __hist_remove_notfound() {
-    if (( __hist_last_exit == 127 )); then
-        [[ -f "$HISTFILE" ]] && LC_ALL=C sed -i '' '$d' "$HISTFILE" 2>/dev/null
+    local ran=$__hist_ran_command
+    __hist_ran_command=""
+    # Remove only the command that just ran and is the file's last entry. An empty
+    # Enter keeps the old status, and a deduplicated repeat writes nothing, so in
+    # both cases the last entry is unrelated history.
+    if (( __hist_last_exit == 127 )) && [[ -n $ran && $ran != *$'\n'* && -f $HISTFILE ]]; then
+        local last
+        last=$(tail -n 1 -- "$HISTFILE" 2>/dev/null)
+        if [[ $last == "$ran" || $last == *";$ran" ]]; then
+            LC_ALL=C sed -i '' '$d' "$HISTFILE" 2>/dev/null
+        fi
     fi
     __hist_last_exit=0
 }
+preexec_functions+=(__hist_note_command)
 precmd_functions+=(__hist_capture_exit __hist_remove_notfound)
 
 ########################################

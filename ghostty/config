@@ -3,7 +3,7 @@ font-family = JetBrains Mono
 font-size = 14
 
 # Theme
-theme = catppuccin-mocha
+theme = Catppuccin Mocha
 
 # Window
 window-padding-x = 16

@@ -143,7 +143,9 @@ fn main() {
                 ])
                 .arg(&workspace)
                 .env("PATH", &path)
-                .env("TMPDIR", root.path());
+                .env("TMPDIR", root.path())
+                // Keep benchmark runs out of the user's permanent operation history.
+                .env("WORKCTL_STATE_DIR", root.path().join("state"));
             let started = Instant::now();
             checked(&mut command);
             let seconds = started.elapsed().as_secs_f64();

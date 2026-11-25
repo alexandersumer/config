@@ -403,6 +403,11 @@ function force_push() {
     git push --force-with-lease
 }
 
+# Fingerprint of staged and unstaged content, to tell whether a hook changed files.
+function _gsc_tree_state() {
+    { git diff; git diff --cached; } | git hash-object --stdin
+}
+
 function _stage_commit_git_impl() {
     local message=$1
     local skip_detekt=$2
@@ -411,6 +416,8 @@ function _stage_commit_git_impl() {
         printf 'Nothing to commit.\n'
         return 2
     fi
+    typeset -g _gsc_state_before_commit
+    _gsc_state_before_commit=$(_gsc_tree_state)
     if [[ "$skip_detekt" = "1" ]]; then
         SKIP_DETEKT=1 git commit -m "$message"
     else
@@ -444,7 +451,9 @@ function _gsc_impl() {
     fi
 
     if (( commit_status != 0 )); then
-        if ! git diff --quiet || ! git diff --cached --quiet; then
+        # A rejected commit always leaves its changes staged. Retry only when the
+        # hook itself changed files, so a failing check runs once.
+        if [[ "$(_gsc_tree_state)" != "$_gsc_state_before_commit" ]]; then
             printf '\033[33mHooks modified files, staging changes and retrying commit...\033[0m\n'
             git add -u
             _stage_commit_git_impl "$message" "$skip_detekt"
@@ -519,13 +528,20 @@ function soft_reset_remote_default() {
         return 1
     fi
 
-    if ! git show-ref --verify --quiet "refs/heads/$default_branch"; then
-        printf '\033[31merror: local '\''%s'\'' branch not found\033[0m\n' "${default_branch}"
-        printf '\033[33mtry:\033[0m \033[32mgit fetch %s %s:%s\033[0m\n' "$remote" "${default_branch}" "${default_branch}"
+    if ! git show-ref --verify --quiet "refs/remotes/$remote/$default_branch"; then
+        printf '\033[31merror: '\''%s/%s'\'' not found\033[0m\n' "$remote" "${default_branch}"
+        printf '\033[33mtry:\033[0m \033[32mgit fetch %s %s\033[0m\n' "$remote" "${default_branch}"
         return 1
     fi
-    printf 'soft reset onto %s: \033[32mgit reset --soft %s\033[0m\n' "${default_branch}" "${default_branch}"
-    git reset --soft "$default_branch"
+    # Reset to where this branch left the remote default. A local default branch
+    # can be stale, which would stage upstream changes as if they were local work.
+    local base
+    if ! base=$(git merge-base HEAD "$remote/$default_branch"); then
+        printf '\033[31merror: no common history with %s/%s\033[0m\n' "$remote" "${default_branch}"
+        return 1
+    fi
+    printf 'soft reset onto %s/%s: \033[32mgit reset --soft %s\033[0m\n' "$remote" "${default_branch}" "${base[1,12]}"
+    git reset --soft "$base"
 }
 
 # Origin-named aliases for non-reset helpers. Checkout maintenance uses workctl.
