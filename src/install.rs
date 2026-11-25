@@ -624,6 +624,7 @@ fn install_workctl(home: &Path) -> Result<()> {
     let internal = home.join(".local/bin/config-tools");
     verify_config_tools_binary_target(&source, &internal)?;
     let legacy = owned_legacy(home, &source)?;
+    crate::launchd::pending(home)?;
     let completion = home.join(".local/share/zsh/site-functions/_workctl");
     match fs::symlink_metadata(&completion) {
         Ok(m)
@@ -674,7 +675,7 @@ fn install_workctl(home: &Path) -> Result<()> {
     }
     println!("Installed workctl -> {}", target.display());
     println!("Installed zsh completion -> {}", completion.display());
-    Ok(())
+    crate::launchd::install(home)
 }
 
 fn validate_config_skills(config_root: &Path) -> Result<()> {
@@ -1516,6 +1517,7 @@ pub(crate) fn workctl_diagnostics(home: &Path) -> Result<Vec<String>> {
         Ok(None) => {}
         Err(e) => errors.push(e),
     }
+    errors.extend(crate::launchd::diagnostics(home)?);
     Ok(errors)
 }
 

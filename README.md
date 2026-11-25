@@ -27,7 +27,7 @@ individual checks, and skill updates.
 
 ## Everyday commands
 
-`workctl` handles Git maintenance, authentication readiness, and Bitbucket pull requests. Use `--help`
+`workctl` handles Git and Docker maintenance, authentication readiness, and Bitbucket pull requests. Use `--help`
 after any command to see its options.
 
 | Task | Command |
@@ -38,6 +38,8 @@ after any command to see its options.
 | Preview seven-day bulk discard | `workctl git worktree clean --older-than 7d --discard-all-local ~/src` |
 | Preview linked-worktree cleanup | `workctl git worktree clean ~/src` |
 | Apply linked-worktree cleanup | `workctl git worktree clean --apply ~/src` |
+| Preview Docker image cleanup to a size budget | `workctl docker image clean --max-used-space 80GB` |
+| Apply Docker image cleanup | `workctl docker image clean --max-used-space 80GB --older-than 2h --apply` |
 | Inspect unsuccessful operation runs | `workctl history --unsuccessful --json` |
 | Inspect credential requirements offline | `workctl auth inspect --profile code --json` |
 | Verify work credentials and renew as needed | `workctl auth preflight` |
@@ -55,6 +57,8 @@ files**. Bulk discard additionally authorizes tracked and untracked file loss wi
 the selected worktrees. Age uses directory creation time; unknown ages stay excluded.
 Use exclusions or named scopes to narrow selection, and operation history to inspect
 partial failures before retrying. Review the preview before applying cleanup across a workspace.
+Docker image cleanup also previews by default. With `--apply`, it removes images that no
+container uses, oldest arrival first, until the image store fits the budget.
 See the [workctl guide](docs/workctl.md) for authentication, Git policies, and recovery commands.
 
 ## Use custom skills

@@ -955,6 +955,148 @@ fn atomic_install_migrates_owned_files_preserves_foreign_files_and_works_in_fres
     );
 }
 #[test]
+fn interactive_shells_warn_only_when_the_scheduled_docker_cleanup_is_overdue() {
+    let home = tempfile::tempdir().unwrap();
+    let config =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("zsh/zshrc")).unwrap();
+    let section = config
+        .split_once("# Docker image cleanup (scheduled)\n")
+        .unwrap()
+        .1
+        .split_once("# Tool initialization (lazy loading)")
+        .unwrap()
+        .0;
+    let script = home.path().join("docker-cleanup-warning.zsh");
+    fs::write(&script, section).unwrap();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    // The boot time comes from a scripted sysctl so fresh CI machines behave like long-running ones.
+    let bin = home.path().join("bin");
+    fs::create_dir(&bin).unwrap();
+    fs::write(
+        bin.join("sysctl"),
+        "#!/bin/sh\necho \"{ sec = $FAKE_BOOT, usec = 0 } Thu Jan  1 00:00:00 1970\"\n",
+    )
+    .unwrap();
+    fs::set_permissions(bin.join("sysctl"), fs::Permissions::from_mode(0o755)).unwrap();
+    let warns = |interactive: bool, booted: u64| {
+        let mut shell = Command::new("zsh");
+        shell.arg("-f");
+        if interactive {
+            shell.arg("-i");
+        }
+        let out = shell
+            .args(["-c", "source \"$1\"", "verification"])
+            .arg(&script)
+            .env("HOME", home.path())
+            .env("FAKE_BOOT", booted.to_string())
+            .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        text(&out).contains("scheduled Docker image cleanup has not succeeded")
+    };
+    let long_ago = now - 7 * 86_400;
+    let agents = home.path().join("Library/LaunchAgents");
+    let stamp = home
+        .path()
+        .join(".local/state/workctl/docker-image-clean.succeeded");
+    fs::create_dir_all(stamp.parent().unwrap()).unwrap();
+
+    assert!(
+        !warns(true, long_ago),
+        "no agent installed, nothing to watch"
+    );
+    fs::create_dir_all(&agents).unwrap();
+    fs::write(
+        agents.join("io.github.alexandersumer.workctl.docker-image-clean.plist"),
+        "",
+    )
+    .unwrap();
+    assert!(warns(true, long_ago), "an agent that never succeeded");
+    assert!(!warns(false, long_ago), "scripts stay quiet");
+    assert!(
+        !warns(true, now - 600),
+        "a restart gets its first hourly turn"
+    );
+
+    fs::write(&stamp, (now - 3600).to_string()).unwrap();
+    assert!(!warns(true, long_ago), "a recent success");
+    fs::write(&stamp, (now - 4 * 3600).to_string()).unwrap();
+    assert!(warns(true, long_ago), "three missed hours");
+    fs::write(&stamp, "garbage").unwrap();
+    assert!(
+        warns(true, long_ago),
+        "an unreadable heartbeat is not a success"
+    );
+}
+#[cfg(target_os = "macos")]
+#[test]
+fn install_manages_the_docker_cleanup_launch_agent_and_never_loads_an_isolated_home() {
+    let home = tempfile::tempdir().unwrap();
+    let install = || {
+        Command::new(env!("CARGO_BIN_EXE_config-tools"))
+            .args(["install-workctl", "--home"])
+            .arg(home.path())
+            .output()
+            .unwrap()
+    };
+    // The installed executable compares managed files with itself.
+    let drift = || {
+        let out = Command::new(home.path().join(".local/bin/workctl"))
+            .args(["doctor", "--json", "--home"])
+            .arg(home.path())
+            .output()
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        value["checks"]["managed_installation"]["errors"].clone()
+    };
+    let out = install();
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(text(&out).contains("Installed launch agent"));
+    assert!(
+        !text(&out).contains("Loaded launch agent"),
+        "{}",
+        text(&out)
+    );
+    let agent = home
+        .path()
+        .join("Library/LaunchAgents/io.github.alexandersumer.workctl.docker-image-clean.plist");
+    let plist = fs::read_to_string(&agent).unwrap();
+    assert!(plist.contains("/.local/bin/workctl</string>\n    <string>docker</string>"));
+    assert_eq!(
+        fs::metadata(&agent).unwrap().permissions().mode() & 0o777,
+        0o644
+    );
+    let lint = Command::new("/usr/bin/plutil")
+        .arg("-lint")
+        .arg(&agent)
+        .output()
+        .unwrap();
+    assert!(lint.status.success(), "{}", text(&lint));
+    assert_eq!(drift(), serde_json::json!([]));
+
+    let out = install();
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(!text(&out).contains("Installed launch agent"));
+
+    fs::write(&agent, "edited").unwrap();
+    assert!(drift()[0].as_str().unwrap().contains("launch agent"));
+    assert!(install().status.success());
+    assert_eq!(fs::read_to_string(&agent).unwrap(), plist);
+
+    fs::remove_file(&agent).unwrap();
+    fs::create_dir(&agent).unwrap();
+    let out = install();
+    assert!(!out.status.success());
+    assert!(text(&out).contains("launch agent is not a regular file"));
+    assert!(agent.is_dir());
+    // Ownership is settled before any managed file changes.
+    assert!(!text(&out).contains("Installed workctl"));
+}
+#[test]
 fn reset_json_is_one_document_and_success_leaves_no_diagnostics() {
     let f = Fixture::new();
     let runtime = f.temp.path().join("runtime");

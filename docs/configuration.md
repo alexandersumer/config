@@ -32,7 +32,7 @@ Command roles:
 - `prepare`: runs the same verification as `check`.
 - `pre-commit`: validates an isolated snapshot of the Git index, so unstaged and untracked work cannot affect the commit checks. Outside Git, runs `prepare` on the supplied checkout. No home installation is required.
 - `install`: intentional home-directory mutation for the `~/.agents/skills` symlink and custom `~/.claude/skills` symlinks, migration of old managed links, Codex config flag repair, `~/.local/bin/config-tools` and `~/.local/bin/workctl`, and the global agent instruction links. Codex itself is installed and updated through its official distribution; this installer does not create a Codex launcher.
-- `install-workctl`: updates only managed `workctl`, `config-tools`, and generated zsh completion; accepts `--home PATH` for an isolated installation. It does not rewrite shell startup or agent configuration.
+- `install-workctl`: updates only managed `workctl`, `config-tools`, generated zsh completion, and on macOS the hourly Docker image cleanup launch agent; accepts `--home PATH` for an isolated installation. It does not rewrite shell startup or agent configuration.
 - `install-git-hooks`: intentional local Git config mutation for `core.hooksPath`.
 
 ## Custom skills
@@ -132,6 +132,7 @@ Expected symlink behavior:
 - `~/.config/ghostty/config` links to this config checkout's `ghostty/config` file.
 - `~/Library/Application Support/com.mitchellh.ghostty/config` is absent so Ghostty loads the managed config only once.
 - `~/.local/bin/config-tools` and `~/.local/bin/workctl` are runnable copies of the Rust multicall executable.
+- On macOS, `~/Library/LaunchAgents/io.github.alexandersumer.workctl.docker-image-clean.plist` is a generated regular file that runs the installed `workctl` hourly. It is loaded only when installing into the current account's own home.
 - Codex runs directly from the official Homebrew installation. The shell prefers `/opt/homebrew/bin` over older `/usr/local/bin` tools; no config-repair wrapper is installed.
 - `~/.codex/skills/.system` remains a Codex-owned directory with Codex system skills.
 - Each custom skill is discovered through `~/.agents/skills` and linked individually into `~/.claude/skills`. Old managed `~/.codex/skills/<name>` links are removed.

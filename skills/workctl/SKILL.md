@@ -1,6 +1,6 @@
 ---
 name: workctl
-description: Use workctl for credential inspection and renewal, workspace inventory, Git maintenance, and operation recovery.
+description: Use workctl for credential inspection and renewal, workspace inventory, Git maintenance, Docker image cleanup, and operation recovery.
 ---
 
 Run the installed `workctl` directly for these tasks. It handles discovery,
@@ -29,6 +29,8 @@ workspace. Prefer `--json` for structured results.
 | Reconcile uncertain cleanup | `workctl git worktree clean --reconcile RUN_ID --json` |
 | Preview worktree cleanup | `workctl git worktree clean PATH --json` |
 | Remove eligible worktrees | `workctl git worktree clean --apply PATH --json` |
+| Preview Docker image cleanup to a size budget | `workctl docker image clean --max-used-space 80GB --json` |
+| Remove unused Docker images over budget | `workctl docker image clean --max-used-space 80GB --older-than 2h --apply --json` |
 | Check runtime prerequisites | `workctl doctor --json` |
 
 ## Choose and execute

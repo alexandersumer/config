@@ -51,7 +51,7 @@ jobs:
           WORKCTL_STATE_DIR: ${{ runner.temp }}/workctl-state
         run: |
           case '${{ matrix.suite }}' in
-            reset) cargo +stable run --locked -- test-parallel --worker-budget 8 --locked --lib --test reset_cli --test reset_e2e --test validation ;;
+            reset) cargo +stable run --locked -- test-parallel --worker-budget 8 --locked --lib --test reset_cli --test reset_e2e --test docker_cli --test validation ;;
             worktree) cargo +stable run --locked -- test-parallel --worker-budget 8 --locked --test workctl ;;
             auth) cargo +stable run --locked -- test-parallel --worker-budget 8 --locked --test auth_cli ;;
             *) echo 'Unknown contract suite' >&2; exit 1 ;;
