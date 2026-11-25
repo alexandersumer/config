@@ -31,14 +31,14 @@ Fix the root cause in application code, an incorrect intended-behavior test, fix
 
 No suppressions, baselines, skipped/deleted/weakened tests, sleeps, broad catches, silent fallbacks, fake success exits, retry wrappers that hide the defect, or code that dodges the checker. Dependency, build config, or test-infra changes are allowed only when the captured evidence proves they are the minimal root-cause fix.
 
-Do not blindly rerun the same command or CI job; each run must follow a fix, narrow the hypothesis, or add a diagnostic. Stop with a concrete blocker instead of looping on inaccessible logs, missing permissions, unavailable CI, or ambiguous product intent.
+Do not blindly rerun the same command or CI job; each run must follow a fix, narrow the hypothesis, or add a diagnostic. A failed fix attempt is evidence for the next hypothesis, not a reason to stop. When logs or access are denied, renew access once with `auth-preflight` and retry. Stop with a concrete blocker only when access is still denied, CI is unavailable, or product intent is ambiguous.
 
 ## Verify
 
 1. Rerun or reuse fresh proof for the targeted failing check, and compare it with the original failing signal. Do not rerun a passing broad proof when no relevant files changed since; run only the narrowest command covering any new edit.
 2. Run or reuse the broader relevant suite, build, lint, or CI gate only when the proof policy justifies it; otherwise name the exact broad-proof blocker or narrower proof used.
 3. If adding or changing an automated check, prove when feasible that it fails for the original bug, then restore the fix and rerun green; reuse prior fail/pass proof only when it is same-diff and same-scope.
-4. When publishing is authorized, publish only a coherent fix. If the requested outcome includes green CI, inspect resulting CI and repeat this loop for new branch-relevant failures until CI is green or a concrete blocker remains. A request to commit or push alone does not add a CI-monitoring task. Claim CI is green only when the refreshed provider data is for the latest branch-relevant source SHA and every visible required branch-relevant check is terminal success; otherwise report the exact pending, red, missing, stale, or inaccessible check state as the blocker.
+4. When publishing is authorized, publish only a coherent fix. If the requested outcome includes green CI, inspect resulting CI and repeat this loop for new branch-relevant failures until CI is green or a concrete blocker remains. A pending run is not a result: wait for it inside the turn, then refresh. A request to commit or push alone does not add a CI-monitoring task. Claim CI is green only when the refreshed provider data is for the latest branch-relevant source SHA and every visible required branch-relevant check is terminal success; otherwise report the exact red, missing, stale, stuck, or inaccessible check state as the blocker.
 
 ## Final
 

@@ -52,6 +52,7 @@ pub(crate) fn run_regression_tests() -> Result<()> {
     test_branch_description_check_helper()?;
     test_pr_writing_skills_use_branch_description()?;
     test_mutating_skill_write_boundaries()?;
+    test_delivery_skills_keep_working_until_done()?;
     test_deep_review_skills_require_portable_managed_reviewer_contract()?;
     test_custom_skills_reject_accidental_environment_coupling()?;
     test_study_skills_resolve_portable_collection_roots()?;
@@ -265,6 +266,46 @@ fn test_mutating_skill_write_boundaries() -> Result<()> {
             if !text.contains(expected) {
                 return Err(format!(
                     "{}: mutating skill lost a write-boundary contract; missing {expected:?}",
+                    skill_path.display()
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn test_delivery_skills_keep_working_until_done() -> Result<()> {
+    let config_root = config_root_from_exe()?;
+    let contracts: &[(&str, &[&str])] = &[
+        (
+            "drive-to-completion",
+            &[
+                "End the turn only when every acceptance criterion is verified or its next action belongs to someone else",
+                "One status poll is not a wait",
+                "Never end the turn on \"CI is running\"",
+                "with no request made is still your action",
+                "Persistence never licenses a shortcut",
+                "return to the loop",
+            ],
+        ),
+        (
+            "execute-plan",
+            &["Defer a requirement only when the user descoped it or a concrete blocker prevents it"],
+        ),
+        ("fix-failures", &["wait for it inside the turn"]),
+        ("address-comments", &["wait for them inside the turn"]),
+        ("clear-merge-blockers", &["Ending the turn is not a wait"]),
+    ];
+
+    for (skill_name, expected_fragments) in contracts {
+        let skill_path = config_root.join("skills").join(skill_name).join("SKILL.md");
+        let text = fs::read_to_string(&skill_path)
+            .map_err(|err| format!("{}: cannot read skill: {err}", skill_path.display()))?;
+        for expected in *expected_fragments {
+            if !text.contains(expected) {
+                return Err(format!(
+                    "{}: delivery skill lost a keep-working contract; missing {expected:?}",
                     skill_path.display()
                 ));
             }

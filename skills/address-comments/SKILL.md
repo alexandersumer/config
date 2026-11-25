@@ -1,6 +1,6 @@
 ---
 name: address-comments
-description: Address actionable PR comments and publish coherent fixes
+description: Address actionable PR review comments and publish coherent fixes. Use when asked to address, fix, or work through review comments on a pull request.
 ---
 
 ## Proof policy
@@ -40,7 +40,7 @@ Add or update a targeted test when the comment identifies a realistic regression
 
 No suppressions, baselines, skipped/deleted/weakened tests, sleeps, broad catches, silent fallbacks, fake success exits, or code that dodges the reviewer concern. Change dependencies, build config, or test infra only when the comment evidence proves that is the minimal root-cause fix.
 
-Each refetch or repush must follow a fix, a narrowed classification, or new comment or CI evidence. Stop with a concrete blocker instead of looping on inaccessible PR data, missing permissions, unavailable CI, or ambiguous reviewer intent.
+Each refetch or repush must follow a fix, a narrowed classification, or new comment or CI evidence. When PR data or access is denied, renew access once with `auth-preflight` and retry. Stop with a concrete blocker only when access is still denied, CI is unavailable, or reviewer intent is ambiguous.
 
 ## Verify and publish
 
@@ -48,7 +48,7 @@ Each refetch or repush must follow a fix, a narrowed classification, or new comm
 2. If a new or changed automated check is part of the fix, prove when feasible that it fails for the original issue, then restore the fix and rerun green; reuse prior fail/pass proof only when it is same-diff and same-scope.
 3. Stage only the comment fixes, isolating them from unrelated commits and local changes when necessary.
 4. Commit with a grounded Conventional Commit subject and push explicitly to the proven source ref with `git push origin HEAD:<PR-source-branch>`, adding `-u` only when no upstream exists; do not rely on an implicit upstream refspec. If the fixes change what the PR does, regenerate its title and description with `branch-description` and replace them on the PR.
-5. After pushing, refresh PR comments and branch-relevant checks. Continue until no actionable comments and no CI failures caused by the fixes remain, or a concrete blocker remains. Claim CI is green only when refreshed provider data is for the latest branch-relevant source SHA and every visible required check is terminal success; otherwise report the exact pending, red, missing, stale, or inaccessible check state as the blocker. Do not loop because the PR UI still shows an old comment the pushed diff already addresses.
+5. After pushing, refresh PR comments and branch-relevant checks. Pending checks are not a result: wait for them inside the turn, then refresh. Continue until no actionable comments and no CI failures caused by the fixes remain, or a concrete blocker remains. Claim CI is green only when refreshed provider data is for the latest branch-relevant source SHA and every visible required check is terminal success; otherwise report the exact red, missing, stale, stuck, or inaccessible check state as the blocker. Do not loop because the PR UI still shows an old comment the pushed diff already addresses.
 
 ## Final
 

@@ -1,6 +1,6 @@
 ---
 name: git-publish-to-origin
-description: Commit and push current branch to origin, including main/default when current
+description: Commit and push the current branch to origin without opening a PR, including main/default when current. Use when asked to push or publish directly to origin; use git-publish when a pull request is wanted.
 ---
 
 Commit staged, unstaged, and relevant untracked changes only when needed, then push the current branch to the same branch name on `origin`.

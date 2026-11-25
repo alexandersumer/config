@@ -21,7 +21,7 @@ Never say or imply `done`, `cleared`, `unblocked`, `merge-ready`, `all green`, `
 
 A clear/fix/iterate request ends only at provider-proven `green` or when a human/policy/tooling blocker makes safe progress impossible. "No local changes left" is not an exit. Do not give a final response while `needs-local-fix` or `waiting` has a safe next action. If the host has an active-goal mechanism and the user asked to keep going until green, complete it only at `green` and block it only on a repeated exact blocker or a hard execution limit.
 
-A bounded wait is sized to the gate's expected remaining runtime, not a tight poll. A gate with no provider progress well beyond its normal runtime is stuck: report `waiting` with gate, SHA, and elapsed time. New user input claiming CI changed is fresh evidence: end the wait, refresh the exact gate, and do not report from older data.
+A bounded wait is sized to the gate's expected remaining runtime, not a tight poll, and happens inside the turn: block on a watch command or a sleep-and-check loop, and hand it to a background job only on a host that resumes you by itself when the job exits. Ending the turn is not a wait. A gate with no provider progress well beyond its normal runtime is stuck: report `waiting` with gate, SHA, and elapsed time. New user input claiming CI changed is fresh evidence: end the wait, refresh the exact gate, and do not report from older data.
 
 ## Provider reconciliation
 
@@ -109,7 +109,7 @@ Identify the gate, SHA, state, and whether it is required. Rerun a missing, skip
 
 ### Human, policy, or tooling blocker
 
-Report the exact blocker and the action required. Do not churn code to clear it.
+Report the exact blocker and the action required. For a missing approval, include a ready-to-send review request written with `write-review-request`. Do not churn code to clear it.
 
 ## Publish and refresh
 

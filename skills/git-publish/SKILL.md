@@ -1,6 +1,6 @@
 ---
 name: git-publish
-description: Commit, push, and open a ready-for-review PR for the current changes
+description: Commit, push, and open a ready-for-review PR for the current changes, then drive its CI and review comments to green. Use when asked to publish the current changes as a pull request; use git-publish-to-origin to push without one.
 ---
 
 Commit current staged, unstaged, and relevant untracked changes, push to `origin`, then create or report a ready-for-review pull request to the resolved PR destination branch.
