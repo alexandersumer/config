@@ -170,6 +170,43 @@ impl Operation {
             .map(key)
             .collect();
         let tracked: BTreeSet<&[u8]> = tracked_paths.iter().map(Vec::as_slice).collect();
+        // Git reports nothing inside a submodule as untracked, and a reset that
+        // replaces the gitlink with a file or directory deletes whatever its
+        // directory holds. Refuse while that directory has contents.
+        for entry in self
+            .git
+            .call(&["ls-files", "--stage", "-z"])?
+            .split(|b| *b == 0)
+        {
+            let Some(path) = entry
+                .strip_prefix(b"160000 ")
+                .and_then(|rest| rest.splitn(2, |b| *b == b'\t').nth(1))
+            else {
+                continue;
+            };
+            if !tree_collision(&tracked, &key(path)) {
+                continue;
+            }
+            let still_a_submodule = self
+                .git
+                .call_os(&[
+                    OsStr::new("--literal-pathspecs"),
+                    OsStr::new("ls-tree"),
+                    OsStr::new("-z"),
+                    OsStr::new(target),
+                    OsStr::new("--"),
+                    OsStr::from_bytes(path),
+                ])?
+                .starts_with(b"160000 ");
+            let populated = fs::read_dir(self.git.cwd.join(OsStr::from_bytes(path)))
+                .is_ok_and(|mut entries| entries.next().is_some());
+            if populated && !still_a_submodule {
+                return Err(format!(
+                    "Submodule contents would be replaced: {}",
+                    super::display(OsString::from_vec(path.to_vec()))
+                ));
+            }
+        }
         // Deliberately omit --exclude-standard: ignored paths need protection too.
         for entry in self
             .git

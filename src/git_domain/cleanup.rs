@@ -1000,7 +1000,9 @@ impl Session<'_> {
                 flags,
                 device: metadata.dev(),
                 inode: metadata.ino(),
-                force: discard || !operations.is_empty(),
+                // Operation approval never authorizes file loss, so Git keeps its own
+                // refusal for files that appear after the final inspection.
+                force: discard,
                 operations,
                 operation_commits,
                 recovery_ref: None,
@@ -1794,7 +1796,12 @@ fn run_inner(args: &Args, json: bool) -> Result<u8, String> {
     };
     let mut orphan_results = Vec::new();
     for orphan in orphan_plans {
-        let result = orphan.execute(args.apply, args.storage, &mut history);
+        // A registered worktree of the same repository already holds its lock
+        // for this invocation; a second descriptor would only block on it.
+        let locked = repositories
+            .get(&orphan.common)
+            .is_some_and(|repository| repository.is_ok());
+        let result = orphan.execute(args.apply, args.storage, &mut history, locked);
         if let Some(run) = &mut history {
             run.outcome(
                 &orphan.path,
@@ -2415,6 +2422,7 @@ fn inventory(
             .iter()
             .any(|r| r["state"]["complete"] != true || r["storage"]["complete"] == false);
     let orphans=selected.skipped.iter().map(|(path,reason)|serde_json::json!({"path":path.to_string_lossy(),"path_bytes":presentation::path_bytes(path),"age":crate::workspace::Age::read(path).evidence(),"orphan":true,"protection_reason":reason,"local_changes":"unknown_missing_registration","commit_recovery":"unavailable_missing_registration","storage":if args.storage {Some(crate::storage::measure(path))}else{None}})).collect::<Vec<_>>();
+    let incomplete = incomplete || orphans.iter().any(|r| r["storage"]["complete"] == false);
     let result = serde_json::json!({"schema_version":1,"operation":"git.worktree.inventory","status":if incomplete {"incomplete"}else{"completed"},"selection":scope.evidence(),"results":results,"primary_checkouts":presentation::paths(&selected.protected),"primary_inventory":primary_inventory,"orphans":orphans,"not_selected":unselected});
     if json {
         if presentation::json(&result) != 0 {
@@ -2556,6 +2564,7 @@ impl Orphan {
         apply: bool,
         storage: bool,
         history: &mut Option<crate::history::Run>,
+        locked: bool,
     ) -> serde_json::Value {
         let mut measured = storage.then(|| crate::storage::measure(&self.path));
         let free_before = storage
@@ -2564,7 +2573,11 @@ impl Orphan {
         let age = self.age.evidence();
         let mut removal_attempted = false;
         let outcome = (|| -> Result<(), String> {
-            let _lock = lock::acquire(&self.common)?;
+            let _lock = if locked {
+                None
+            } else {
+                Some(lock::acquire(&self.common)?)
+            };
             operation_state(&self.common, &self.common, false)?;
             let fresh = Self::inspect(&self.path)?;
             if fresh.common != self.common

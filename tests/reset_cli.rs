@@ -812,6 +812,61 @@ fn ignored_files_and_submodule_contents_are_preserved() {
 }
 
 #[test]
+fn submodule_contents_are_never_replaced_by_a_target_file() {
+    let f = Fixture::new();
+    git(
+        &f.seed,
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            origin_arg(&f.origin),
+            "module",
+        ],
+    );
+    git(&f.seed, &["commit", "-am", "module"]);
+    git(&f.seed, &["push", "origin", "main"]);
+    git(&f.repo, &["fetch", "origin"]);
+    git(&f.repo, &["reset", "--hard", "origin/main"]);
+    git(
+        &f.repo,
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "update",
+            "--init",
+        ],
+    );
+    let module = f.repo.join("module");
+    fs::write(module.join("ignored"), "precious").unwrap();
+    let dir = git(&module, &["rev-parse", "--absolute-git-dir"]);
+    fs::write(Path::new(&dir).join("info/exclude"), "ignored\n").unwrap();
+    let before = git(&f.repo, &["rev-parse", "HEAD"]);
+
+    // Upstream replaces the submodule with a regular file of the same name.
+    git(&f.seed, &["rm", "-q", "module"]);
+    fs::write(f.seed.join("module"), "now a file\n").unwrap();
+    git(&f.seed, &["add", "module"]);
+    git(&f.seed, &["commit", "-m", "replace module with a file"]);
+    git(&f.seed, &["push", "origin", "main"]);
+
+    let out = f.run(&f.repo, &[]);
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+    assert!(
+        text(&out).contains("Submodule contents would be replaced"),
+        "{}",
+        text(&out)
+    );
+    assert_eq!(
+        fs::read_to_string(module.join("ignored")).unwrap(),
+        "precious"
+    );
+    assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), before);
+}
+
+#[test]
 fn paths_with_newlines_and_non_utf8_bytes_are_accepted_and_safely_displayed() {
     let f = Fixture::new();
     let bytes = if cfg!(target_os = "linux") {
@@ -832,7 +887,14 @@ fn paths_with_newlines_and_non_utf8_bytes_are_accepted_and_safely_displayed() {
 
 #[test]
 fn fetch_timeout_cancellation_and_normal_completion_reap_descendants() {
-    for mode in ["timeout", "cancel", "normal"] {
+    for mode in ["timeout", "cancel", "hangup", "quit", "normal"] {
+        let signal = match mode {
+            "cancel" => Some(libc::SIGINT),
+            // A closed terminal or Ctrl-\ must clean up exactly like Ctrl-C.
+            "hangup" => Some(libc::SIGHUP),
+            "quit" => Some(libc::SIGQUIT),
+            _ => None,
+        };
         let f = Fixture::new();
         let marker = f.temp.path().join("started");
         let escaped = f.temp.path().join("escaped");
@@ -857,24 +919,43 @@ fn fetch_timeout_cancellation_and_normal_completion_reap_descendants() {
             }
         );
         let dir = f.shim(&script);
-        let timeout = if mode == "timeout" { "8" } else { "30" };
-        let mut cmd = f.cli(&f.repo, &[OsStr::new("--timeout"), OsStr::new(timeout)]);
-        f.with_shim(&mut cmd, &dir);
-        cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
-        let child = cmd.spawn().unwrap();
-        wait_marker(&marker);
-        if mode == "cancel" {
+        // The reset deadline must outlast everything before the fetch, which a
+        // busy machine stretches past any single budget. A run that expires
+        // earlier never starts the fixture, so only one that reached it counts.
+        let mut budgets = if mode == "timeout" {
+            ["8", "40", "200"]
+        } else {
+            ["30", "120", "600"]
+        }
+        .into_iter();
+        let (child, budget) = loop {
+            let timeout = budgets
+                .next()
+                .expect("the fetch fixture never started before the reset deadline");
+            let mut cmd = f.cli(&f.repo, &[OsStr::new("--timeout"), OsStr::new(timeout)]);
+            f.with_shim(&mut cmd, &dir);
+            cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+            let mut child = cmd.spawn().unwrap();
+            while !marker.exists() && child.try_wait().unwrap().is_none() {
+                thread::sleep(Duration::from_millis(10));
+            }
+            if marker.exists() {
+                break (child, timeout.parse::<u64>().unwrap());
+            }
+            wait_child(child);
+        };
+        if let Some(signal) = signal {
             unsafe {
-                libc::kill(child.id() as i32, libc::SIGINT);
+                libc::kill(child.id() as i32, signal);
             }
         }
-        let out = wait_child(child);
+        let out = wait_child_within(child, Duration::from_secs(budget + 60));
         if mode == "normal" {
             success(&out);
         } else {
             assert_eq!(
                 out.status.code(),
-                Some(if mode == "cancel" { 130 } else { 1 }),
+                Some(if signal.is_some() { 130 } else { 1 }),
                 "{}",
                 text(&out)
             );
@@ -891,8 +972,8 @@ fn fetch_timeout_cancellation_and_normal_completion_reap_descendants() {
             record["code"],
             match mode {
                 "timeout" => 124,
-                "cancel" => 130,
-                _ => 0,
+                "normal" => 0,
+                _ => 130,
             }
         );
         assert_eq!(record["attempts"], 1);

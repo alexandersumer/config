@@ -3024,6 +3024,48 @@ fn pragmatic_cleanup_protects_tracked_masked_and_late_untracked_work() {
 }
 
 #[test]
+fn operation_approval_alone_keeps_native_git_protection_for_last_moment_files() {
+    for late_file in [false, true] {
+        let f = Fixture::new();
+        git(&f.worktree, &["checkout", "-b", "other"]);
+        git(&f.worktree, &["commit", "--allow-empty", "-m", "other"]);
+        git(&f.worktree, &["checkout", "feature"]);
+        git(&f.worktree, &["merge", "--no-ff", "--no-commit", "other"]);
+        let mut c = Command::new(BIN);
+        env(&mut c);
+        c.args([
+            "git",
+            "worktree",
+            "clean",
+            "--apply",
+            "--json",
+            "--discard-operations",
+        ])
+        .arg(&f.worktree);
+        let evidence = f.worktree.join("last-moment-work");
+        if late_file {
+            let shim = f.shim(&format!(
+                "case \"$*\" in *'worktree remove'*) printf precious > '{}' ;; esac",
+                evidence.display()
+            ));
+            with_shim(&mut c, &shim);
+        }
+        let out = c.output().unwrap();
+        let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        if late_file {
+            assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+            assert_eq!(result["summary"]["removed"], 0, "{}", text(&out));
+            assert_eq!(fs::read_to_string(&evidence).unwrap(), "precious");
+            f.unchanged();
+        } else {
+            assert_eq!(out.status.code(), Some(0), "{}", text(&out));
+            assert_eq!(result["summary"]["removed"], 1, "{}", text(&out));
+            assert!(!f.worktree.exists());
+        }
+    }
+}
+
+#[test]
 fn pragmatic_cleanup_does_not_overwrite_conflicting_or_symbolic_recovery_refs() {
     for symbolic in [false, true] {
         let f = Fixture::new();
@@ -4434,6 +4476,31 @@ fn bulk_age_selection_excludes_young_and_excluded_dirty_worktrees() {
 }
 
 #[test]
+fn inventory_is_incomplete_when_an_orphan_cannot_be_measured() {
+    let f = Fixture::new();
+    let path = orphan(&f);
+    let sealed = path.join("sealed");
+    fs::create_dir(&sealed).unwrap();
+    fs::write(sealed.join("inside"), "unreadable").unwrap();
+    fs::set_permissions(&sealed, fs::Permissions::from_mode(0o000)).unwrap();
+    let out = env(&mut Command::new(BIN))
+        .args(["git", "worktree", "inventory", "--json", "--storage"])
+        .arg(f.temp.path())
+        .output()
+        .unwrap();
+    fs::set_permissions(&sealed, fs::Permissions::from_mode(0o755)).unwrap();
+    let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(
+        result["orphans"][0]["storage"]["complete"],
+        false,
+        "{}",
+        text(&out)
+    );
+    assert_eq!(result["status"], "incomplete", "{}", text(&out));
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+}
+
+#[test]
 fn workspace_scope_inventory_uses_same_selection_and_reports_storage() {
     let f = Fixture::new();
     let config = f.temp.path().join("workspace.json");
@@ -4547,6 +4614,32 @@ fn abandoned_merge_requires_separate_authorization_and_preserves_merge_heads() {
         ],
     );
     assert!(refs.lines().any(|oid| oid == other));
+}
+
+#[test]
+fn orphan_removal_shares_the_lock_held_for_its_repository() {
+    // The container holds a registered worktree and an orphan of the same
+    // repository, so the invocation already holds that repository's lock.
+    let f = Fixture::new();
+    let path = orphan(&f);
+    let mut cmd = Command::new(BIN);
+    env(&mut cmd)
+        .args([
+            "git",
+            "worktree",
+            "clean",
+            "--json",
+            "--apply",
+            "--remove-orphans",
+            "--discard-all-local",
+        ])
+        .arg(f.temp.path())
+        .env("WORKCTL_STATE_DIR", f.temp.path().join("history"));
+    let out = cmd.output().unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(!path.exists(), "{}", text(&out));
+    assert!(!f.worktree.exists(), "{}", text(&out));
+    assert!(f.repo.join("file").is_file());
 }
 
 #[test]

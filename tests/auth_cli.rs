@@ -526,7 +526,13 @@ fn oversized_provider_output_is_bounded_and_secret_free() {
 }
 #[test]
 fn deadline_and_cancellation_clean_provider_descendants_and_release_lock() {
-    for interrupt in [false, true] {
+    // A closed terminal or Ctrl-\ must clean up exactly like Ctrl-C.
+    for signal in [
+        None,
+        Some(libc::SIGINT),
+        Some(libc::SIGHUP),
+        Some(libc::SIGQUIT),
+    ] {
         let f = Fixture::new(json!({"mode":"hang"}));
         let mut child = f
             .command(&[
@@ -557,9 +563,9 @@ fn deadline_and_cancellation_clean_provider_descendants_and_release_lock() {
             }
             std::thread::sleep(Duration::from_millis(10));
         }
-        if interrupt {
+        if let Some(signal) = signal {
             unsafe {
-                libc::kill(child.id() as i32, libc::SIGINT);
+                libc::kill(child.id() as i32, signal);
             }
         }
         let began = Instant::now();
@@ -573,7 +579,7 @@ fn deadline_and_cancellation_clean_provider_descendants_and_release_lock() {
         let out = child.wait_with_output().unwrap();
         assert_eq!(
             out.status.code(),
-            Some(if interrupt { 130 } else { 1 }),
+            Some(if signal.is_some() { 130 } else { 1 }),
             "{}",
             text(&out)
         );

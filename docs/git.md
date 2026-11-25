@@ -48,7 +48,9 @@ can prevent `git worktree repair` from recovering it.
 
 The existing reset policy is preserved: tracked/index changes, dirty submodules,
 unfinished Git operations, unexpected masked tracked paths, and untracked or ignored
-paths that collide with either target tree cause refusal. In a sparse checkout,
+paths that collide with either target tree cause refusal. So does a populated
+submodule directory that a target would replace with a file or directory, because
+Git reports nothing inside it as untracked. In a sparse checkout,
 Git's active rules must exclude every absent skip-worktree path. This requires
 a Git version with `sparse-checkout check-rules` (2.42 or later). Assume-unchanged
 paths and unexpected skip-worktree paths still cause refusal.

@@ -19,11 +19,18 @@ impl Signals {
         CANCELLED.store(false, Ordering::SeqCst);
         INTERRUPTED.store(false, Ordering::SeqCst);
         let mut signals = Self { old: vec![] };
-        for signal in [libc::SIGINT, libc::SIGTERM] {
+        // A closed terminal (SIGHUP) or Ctrl-\ (SIGQUIT) would otherwise end this
+        // process at once and leave its supervised process groups running.
+        for signal in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP, libc::SIGQUIT] {
             // Handler only performs an atomic store, no allocation or locking.
             let old = unsafe { libc::signal(signal, stop as libc::sighandler_t) };
             if old == libc::SIG_ERR {
                 return Err(io::Error::last_os_error().to_string());
+            }
+            if signal == libc::SIGHUP && old == libc::SIG_IGN {
+                // Keep running under nohup, as the caller asked.
+                unsafe { libc::signal(signal, old) };
+                continue;
             }
             signals.old.push((signal, old));
         }
