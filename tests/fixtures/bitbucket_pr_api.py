@@ -1,6 +1,7 @@
 """Local HTTPS Bitbucket Cloud contract used by the public workctl CLI tests."""
 import http.server
 import json
+import os
 import pathlib
 import re
 import socket
@@ -20,7 +21,8 @@ approved = {2}
 truncated_page = False
 limits = set()
 cooldown = 0
-parallel_reads = threading.Barrier(2, timeout=5)
+# Parallel reads arrive late on a busy machine; the wait follows the suite's pace.
+parallel_reads = threading.Barrier(2, timeout=5 * int(os.environ.get('WORKCTL_TEST_PACE', '1')))
 pool_advanced = threading.Event()
 log = (root / "http.jsonl").open("w", buffering=1)
 

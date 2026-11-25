@@ -15,6 +15,8 @@ import sys
 import time
 
 root = pathlib.Path(os.environ['AUTH_FIXTURE'])
+# Simulated hangs and delays follow the suite's pace, like its deadlines.
+pace = int(os.environ.get('WORKCTL_TEST_PACE', '1'))
 state_path = root / 'state.json'
 state = json.loads(state_path.read_text())
 name = pathlib.Path(sys.argv[0]).name
@@ -54,7 +56,7 @@ if interactive and state.get('assert_interaction'):
         (root / 'interaction-overlap').touch()
         sys.exit(98)
 if key in state.get('hang_keys', []):
-    descendant = subprocess.Popen(['/bin/sleep', '30'])
+    descendant = subprocess.Popen(['/bin/sleep', str(30 * pace)])
     (root / ('descendant-' + key)).write_text(str(descendant.pid))
 (root / ('started-' + key)).touch()
 atexit.register(lambda: (root / ('finished-' + key)).touch())
@@ -64,14 +66,14 @@ if key in state.get('hold_keys', []) or key in state.get('hang_keys', []):
 secret = 'AUTH_SECRET_MUST_NEVER_APPEAR'
 mode = state.get('mode')
 if name == 'twg' and state.get('twg_delay'):
-    time.sleep(state['twg_delay'])
+    time.sleep(state['twg_delay'] * pace)
 if mode == 'hang':
-    child = subprocess.Popen(['/bin/sleep', '30'])
+    child = subprocess.Popen(['/bin/sleep', str(30 * pace)])
     (root / 'descendant').write_text(str(child.pid))
     (root / 'started').touch()
-    time.sleep(30)
+    time.sleep(30 * pace)
 if mode == 'leader_exit':
-    child = subprocess.Popen(['/bin/sleep', '30'])
+    child = subprocess.Popen(['/bin/sleep', str(30 * pace)])
     (root / 'descendant').write_text(str(child.pid))
 if mode == 'flood':
     print(secret * 20000)
@@ -102,7 +104,7 @@ def jwt():
 if name == 'bb':
     if args[:2] == ['workspace', 'list']:
         assert '--json' in args
-        time.sleep(state.get('bb_api_delay', 0))
+        time.sleep(state.get('bb_api_delay', 0) * pace)
         if state.get('bb_revoked'):
             print('Authentication failed (401) ' + secret, file=sys.stderr)
             sys.exit(1)
@@ -229,7 +231,7 @@ elif name == 'atlas':
             sys.exit(1)
         if state.get('refresh_hang'):
             (root / 'started').touch()
-            time.sleep(30)
+            time.sleep(30 * pace)
         print(jwt())
     if mode == 'leader_exit':
         sys.exit(0)

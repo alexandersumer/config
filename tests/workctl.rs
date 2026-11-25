@@ -9,6 +9,7 @@ const BIN: &str = env!("CARGO_BIN_EXE_workctl");
 fn env(cmd: &mut Command) -> &mut Command {
     cmd.env("GIT_CONFIG_NOSYSTEM", "1")
         .env("WORKCTL_STATE_DIR", common::state_dir())
+        .env(common::PACE, common::pace().to_string())
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_AUTHOR_NAME", "Test")
         .env("GIT_AUTHOR_EMAIL", "test@example.com")
@@ -131,7 +132,8 @@ impl Fixture {
         fs::write(
             bin.join("git"),
             format!(
-                "#!/bin/sh\n{script}\nexec '{}' \"$@\"\n",
+                "#!/bin/sh\n{}\n{script}\nexec '{}' \"$@\"\n",
+                common::PACED_SHELL,
                 String::from_utf8_lossy(&real.stdout).trim()
             ),
         )
@@ -242,15 +244,23 @@ fn special_coordination_files_refuse_promptly_in_reset_and_cleanup() {
         assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
         let mut cmd = Command::new(BIN);
         env(&mut cmd);
+        let timeout = common::secs(1).to_string();
         cmd.args(if cleanup {
-            vec!["git", "worktree", "clean", "--json", "--timeout", "1"]
+            vec![
+                "git",
+                "worktree",
+                "clean",
+                "--json",
+                "--timeout",
+                timeout.as_str(),
+            ]
         } else {
             vec![
                 "git",
                 "reset",
                 "--json",
                 "--timeout",
-                "1",
+                timeout.as_str(),
                 "--attempts",
                 "1",
             ]
@@ -260,7 +270,7 @@ fn special_coordination_files_refuse_promptly_in_reset_and_cleanup() {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         let mut child = cmd.spawn().unwrap();
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + common::time(5);
         loop {
             if child.try_wait().unwrap().is_some() {
                 break;
@@ -412,7 +422,7 @@ fn with_shim(cmd: &mut Command, bin: &Path) {
     );
 }
 fn wait(path: &Path) {
-    let until = Instant::now() + Duration::from_secs(10);
+    let until = Instant::now() + common::time(10);
     while !path.exists() {
         assert!(Instant::now() < until);
         std::thread::sleep(Duration::from_millis(10));
@@ -698,7 +708,8 @@ fn deadline_and_cancellation_terminate_groups_without_retrying_cleanup() {
         // Release the sentinel only after shutdown; a slow concurrent check must not
         // make it fire while the subprocess is legitimately still running.
         let bin=f.shim(&format!("for arg in \"$@\"; do if [ \"$arg\" = fetch ]; then echo attempt >> '{}'; (touch '{}'; while [ ! -e '{}' ]; do sleep 0.05; done; touch '{}') & sleep 30; fi; done",count.display(),started.display(),release.display(),escaped.display()));
-        let mut cmd = f.command(&["--apply", "--timeout", if cancel { "30" } else { "4" }]);
+        let timeout = common::secs(if cancel { 30 } else { 4 }).to_string();
+        let mut cmd = f.command(&["--apply", "--timeout", timeout.as_str()]);
         cmd.arg(&f.worktree);
         with_shim(&mut cmd, &bin);
         let child = cmd
@@ -729,7 +740,7 @@ fn deadline_and_cancellation_terminate_groups_without_retrying_cleanup() {
         }
         let out = child.wait_with_output().unwrap();
         assert!(
-            execution.elapsed() < Duration::from_secs(8),
+            execution.elapsed() < common::time(8),
             "shutdown exceeded its bounded budget: {}",
             text(&out)
         );
@@ -742,7 +753,7 @@ fn deadline_and_cancellation_terminate_groups_without_retrying_cleanup() {
         assert_eq!(fs::read_to_string(count).unwrap(), "attempt\n");
         assert!(!escaped.exists(), "sentinel must wait for explicit release");
         fs::write(release, "release\n").unwrap();
-        std::thread::sleep(Duration::from_secs(3));
+        std::thread::sleep(common::time(3));
         assert!(!escaped.exists());
         f.unchanged();
     }
@@ -1869,7 +1880,8 @@ fn cancellation_after_native_removal_reports_unverified_and_releases_lock() {
     sleep 30
     exit 0;;
 esac"#);
-    let mut cmd = f.command(&["--apply", "--timeout", "30"]);
+    let timeout = common::secs(30).to_string();
+    let mut cmd = f.command(&["--apply", "--timeout", timeout.as_str()]);
     cmd.arg(&f.worktree)
         .env("REAL_GIT", git_program())
         .env("PROBE_ATTEMPTS", &attempts)
@@ -1884,8 +1896,8 @@ esac"#);
         .spawn()
         .unwrap();
     // Reaching removal is setup, bounded by the existing command timeout.
-    // Cancellation responsiveness gets its own ten-second budget below.
-    let deadline = Instant::now() + Duration::from_secs(30);
+    // Cancellation responsiveness gets its own budget below.
+    let deadline = Instant::now() + common::time(30);
     while !started.exists() && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(10));
     }
@@ -1893,7 +1905,7 @@ esac"#);
     unsafe {
         libc::kill(child.id() as i32, libc::SIGINT);
     }
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + common::time(10);
     while child.try_wait().unwrap().is_none() && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(10));
     }
@@ -1934,7 +1946,7 @@ esac"#);
     );
     assert_eq!(fs::read_to_string(attempts).unwrap(), "attempted\n");
     fs::write(release, "release\n").unwrap();
-    std::thread::sleep(Duration::from_secs(3));
+    std::thread::sleep(common::time(3));
     assert!(
         !escaped.exists(),
         "removal descendants must not survive cancellation"
@@ -2053,7 +2065,7 @@ fn discovery_is_visible_before_git_finishes_and_counts_toward_elapsed() {
             .stderr(fs::File::create(&stderr).unwrap())
             .spawn()
             .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + common::time(10);
         while !sentinel.exists() && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(10));
         }
@@ -2089,7 +2101,7 @@ fn cancellation_during_discovery_reports_interruption_without_starting_mutation(
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + common::time(10);
         while !sentinel.exists() && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(10));
         }
@@ -2097,7 +2109,7 @@ fn cancellation_during_discovery_reports_interruption_without_starting_mutation(
         unsafe {
             libc::kill(child.id() as i32, libc::SIGINT);
         }
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + common::time(10);
         while child.try_wait().unwrap().is_none() && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(10));
         }
@@ -3107,6 +3119,7 @@ fn pragmatic_recovery_deadlines_and_cancellation_preserve_work_and_release_locks
         let started = f.temp.path().join("recovery-started");
         let count = f.temp.path().join("attempts");
         let shim = f.shim("case \" $* \" in *' update-ref '*) echo attempt >> \"$PROBE_COUNT\"; touch \"$PROBE_STARTED\"; sleep 30;; esac");
+        let timeout = common::secs(if cancel { 30 } else { 8 }).to_string();
         let mut c = Command::new(BIN);
         env(&mut c);
         c.args([
@@ -3116,7 +3129,7 @@ fn pragmatic_recovery_deadlines_and_cancellation_preserve_work_and_release_locks
             "--apply",
             "--json",
             "--timeout",
-            if cancel { "30" } else { "8" },
+            timeout.as_str(),
         ])
         .arg(&f.worktree)
         .env("PROBE_STARTED", &started)
@@ -3128,7 +3141,7 @@ fn pragmatic_recovery_deadlines_and_cancellation_preserve_work_and_release_locks
         let mut child = c.spawn().unwrap();
         // Allow real preflight under concurrent suite load, then exercise the
         // hung recovery command. The public deadline and its reason stay asserted.
-        let startup_deadline = launched + Duration::from_secs(10);
+        let startup_deadline = launched + common::time(10);
         while !started.exists() {
             if child.try_wait().unwrap().is_some() {
                 panic!(
@@ -3154,7 +3167,7 @@ fn pragmatic_recovery_deadlines_and_cancellation_preserve_work_and_release_locks
         }
         let out = child.wait_with_output().unwrap();
         assert!(
-            launched.elapsed() < Duration::from_secs(15),
+            launched.elapsed() < common::time(15),
             "cleanup did not honor its bounded deadline"
         );
         assert!(
@@ -3580,7 +3593,7 @@ esac
         impl Drop for HookCleanup {
             fn drop(&mut self) {
                 let _ = fs::write(&self.release, "release");
-                for _ in 0..200 {
+                for _ in 0..200 * common::pace() {
                     if self.done.exists() {
                         return;
                     }
@@ -3614,7 +3627,7 @@ if trigger and not os.path.exists(os.environ['PROBE_READY']):
         os.closerange(3, 65536)
         with open(os.environ['PROBE_DONE'], 'w') as f: f.write('done')
         os._exit(0)
-    deadline = time.monotonic() + 5
+    deadline = time.monotonic() + 5 * int(os.environ.get('WORKCTL_TEST_PACE', '1'))
     while not os.path.exists(os.environ['PROBE_READY']):
         if time.monotonic() > deadline: sys.exit(1)
         time.sleep(0.01)
@@ -3716,7 +3729,7 @@ fn destructive_cleanup_keeps_the_lock_after_its_supervisor_is_killed() {
         env(&mut cmd);
         cmd.args(["git", "worktree", "clean", "--apply", "--json"])
             .arg(&f.worktree)
-            .args(["--timeout", "8"])
+            .args(["--timeout", common::secs(8).to_string().as_str()])
             .env("PROBE_GROUP", &group)
             .env("PROBE_STARTED", &started)
             .stdout(Stdio::piped())
@@ -3744,7 +3757,7 @@ fn destructive_cleanup_keeps_the_lock_after_its_supervisor_is_killed() {
             text(&busy)
         );
         if orphan_deadline {
-            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            let deadline = std::time::Instant::now() + common::time(10);
             while !probe().status.success() {
                 assert!(
                     std::time::Instant::now() < deadline,
@@ -3808,7 +3821,7 @@ maximum = update(1)
 (root / ('ready-' + str(os.getpid()))).write_text(json.dumps({'group': os.getpgrp(), 'owner': os.getppid()}))
 try:
     if maximum > 2: sys.exit(73)
-    until = time.monotonic() + 12
+    until = time.monotonic() + 12 * int(os.environ.get('WORKCTL_TEST_PACE', '1'))
     while not (root / 'release').exists():
         if time.monotonic() > until: sys.exit(74)
         time.sleep(0.01)
@@ -3836,7 +3849,7 @@ finally:
                 "--jobs",
                 "2",
                 "--timeout",
-                "15",
+                common::secs(15).to_string().as_str(),
             ])
             .arg(&f.repo)
             .env("PROBE_GATE", &gate)
@@ -3858,7 +3871,7 @@ finally:
                 })
                 .collect::<Vec<_>>()
         };
-        let until = Instant::now() + Duration::from_secs(10);
+        let until = Instant::now() + common::time(10);
         while ready().len() < 2 {
             assert!(Instant::now() < until, "parallel removal did not start");
             std::thread::sleep(Duration::from_millis(10));
@@ -3902,7 +3915,7 @@ finally:
                 unsafe {
                     libc::kill(-group, libc::SIGKILL);
                 }
-                let until = Instant::now() + Duration::from_secs(5);
+                let until = Instant::now() + common::time(5);
                 while unsafe { libc::kill(owner, 0) } == 0 {
                     assert!(Instant::now() < until, "orphaned owner stayed alive");
                     std::thread::sleep(Duration::from_millis(10));
@@ -3985,7 +3998,7 @@ fn inspection_revalidates_only_owned_registration_races_and_preserves_new_data()
 root = pathlib.Path(os.environ['PROBE_STATE'])
 args = sys.argv[1:]; mode = os.environ['PROBE_MODE']
 def wait(name):
-    deadline = time.monotonic() + 10
+    deadline = time.monotonic() + 10 * int(os.environ.get('WORKCTL_TEST_PACE', '1'))
     while not (root / name).exists():
         if time.monotonic() > deadline: sys.exit(74)
         time.sleep(.01)
@@ -4037,7 +4050,7 @@ esac
                 "--jobs",
                 "2",
                 "--timeout",
-                "15",
+                common::secs(15).to_string().as_str(),
             ])
             .arg(if mode == "idle" { &fast } else { &f.repo })
             .env("PROBE_STATE", &state)
@@ -4051,17 +4064,17 @@ esac
             .spawn()
             .unwrap();
         let injected = state.join("injected");
-        let until = Instant::now() + Duration::from_secs(10);
+        let until = Instant::now() + common::time(10);
         while !injected.exists() && Instant::now() < until {
             std::thread::sleep(Duration::from_millis(10));
         }
         if !injected.exists() {
-            // Preserve the ten-second assertion and reap the failed fixture,
+            // Preserve the start assertion and reap the failed fixture,
             // including its diagnostics, after releasing any owned native gate.
             fs::write(&release, "release").unwrap();
             let out = child.wait_with_output().unwrap();
             panic!(
-                "registration fault did not start within ten seconds ({mode}): {}",
+                "registration fault did not start in time ({mode}): {}",
                 text(&out)
             );
         }
@@ -4153,7 +4166,7 @@ if 'remove' not in args:
 counter(1)
 (root / ('ready-' + str(os.getpid()))).touch()
 try:
-    deadline = time.monotonic() + 10
+    deadline = time.monotonic() + 10 * int(os.environ.get('WORKCTL_TEST_PACE', '1'))
     slow = pathlib.Path(args[-1]).resolve() == pathlib.Path(os.environ['PROBE_SLOW']).resolve()
     if slow: (root / 'slow-started').touch()
     while len(list(root.glob('ready-*'))) < 2 or (slow and not (root / 'release').exists()):
@@ -4185,7 +4198,7 @@ finally:
             "--jobs",
             "2",
             "--timeout",
-            "15",
+            common::secs(15).to_string().as_str(),
         ])
         .arg(&f.repo)
         .env("PROBE_STATE", &state)
@@ -4203,7 +4216,7 @@ finally:
         "slow native removal must still be gated"
     );
     let overlap = state.join("verification-overlapped-removal");
-    let until = Instant::now() + Duration::from_secs(1);
+    let until = Instant::now() + common::time(1);
     while !overlap.exists() && Instant::now() < until {
         std::thread::sleep(Duration::from_millis(10));
     }

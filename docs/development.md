@@ -151,6 +151,12 @@ removes its temporary files after replaying the complete output. Hosted logs
 live in the existing runtime artifact directory, so timeout diagnostics can be uploaded by the always-run
 artifact step. Tests retain their existing assertions and time limits.
 
+Time budgets in the Git suites are written for an idle machine. `tests/common/mod.rs`
+measures how slowly the machine starts Git as a suite runs and multiplies every wait,
+product deadline, simulated hang, and polling limit in a scenario by that pace, which
+only rises during a run. An idle machine runs the written values. A busy one runs the
+same scenarios more slowly instead of reading a late subprocess as a hang.
+
 Hosted jobs cache dependency build outputs by OS, architecture, exact Rust
 compiler identity, manifest, lockfile, and Cargo configuration. There are no
 fallback restore keys. Every non-registry package's outputs, including shared

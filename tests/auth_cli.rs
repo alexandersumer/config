@@ -1,5 +1,6 @@
 //! Real workctl CLI, OS process groups, pipes, locks, argv and files. The external
 //! provider CLIs are simulated; real account/cache proof lives in auth_live.rs.
+mod common;
 use serde_json::{json, Value};
 use std::fs;
 use std::os::unix::fs::{symlink, PermissionsExt};
@@ -118,6 +119,7 @@ impl Fixture {
         let mut c = Command::new(BIN);
         c.args(args)
             .env("AUTH_FIXTURE", self.root.path())
+            .env(common::PACE, common::pace().to_string())
             .env(
                 "PATH",
                 format!("{}:/usr/bin:/bin", self.root.path().join("bin").display()),
@@ -167,7 +169,7 @@ fn text(out: &Output) -> String {
     )
 }
 fn wait_file(path: &std::path::Path) {
-    let end = Instant::now() + Duration::from_secs(10);
+    let end = Instant::now() + common::time(10);
     while !path.exists() {
         assert!(Instant::now() < end, "fixture did not start: {path:?}");
         std::thread::sleep(Duration::from_millis(10));
@@ -536,14 +538,14 @@ fn deadline_and_cancellation_clean_provider_descendants_and_release_lock() {
                 "logs",
                 "--json",
                 "--timeout",
-                "10",
+                &common::secs(10).to_string(),
             ])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
         let started = f.root.path().join("started");
-        let startup_deadline = Instant::now() + Duration::from_secs(10);
+        let startup_deadline = Instant::now() + common::time(10);
         while !started.exists() {
             let stopped = child.try_wait().unwrap().is_some();
             if stopped || Instant::now() >= startup_deadline {
@@ -567,7 +569,7 @@ fn deadline_and_cancellation_clean_provider_descendants_and_release_lock() {
             if child.try_wait().unwrap().is_some() {
                 break;
             }
-            assert!(began.elapsed() < Duration::from_secs(12));
+            assert!(began.elapsed() < common::time(12));
             std::thread::sleep(Duration::from_millis(10));
         }
         let out = child.wait_with_output().unwrap();
@@ -665,7 +667,7 @@ fn activation_prompt_is_visible_before_provider_completes_and_no_secret_leaks() 
     });
     // Measure forwarding after the provider emits its prompt, not cold CLI startup.
     wait_file(&f.root.path().join("started"));
-    let visible = rx.recv_timeout(Duration::from_secs(3));
+    let visible = rx.recv_timeout(common::time(3));
     fs::write(f.root.path().join("release"), "").unwrap();
     let out = child.wait_with_output().unwrap();
     let stderr = reader.join().unwrap();
@@ -717,7 +719,7 @@ fn credentials_are_rechecked_for_age_at_command_handoff() {
     f.started("twg-doctor");
     f.finished("bb-workspace-list");
     // Let an already verified credential expire while another provider waits.
-    std::thread::sleep(Duration::from_secs(9));
+    std::thread::sleep(common::time(9));
     f.release("twg-doctor");
     let r = child.finish(1);
     assert_eq!(r["targets"][0]["status"], "blocked", "{r}");
@@ -763,7 +765,7 @@ fn special_or_oversized_profile_files_fail_promptly_without_provider_calls() {
     assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
     let start = Instant::now();
     f.run(&["--config", path.to_str().unwrap()], 1);
-    assert!(start.elapsed() < Duration::from_secs(2));
+    assert!(start.elapsed() < common::time(2));
     assert!(f.calls().is_empty());
     fs::remove_file(&path).unwrap();
     fs::write(&path, vec![b'x'; 65537]).unwrap();
@@ -810,13 +812,28 @@ fn exec_preserves_non_utf8_arguments_and_signal_status() {
 fn coordination_wait_has_a_deadline_and_does_not_invoke_providers() {
     let f = Fixture::new(json!({"mode":"hang"}));
     let mut first = f
-        .command(&["auth", "preflight", "--profile", "logs", "--timeout", "10"])
+        .command(&[
+            "auth",
+            "preflight",
+            "--profile",
+            "logs",
+            "--timeout",
+            &common::secs(10).to_string(),
+        ])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
         .unwrap();
     wait_file(&f.root.path().join("started"));
-    let r = f.run(&["--profile", "logs", "--timeout", "1"], 1);
+    let r = f.run(
+        &[
+            "--profile",
+            "logs",
+            "--timeout",
+            &common::secs(1).to_string(),
+        ],
+        1,
+    );
     assert!(r["error"]
         .as_str()
         .unwrap()
@@ -837,7 +854,15 @@ fn coordination_wait_has_a_deadline_and_does_not_invoke_providers() {
 #[test]
 fn inconclusive_refresh_checks_the_cache_once_without_reissuing() {
     let f = Fixture::new(json!({"atlas_valid":false,"refresh_hang":true}));
-    let r = f.run(&["--profile", "logs", "--login-timeout", "3"], 0);
+    let r = f.run(
+        &[
+            "--profile",
+            "logs",
+            "--login-timeout",
+            &common::secs(3).to_string(),
+        ],
+        0,
+    );
     assert_eq!(r["targets"][0]["status"], "refreshed");
     assert_eq!(f.calls().len(), 3);
     assert_eq!(
@@ -1327,7 +1352,7 @@ fn service_progress_identifies_the_audience_before_any_browser_prompt() {
 struct RunningAuth(std::process::Child);
 impl RunningAuth {
     fn finish(mut self, expected: i32) -> Value {
-        let deadline = Instant::now() + Duration::from_secs(15);
+        let deadline = Instant::now() + common::time(15);
         while self.0.try_wait().unwrap().is_none() {
             assert!(Instant::now() < deadline, "auth workers did not finish");
             std::thread::sleep(Duration::from_millis(10));
@@ -1366,12 +1391,18 @@ impl Drop for RunningAuth {
 impl Fixture {
     fn start(&self, extra: &[&str]) -> RunningAuth {
         RunningAuth(
-            self.command(&["auth", "preflight", "--json", "--timeout", "30"])
-                .args(extra)
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()
-                .unwrap(),
+            self.command(&[
+                "auth",
+                "preflight",
+                "--json",
+                "--timeout",
+                &common::secs(30).to_string(),
+            ])
+            .args(extra)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap(),
         )
     }
     fn started(&self, key: &str) {
@@ -1453,7 +1484,7 @@ fn interactive_commands_are_exclusive_while_background_work_continues() {
     ]));
     let child = f.start(&["--force", "--config", &config]);
     f.started("twg-doctor");
-    let end = Instant::now() + Duration::from_secs(5);
+    let end = Instant::now() + common::time(5);
     while !f.has_started("bb-auth-login") && !f.has_started("atlas-force-service") {
         assert!(Instant::now() < end);
         std::thread::sleep(Duration::from_millis(10));
@@ -1494,18 +1525,18 @@ fn queued_login_receives_its_full_command_deadline() {
         "--config",
         &config,
         "--timeout",
-        "2",
+        &common::secs(2).to_string(),
         "--login-timeout",
-        "5",
+        &common::secs(5).to_string(),
     ]);
     f.started("bb-auth-status");
     f.started("atlas-force-service");
     f.release("bb-auth-status");
     f.finished("bb-workspace-list");
-    std::thread::sleep(Duration::from_secs(3));
+    std::thread::sleep(common::time(3));
     f.release("atlas-force-service");
     f.started("bb-auth-login");
-    std::thread::sleep(Duration::from_secs(3));
+    std::thread::sleep(common::time(3));
     f.release("bb-auth-login");
     let result = child.finish(0);
     assert_eq!(result["status"], "completed");
@@ -1527,17 +1558,23 @@ fn provider_timeout_preserves_results_and_continues_other_provider_queues() {
         {"provider":"slauth","audience":"third"},
         {"provider":"bitbucket"}
     ]));
-    let child = f.start(&["--check", "--config", &config, "--timeout", "5"]);
+    let child = f.start(&[
+        "--check",
+        "--config",
+        &config,
+        "--timeout",
+        &common::secs(5).to_string(),
+    ]);
     f.started("twg-doctor");
     f.started("atlas-cache-first");
-    std::thread::sleep(Duration::from_secs(2));
+    std::thread::sleep(common::time(2));
     f.release("atlas-cache-first");
     f.started("atlas-cache-second");
     let descendant: i32 = fs::read_to_string(f.root.path().join("descendant-twg-doctor"))
         .unwrap()
         .parse()
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(8);
+    let deadline = Instant::now() + common::time(8);
     while alive(descendant) {
         assert!(
             Instant::now() < deadline,
@@ -1577,7 +1614,7 @@ fn cancellation_cleans_multiple_workers_and_does_not_launch_queued_interaction()
     f.started("twg-doctor");
     f.finished("bb-auth-status");
     f.finished("atlas-cache-service");
-    let end = Instant::now() + Duration::from_secs(5);
+    let end = Instant::now() + common::time(5);
     while !f.has_started("bb-auth-login") && !f.has_started("atlas-force-service") {
         assert!(Instant::now() < end);
         std::thread::sleep(Duration::from_millis(10));
@@ -1615,7 +1652,7 @@ fn coordination_timeout_is_independent_of_provider_command_timeout() {
             "logs",
             "--check",
             "--coordination-timeout",
-            "1",
+            &common::secs(1).to_string(),
         ])
         .finish(1);
     assert!(result["error"]
@@ -1628,12 +1665,12 @@ fn coordination_timeout_is_independent_of_provider_command_timeout() {
         "logs",
         "--check",
         "--timeout",
-        "1",
+        &common::secs(1).to_string(),
         "--coordination-timeout",
-        "5",
+        &common::secs(5).to_string(),
     ]);
     // Exceed the provider timeout while the second invocation is queued.
-    std::thread::sleep(Duration::from_millis(1200));
+    std::thread::sleep(Duration::from_millis(1200 * common::pace()));
     f.release("atlas-cache-splunk.paas-inf.net");
     first.finish(0);
     second.finish(0);
@@ -2179,7 +2216,15 @@ fn micros_bad_issuance_never_runs_login_or_launches_a_wrapped_command() {
 #[test]
 fn micros_login_timeout_fails_even_with_a_fresh_cache() {
     let f = Fixture::new(json!({"atlas_valid":false,"hang_keys":["atlas-micros-login"]}));
-    let r = f.run(&["--profile", "micros", "--login-timeout", "1"], 1);
+    let r = f.run(
+        &[
+            "--profile",
+            "micros",
+            "--login-timeout",
+            &common::secs(1).to_string(),
+        ],
+        1,
+    );
     assert_eq!(r["targets"][0]["status"], "failed");
     let pid = fs::read_to_string(f.root.path().join("descendant-atlas-micros-login"))
         .unwrap()
@@ -2258,6 +2303,7 @@ impl PullRequestApi {
         let mut server = Command::new("/usr/bin/python3")
             .args(["-u", "-c", include_str!("fixtures/bitbucket_pr_api.py")])
             .arg(root.path())
+            .env(common::PACE, common::pace().to_string())
             .arg(mode)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -2811,7 +2857,7 @@ fn pr_approve_e2e_waits_cancellably_and_previews_bypass_the_write_lock() {
                 .unwrap(),
         )
     };
-    let timed_out = spawn(&["team/two", "--lock-timeout", "1"]).finish(1);
+    let timed_out = spawn(&["team/two", "--lock-timeout", &common::secs(1).to_string()]).finish(1);
     assert!(timed_out["error"]
         .as_str()
         .unwrap()
@@ -2827,7 +2873,7 @@ fn pr_approve_e2e_waits_cancellably_and_previews_bypass_the_write_lock() {
                 .spawn()
                 .unwrap(),
         );
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + common::time(10);
         while !fs::read_to_string(&progress)
             .unwrap()
             .contains("Waiting for another pull request approval run")
