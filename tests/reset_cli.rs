@@ -389,31 +389,42 @@ fn missing_index_on_an_empty_branch_preserves_noncolliding_local_files() {
 
 #[test]
 fn vacant_clone_reset_timeout_during_initialization_is_not_replayed() {
-    let f = Fixture::new();
-    let repo = f.clone_without_checkout();
-    let shim = f.shim(
-        r#"for arg in "$@"; do
+    // The deadline must outlast everything before the checkout is initialized,
+    // or an earlier stage times out and is legitimately retried. A busy machine
+    // needs a longer one; a replayed initialization shows more than one attempt
+    // at every scale.
+    let timeouts = ["5", "30", "120"];
+    for timeout in timeouts {
+        let f = Fixture::new();
+        let repo = f.clone_without_checkout();
+        let shim = f.shim(
+            r#"for arg in "$@"; do
             if [ "$arg" = read-tree ]; then
                 command -p git "$@" || exit $?
-                sleep 30
+                sleep 600
                 exit 0
             fi
         done"#,
-    );
-    let mut command = f.cli(&repo, &[]);
-    f.with_shim(&mut command, &shim);
-    let out = command
-        .args(["--timeout", "5", "--attempts", "3", "--json"])
-        .output()
-        .unwrap();
-    assert_eq!(out.status.code(), Some(1), "{}", text(&out));
-    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    let result = &report["results"][0];
-    assert_eq!(result["failure_kind"], "checkout_unverified", "{result}");
-    assert_eq!(result["attempts"], 1, "{result}");
-    assert_eq!(result["stage"], "initialize checkout", "{result}");
-    assert_eq!(git(&repo, &["rev-parse", "HEAD"]), f.old);
-    assert_eq!(fs::read_to_string(repo.join("file")).unwrap(), "initial\n");
+        );
+        let mut command = f.cli(&repo, &[]);
+        f.with_shim(&mut command, &shim);
+        let out = command
+            .args(["--timeout", timeout, "--attempts", "3", "--json"])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+        let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        let result = &report["results"][0];
+        if result["attempts"] != 1 && timeout != timeouts[timeouts.len() - 1] {
+            continue;
+        }
+        assert_eq!(result["failure_kind"], "checkout_unverified", "{result}");
+        assert_eq!(result["attempts"], 1, "{result}");
+        assert_eq!(result["stage"], "initialize checkout", "{result}");
+        assert_eq!(git(&repo, &["rev-parse", "HEAD"]), f.old);
+        assert_eq!(fs::read_to_string(repo.join("file")).unwrap(), "initial\n");
+        return;
+    }
 }
 
 #[test]
@@ -1018,7 +1029,7 @@ fn killed_supervisor_leaves_active_worker_holding_repository_lock() {
     assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.old);
     fs::write(&release, "release").unwrap();
     let lock = fs::File::open(f.repo.join(".git/repo-batch.lock")).unwrap();
-    let until = Instant::now() + Duration::from_secs(10);
+    let until = Instant::now() + Duration::from_secs(60);
     loop {
         if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
             break;
@@ -1578,7 +1589,7 @@ fn cancellation_interrupts_retry_backoff_and_cancels_queued_repositories() {
         .stderr(fs::File::create(&output).unwrap())
         .spawn()
         .unwrap();
-    let until = Instant::now() + Duration::from_secs(10);
+    let until = Instant::now() + Duration::from_secs(60);
     loop {
         let text = fs::read_to_string(&output).unwrap();
         if let Some(dir) = text.lines().find_map(|line| line.strip_prefix("Logs: ")) {

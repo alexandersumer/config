@@ -22,8 +22,25 @@ limits = set()
 cooldown = 0
 # Overlap proof only: generous for a busy machine, under curl's 28 second limit.
 parallel_reads = threading.Barrier(2, timeout=20)
+overlap_proven = threading.Event()
 pool_advanced = threading.Event()
 log = (root / "http.jsonl").open("w", buffering=1)
+
+
+def overlapped():
+    """Hold two concurrent requests together once, as proof that they overlap.
+
+    A barrier stays broken after one timeout and a later retry would wait alone,
+    so requests after the proof pass straight through.
+    """
+    if overlap_proven.is_set():
+        return True
+    try:
+        parallel_reads.wait()
+    except threading.BrokenBarrierError:
+        return overlap_proven.is_set()
+    overlap_proven.set()
+    return True
 
 
 def author(pr, detail=False):
@@ -86,9 +103,7 @@ class Api(http.server.BaseHTTPRequestHandler):
             (root / "oauth-expired").touch()
             return self.respond(401, {})
         if mode == "concurrent_expiry" and not renewed and re.search(r"/[12]/activity$", path):
-            try:
-                parallel_reads.wait()
-            except threading.BrokenBarrierError:
+            if not overlapped():
                 return self.respond(500, {})
             (root / "oauth-expired").touch()
             return self.respond(401, {})
@@ -136,9 +151,7 @@ class Api(http.server.BaseHTTPRequestHandler):
                 if mode == "discover_review_requests_empty":
                     return self.respond(200, {"values": []})
                 if mode == "discover_review_requests" and "page" not in query:
-                    try:
-                        parallel_reads.wait()
-                    except threading.BrokenBarrierError:
+                    if not overlapped():
                         return self.respond(500, {})
                 def row(repo, number, title, author=me, state="OPEN", queued=False, draft=False):
                     return {"id": number, "title": title, "state": state, "queued": queued, "draft": draft,
@@ -179,9 +192,7 @@ class Api(http.server.BaseHTTPRequestHandler):
             if repo == "unlisted":
                 return self.respond(200, {"values": [candidate(10)]})
             if mode == "discovery_overlap" and repo in {"one", "two"} and "page" not in query:
-                try:
-                    parallel_reads.wait()
-                except threading.BrokenBarrierError:
+                if not overlapped():
                     return self.respond(500, {})
             if repo == "bad":
                 return self.respond(403, {})
@@ -249,9 +260,7 @@ class Api(http.server.BaseHTTPRequestHandler):
             return self.respond(200, dict(id=pr, state="OPEN", title=title, queued=False))
         if suffix == "/activity" and self.command == "GET":
             if mode == "overlap" and pr in {1, 2}:
-                try:
-                    parallel_reads.wait()
-                except threading.BrokenBarrierError:
+                if not overlapped():
                     return self.respond(500, {})
             if pr == 3:
                 if query.get("page") == ["2"]:

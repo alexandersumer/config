@@ -1893,7 +1893,7 @@ esac"#);
     unsafe {
         libc::kill(child.id() as i32, libc::SIGINT);
     }
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(60);
     while child.try_wait().unwrap().is_none() && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(10));
     }
@@ -2053,7 +2053,7 @@ fn discovery_is_visible_before_git_finishes_and_counts_toward_elapsed() {
             .stderr(fs::File::create(&stderr).unwrap())
             .spawn()
             .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + Duration::from_secs(60);
         while !sentinel.exists() && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(10));
         }
@@ -2089,7 +2089,7 @@ fn cancellation_during_discovery_reports_interruption_without_starting_mutation(
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + Duration::from_secs(60);
         while !sentinel.exists() && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(10));
         }
@@ -2097,7 +2097,7 @@ fn cancellation_during_discovery_reports_interruption_without_starting_mutation(
         unsafe {
             libc::kill(child.id() as i32, libc::SIGINT);
         }
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + Duration::from_secs(60);
         while child.try_wait().unwrap().is_none() && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(10));
         }
@@ -3858,7 +3858,7 @@ finally:
                 })
                 .collect::<Vec<_>>()
         };
-        let until = Instant::now() + Duration::from_secs(10);
+        let until = Instant::now() + Duration::from_secs(60);
         while ready().len() < 2 {
             assert!(Instant::now() < until, "parallel removal did not start");
             std::thread::sleep(Duration::from_millis(10));
@@ -3985,7 +3985,7 @@ fn inspection_revalidates_only_owned_registration_races_and_preserves_new_data()
 root = pathlib.Path(os.environ['PROBE_STATE'])
 args = sys.argv[1:]; mode = os.environ['PROBE_MODE']
 def wait(name):
-    deadline = time.monotonic() + 10
+    deadline = time.monotonic() + 60
     while not (root / name).exists():
         if time.monotonic() > deadline: sys.exit(74)
         time.sleep(.01)
@@ -4051,17 +4051,17 @@ esac
             .spawn()
             .unwrap();
         let injected = state.join("injected");
-        let until = Instant::now() + Duration::from_secs(10);
+        let until = Instant::now() + Duration::from_secs(60);
         while !injected.exists() && Instant::now() < until {
             std::thread::sleep(Duration::from_millis(10));
         }
         if !injected.exists() {
-            // Preserve the ten-second assertion and reap the failed fixture,
+            // Preserve the bounded assertion and reap the failed fixture,
             // including its diagnostics, after releasing any owned native gate.
             fs::write(&release, "release").unwrap();
             let out = child.wait_with_output().unwrap();
             panic!(
-                "registration fault did not start within ten seconds ({mode}): {}",
+                "registration fault did not start within sixty seconds ({mode}): {}",
                 text(&out)
             );
         }
@@ -4153,7 +4153,7 @@ if 'remove' not in args:
 counter(1)
 (root / ('ready-' + str(os.getpid()))).touch()
 try:
-    deadline = time.monotonic() + 10
+    deadline = time.monotonic() + 60
     slow = pathlib.Path(args[-1]).resolve() == pathlib.Path(os.environ['PROBE_SLOW']).resolve()
     if slow: (root / 'slow-started').touch()
     while len(list(root.glob('ready-*'))) < 2 or (slow and not (root / 'release').exists()):

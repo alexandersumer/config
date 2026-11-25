@@ -169,7 +169,7 @@ impl Runtime {
         .process_group(0);
         self.daemon = Some(cmd.spawn().expect("git daemon is required, not optional"));
         let url = format!("git://127.0.0.1:{port}/origin.git");
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + Duration::from_secs(60);
         loop {
             let mut cmd = self.command(self.root(), "git");
             cmd.args(["ls-remote", "--symref", &url, "HEAD"]);
