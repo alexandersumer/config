@@ -102,6 +102,9 @@ impl Operation {
                 crate::presentation::shell_arg(self.git.cwd.as_os_str())
             ));
         }
+        self.check_no_operation()
+    }
+    fn check_no_operation(&self) -> Result<(), String> {
         for marker in [
             "MERGE_HEAD",
             "CHERRY_PICK_HEAD",
@@ -118,6 +121,35 @@ impl Operation {
             }
         }
         Ok(())
+    }
+    fn vacant_head(&self) -> Result<Option<String>, String> {
+        if git::exists(&self.git.metadata("index"))? {
+            return Ok(None);
+        }
+        let Some(head) =
+            self.git
+                .optional(&["rev-parse", "--verify", "--quiet", "HEAD^{commit}"])?
+        else {
+            return Ok(None);
+        };
+        let head = super::object_id(&git::reference_text(head)?)?;
+        self.check_no_operation()?;
+        if git::exists(&self.git.metadata("index.lock"))? {
+            return Err("Git index is locked; refusing to initialize checkout".into());
+        }
+        for entry in fs::read_dir(&self.git.cwd).map_err(|e| e.to_string())? {
+            if entry.map_err(|e| e.to_string())?.file_name() != ".git" {
+                // A genuinely empty HEAD is already handled by normal reset checks.
+                if self.git.call(&["ls-tree", "-z", &head])?.is_empty() {
+                    return Ok(None);
+                }
+                return Err(
+                    "Git index is missing and checkout contains local entries; refusing to initialize checkout"
+                        .into(),
+                );
+            }
+        }
+        Ok(Some(head))
     }
     fn tree(&self, target: &str) -> Result<(), String> {
         self.clean()?;
@@ -439,7 +471,10 @@ impl Operation {
         fetch_stderr: &fs::File,
     ) -> Result<(), String> {
         self.stage("preflight")?;
-        self.clean()?;
+        let vacant_head = self.vacant_head()?;
+        if vacant_head.is_none() {
+            self.clean()?;
+        }
         if let Some(hint) = hint {
             super::object_id(hint)?;
             if !self.git.has_local_commit(hint) {
@@ -612,6 +647,9 @@ impl Operation {
         if partial {
             let mut trees = vec![oid.as_str()];
             trees.extend(old.as_deref().filter(|old| *old != oid));
+            if let Some(head) = vacant_head.as_deref().filter(|head| !trees.contains(head)) {
+                trees.push(head);
+            }
             self.hydrate_checkout(&trees, &mut promisors, fetch_stderr)?;
             if self
                 .git
@@ -625,6 +663,36 @@ impl Operation {
                         .into(),
                 );
             }
+        }
+        let expected_checkout = || Checkout {
+            local_ref: local_ref.clone(),
+            oid: oid.clone(),
+            upstream: destination.clone(),
+        };
+        if let Some(head) = vacant_head.as_deref() {
+            if self.vacant_head()?.as_deref() != Some(head) {
+                return Err("Vacant checkout changed during fetch; refusing initialization".into());
+            }
+            self.status.checkout = Some(expected_checkout());
+            self.stage("initialize checkout")?;
+            // Merging the identical tree into itself preserves a newly created
+            // index and refuses worktree collisions even after the final probe.
+            checkout_action(
+                &self.git,
+                partial,
+                &[
+                    "read-tree",
+                    "-m",
+                    "-u",
+                    "--no-recurse-submodules",
+                    head,
+                    head,
+                ],
+            )?;
+            if self.git.text(&["rev-parse", "--verify", "HEAD^{commit}"])? != head {
+                return Err("HEAD changed during checkout initialization; refusing reset".into());
+            }
+            println!("Initialized vacant checkout at {head}");
         }
         self.stage("check trees and backup")?;
         self.tree(&oid)?;
@@ -650,11 +718,7 @@ impl Operation {
                 );
             }
         }
-        self.status.checkout = Some(Checkout {
-            local_ref: local_ref.clone(),
-            oid: oid.clone(),
-            upstream: destination.clone(),
-        });
+        self.status.checkout.get_or_insert_with(expected_checkout);
         self.stage("switch")?;
         if old.is_some() {
             checkout_action(

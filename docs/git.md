@@ -52,6 +52,15 @@ paths that collide with either target tree cause refusal. In a sparse checkout,
 Git's active rules must exclude every absent skip-worktree path. This requires
 a Git version with `sparse-checkout check-rules` (2.42 or later). Assume-unchanged
 paths and unexpected skip-worktree paths still cause refusal.
+A primary clone with a valid HEAD, no index, and no entries outside `.git`
+can finish its initial checkout as part of reset. After verifying the fetched
+target, workctl rechecks that the checkout is still vacant, then uses Git's
+non-overwriting tree merge to materialize the existing HEAD before continuing.
+A missing index with local files and a nonempty HEAD tree, staged deletions,
+Git operation markers, and index locks still cause refusal. If initialization
+starts and the outcome cannot be verified, reset reports that the checkout
+requires inspection before retry.
+
 The remote's advertised HEAD determines the default branch. Reset fetches only
 that branch into its configured tracking ref, without pruning or updating unrelated
 branches or tags. Fetch mappings must resolve it unambiguously and never replace

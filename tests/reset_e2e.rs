@@ -193,6 +193,71 @@ impl Runtime {
 }
 
 #[test]
+fn vacant_partial_clone_initializes_with_verified_checkout_objects() {
+    let mut rt = Runtime::new();
+    let seed = rt.root().join("seed");
+    rt.git(rt.root(), &["init", "-b", "trunk", path(&seed)]);
+    fs::write(seed.join("file"), "base").unwrap();
+    rt.git(&seed, &["add", "file"]);
+    rt.git(&seed, &["commit", "-m", "base"]);
+    let base = rt.git(&seed, &["rev-parse", "HEAD"]);
+    rt.git(&seed, &["switch", "-c", "review"]);
+    fs::write(seed.join("file"), "review").unwrap();
+    rt.git(&seed, &["commit", "-am", "review"]);
+    let review = rt.git(&seed, &["rev-parse", "HEAD"]);
+    rt.git(&seed, &["switch", "trunk"]);
+    let origin = rt.root().join("origin.git");
+    rt.git(rt.root(), &["clone", "--bare", path(&seed), path(&origin)]);
+    rt.git(&origin, &["config", "uploadpack.allowFilter", "true"]);
+    rt.git(
+        &origin,
+        &["config", "uploadpack.allowAnySHA1InWant", "true"],
+    );
+    let url = rt.serve(&origin);
+    let vacant = rt.root().join("vacant");
+    rt.git(
+        rt.root(),
+        &[
+            "clone",
+            "--filter=blob:none",
+            "--no-checkout",
+            &url,
+            path(&vacant),
+        ],
+    );
+    rt.git(&vacant, &["update-ref", "refs/heads/review", &review]);
+    rt.git(&vacant, &["symbolic-ref", "HEAD", "refs/heads/review"]);
+    assert!(!vacant.join(".git/index").exists());
+    fs::write(seed.join("file"), "tip").unwrap();
+    rt.git(&seed, &["commit", "-am", "tip"]);
+    rt.git(&seed, &["push", path(&origin), "trunk"]);
+    let target = rt.git(&seed, &["rev-parse", "HEAD"]);
+
+    let mut command = rt.command(&vacant, &rt.binary);
+    command
+        .args(["git", "reset", "--json", "--attempts=1"])
+        .env("GIT_NO_LAZY_FETCH", "1");
+    let result = rt.run(command);
+    assert!(result.status.success(), "{}", text(&result));
+    assert_eq!(rt.git(&vacant, &["rev-parse", "HEAD"]), target);
+    assert_eq!(rt.git(&vacant, &["rev-parse", "review"]), review);
+    assert_eq!(rt.git(&vacant, &["rev-parse", "@{upstream}"]), target);
+    assert_eq!(rt.git(&vacant, &["status", "--porcelain"]), "");
+    assert_eq!(fs::read_to_string(vacant.join("file")).unwrap(), "tip");
+    assert_eq!(
+        rt.git(
+            &vacant,
+            &[
+                "for-each-ref",
+                "--format=%(objectname)",
+                "refs/home-reset-backups"
+            ]
+        ),
+        base
+    );
+}
+
+#[test]
 fn partial_sparse_reset_fetches_only_checkout_blobs_over_git_protocol() {
     let mut rt = Runtime::new();
     let seed = rt.root().join("seed");

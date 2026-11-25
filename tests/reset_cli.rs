@@ -111,6 +111,20 @@ impl Fixture {
         );
         path
     }
+    fn clone_without_checkout(&self) -> PathBuf {
+        let path = self.workspace.join("vacant");
+        git(
+            &self.workspace,
+            &[
+                "clone",
+                "--no-checkout",
+                origin_arg(&self.origin),
+                origin_arg(&path),
+            ],
+        );
+        git(&path, &["update-ref", "refs/heads/main", &self.old]);
+        path
+    }
     fn push_file(&self, name: &str) {
         fs::write(self.seed.join(name), "remote").unwrap();
         git(&self.seed, &["add", name]);
@@ -252,6 +266,151 @@ fn dirty_index_and_worktree_refuse_before_fetch_while_other_repos_finish() {
         assert_eq!(git(&other, &["rev-parse", "HEAD"]), f.new);
         assert_eq!(fs::read_to_string(f.repo.join("file")).unwrap(), "precious");
     }
+}
+
+#[test]
+fn vacant_clone_reset_initializes_checkout_and_saves_the_old_branch_tip() {
+    let f = Fixture::new();
+    let repo = f.clone_without_checkout();
+    assert!(!repo.join(".git/index").exists());
+    assert!(!repo.join("file").exists());
+    let out = f.run(&repo, &[]);
+    success(&out);
+    assert_eq!(fs::read_to_string(repo.join("file")).unwrap(), "updated\n");
+    assert_eq!(git(&repo, &["rev-parse", "HEAD"]), f.new);
+    assert_eq!(git(&repo, &["rev-parse", "@{upstream}"]), f.new);
+    assert_eq!(git(&repo, &["status", "--porcelain"]), "");
+    assert_eq!(
+        git(
+            &repo,
+            &[
+                "for-each-ref",
+                "--format=%(objectname)",
+                "refs/home-reset-backups"
+            ]
+        ),
+        f.old
+    );
+    assert!(fs::read_to_string(logs(&out).join("0001.log"))
+        .unwrap()
+        .contains("Stage: initialize checkout"));
+}
+
+#[test]
+fn vacant_clone_reset_refuses_worktree_entries_operation_markers_and_staged_deletions() {
+    for (state, expected) in [
+        (
+            "local-file",
+            "Git index is missing and checkout contains local entries",
+        ),
+        ("operation", "Git operation in progress"),
+        ("index-lock", "Git index is locked"),
+        ("staged-deletion", "Tracked changes"),
+    ] {
+        let f = Fixture::new();
+        let repo = f.clone_without_checkout();
+        git(&repo, &["update-ref", "refs/remotes/origin/main", &f.old]);
+        match state {
+            "local-file" => {
+                fs::write(repo.join("keep"), "precious").unwrap();
+                fs::write(repo.join(".git/info/exclude"), "keep\n").unwrap();
+            }
+            "operation" => fs::write(repo.join(".git/MERGE_HEAD"), &f.old).unwrap(),
+            "index-lock" => fs::write(repo.join(".git/index.lock"), "lock").unwrap(),
+            "staged-deletion" => {
+                git(&repo, &["read-tree", "--empty"]);
+            }
+            _ => unreachable!(),
+        }
+        failure(&f.run(&repo, &[]), expected);
+        assert_eq!(git(&repo, &["rev-parse", "HEAD"]), f.old);
+        assert_eq!(git(&repo, &["rev-parse", "origin/main"]), f.old);
+        assert!(!repo.join("file").exists());
+        match state {
+            "local-file" => assert_eq!(fs::read_to_string(repo.join("keep")).unwrap(), "precious"),
+            "index-lock" => assert_eq!(
+                fs::read_to_string(repo.join(".git/index.lock")).unwrap(),
+                "lock"
+            ),
+            "staged-deletion" => assert!(repo.join(".git/index").is_file()),
+            _ => (),
+        }
+    }
+}
+
+#[test]
+fn vacant_clone_reset_rechecks_after_fetch_and_preserves_late_collisions() {
+    for trigger in ["fetch", "read-tree"] {
+        let f = Fixture::new();
+        let repo = f.clone_without_checkout();
+        let shim = f.shim(&format!(
+            "for arg in \"$@\"; do if [ \"$arg\" = {trigger} ]; then printf precious > file; fi; done"
+        ));
+        let mut command = f.cli(&repo, &[]);
+        f.with_shim(&mut command, &shim);
+        let out = command.output().unwrap();
+        let expected = if trigger == "fetch" {
+            "Git index is missing and checkout contains local entries"
+        } else {
+            "would be overwritten"
+        };
+        failure(&out, expected);
+        assert_eq!(fs::read_to_string(repo.join("file")).unwrap(), "precious");
+        assert!(!repo.join(".git/index").exists());
+        assert_eq!(git(&repo, &["rev-parse", "HEAD"]), f.old);
+        assert_eq!(git(&repo, &["for-each-ref", "refs/home-reset-backups"]), "");
+    }
+}
+
+#[test]
+fn missing_index_on_an_empty_branch_preserves_noncolliding_local_files() {
+    let f = Fixture::new();
+    let repo = f.clone_without_checkout();
+    let empty_tree = git(&repo, &["rev-parse", "HEAD^{tree}"]);
+    let out = env(Command::new("git").current_dir(&repo))
+        .args(["mktree"])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+    let empty = String::from_utf8(out.stdout).unwrap();
+    assert_ne!(empty.trim(), empty_tree);
+    let empty_head = git(&repo, &["commit-tree", empty.trim(), "-m", "empty"]);
+    git(&repo, &["update-ref", "refs/heads/main", &empty_head]);
+    fs::write(repo.join("keep"), "precious").unwrap();
+
+    success(&f.run(&repo, &[]));
+    assert_eq!(fs::read_to_string(repo.join("keep")).unwrap(), "precious");
+    assert_eq!(git(&repo, &["rev-parse", "HEAD"]), f.new);
+}
+
+#[test]
+fn vacant_clone_reset_timeout_during_initialization_is_not_replayed() {
+    let f = Fixture::new();
+    let repo = f.clone_without_checkout();
+    let shim = f.shim(
+        r#"for arg in "$@"; do
+            if [ "$arg" = read-tree ]; then
+                command -p git "$@" || exit $?
+                sleep 30
+                exit 0
+            fi
+        done"#,
+    );
+    let mut command = f.cli(&repo, &[]);
+    f.with_shim(&mut command, &shim);
+    let out = command
+        .args(["--timeout", "5", "--attempts", "3", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let result = &report["results"][0];
+    assert_eq!(result["failure_kind"], "checkout_unverified", "{result}");
+    assert_eq!(result["attempts"], 1, "{result}");
+    assert_eq!(result["stage"], "initialize checkout", "{result}");
+    assert_eq!(git(&repo, &["rev-parse", "HEAD"]), f.old);
+    assert_eq!(fs::read_to_string(repo.join("file")).unwrap(), "initial\n");
 }
 
 #[test]
