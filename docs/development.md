@@ -2,11 +2,11 @@
 
 [Back to README](../README.md)
 
-Enable the tracked Git hook once per checkout. Repository checks use an isolated staged snapshot; installation checks are separate.
+Enable the tracked Git hooks once per checkout. Repository checks use an isolated staged snapshot; installation checks are separate.
 
 ## Git hooks
 
-This config checkout uses Git's native tracked-hooks convention: `.githooks/pre-commit` is tracked, and the local checkout is configured with:
+This config checkout uses Git's native tracked-hooks convention: the hooks in `.githooks` are tracked, and the local checkout is configured with:
 
 ```bash
 git config core.hooksPath .githooks
@@ -18,11 +18,25 @@ Use the Rust helper to configure that for this checkout:
 cargo run -- install-git-hooks
 ```
 
-The pre-commit hook delegates to Rust:
+Each hook delegates to Rust:
+
+| Hook | Command | Purpose |
+| --- | --- | --- |
+| `pre-commit` | `cargo run -- pre-commit` | Check the staged snapshot before a commit |
+| `pre-merge-commit` | `cargo run -- pre-commit` | Check the merged snapshot before an automatic merge commit, which skips `pre-commit` |
+| `pre-push` | `cargo run -- pre-push` | Allow only a published fast-forward of `origin/main` |
+
+## Publishing
+
+This repository publishes directly to `origin/main`, without branches or pull requests on `origin`:
 
 ```bash
-cargo run -- pre-commit
+cargo run -- publish
 ```
+
+Run it from the checkout that holds the validated commits. It refuses to run with uncommitted tracked changes or an unfinished Git operation, fetches `origin/main`, and stops if that tip is not already in HEAD. Otherwise it pushes HEAD as a fast-forward, confirms the remote tip, and fast-forwards the primary checkout when that checkout is on `main`, has no tracked changes, no unfinished operation, and no local commits. Exit 3 means the push landed but the primary checkout was left alone; the message names the reason.
+
+The pre-push hook enforces the same rule for every push to `origin`: it rejects any ref other than `main`, deletions, non-fast-forward updates, and a push that did not come from `publish`. Pushes to other remotes are not restricted.
 
 Git intentionally does not auto-enable arbitrary hooks from a freshly cloned checkout for security reasons. A fresh checkout therefore needs one local setup step (`cargo run -- install-git-hooks`) before hooks will run. After that, hooks are enabled for that checkout.
 
@@ -107,9 +121,11 @@ The executable-file check should print only:
 
 ```text
 ./.githooks/pre-commit
+./.githooks/pre-merge-commit
+./.githooks/pre-push
 ```
 
-`.githooks/pre-commit` delegates to Rust and should contain no config-tool logic beyond `cargo run -- pre-commit`.
+Each hook delegates to Rust and should contain no config-tool logic beyond its `cargo run` command.
 
 ### Parallel test execution
 
@@ -119,7 +135,7 @@ also runs doctests. The hosted Linux/macOS workflow uses the same runner with it
 existing explicit target list, plus a regression test for the runner itself:
 
 ```sh
-cargo run --locked -- test-parallel --locked --lib --test reset_cli --test reset_e2e --test workctl --test auth_cli --test validation
+cargo run --locked -- test-parallel --locked --lib --test reset_cli --test reset_e2e --test workctl --test auth_cli --test validation --test publish
 ```
 
 Cargo remains responsible for compilation and dependency invalidation. No test

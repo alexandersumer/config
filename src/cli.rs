@@ -31,6 +31,8 @@ pub(crate) fn run() -> Result<ExitCode> {
         "prepare" => prepare_command(command_args).map(|()| ExitCode::SUCCESS),
         "pre-commit" => pre_commit_command(command_args).map(|()| ExitCode::SUCCESS),
         "install-git-hooks" => install_git_hooks_command(command_args).map(|()| ExitCode::SUCCESS),
+        "publish" => crate::publish::publish_command(command_args),
+        "pre-push" => crate::publish::pre_push_command(command_args).map(|()| ExitCode::SUCCESS),
         "check-codex-skills" => {
             check_codex_skills_command(command_args).map(|()| ExitCode::SUCCESS)
         }
@@ -58,7 +60,7 @@ fn print_help() {
 }
 
 fn help_text() -> &'static str {
-    "Usage: config-tools <command> [options]\n\nCommands:\n  install-workctl [--home PATH]\n  validate [--config-root PATH]\n  test-validate\n  test-parallel [--worker-budget 2..64] [--locked] [--lib] [--test NAME]...\n  check [--config-root PATH]\n  prepare [--config-root PATH]\n  pre-commit [--config-root PATH]\n  install-git-hooks [--config-root PATH]\n  check-codex-skills [--config-root PATH] [--home PATH]\n  check-claude-skills [--config-root PATH] [--home PATH]\n  check-install [--config-root PATH] [--home PATH]\n  repair-codex-config [--home PATH]\n  install [--config-root PATH] [--home PATH]\n"
+    "Usage: config-tools <command> [options]\n\nCommands:\n  install-workctl [--home PATH]\n  validate [--config-root PATH]\n  test-validate\n  test-parallel [--worker-budget 2..64] [--locked] [--lib] [--test NAME]...\n  check [--config-root PATH]\n  prepare [--config-root PATH]\n  pre-commit [--config-root PATH]\n  publish\n  pre-push REMOTE_NAME REMOTE_URL\n  install-git-hooks [--config-root PATH]\n  check-codex-skills [--config-root PATH] [--home PATH]\n  check-claude-skills [--config-root PATH] [--home PATH]\n  check-install [--config-root PATH] [--home PATH]\n  repair-codex-config [--home PATH]\n  install [--config-root PATH] [--home PATH]\n"
 }
 
 pub(crate) fn parse_config_args(args: &[String], allow_check: bool) -> Result<(PathBuf, bool)> {

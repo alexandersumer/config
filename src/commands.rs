@@ -108,7 +108,7 @@ pub(crate) fn pre_commit_command(args: &[String]) -> Result<()> {
     // Local package outputs are discarded first, as in hosted caching, so staged
     // source is always rebuilt regardless of file timestamps.
     discard_local_package_outputs(&snapshot_cargo)?;
-    let status = snapshot_cargo(&["run", "--", "prepare"])
+    let status = snapshot_cargo(&["run", "--locked", "--", "prepare"])
         .status()
         .map_err(|err| format!("cannot validate staged snapshot: {err}"))?;
     if status.success() {
@@ -179,7 +179,9 @@ fn reset_snapshot_source(snapshot: &Path) -> Result<()> {
 fn discard_local_package_outputs(
     snapshot_cargo: &dyn Fn(&[&str]) -> std::process::Command,
 ) -> Result<()> {
-    let output = snapshot_cargo(&["metadata", "--format-version", "1"])
+    // Hosted checks build with --locked, so a manifest staged without its
+    // lockfile must fail here instead of on main.
+    let output = snapshot_cargo(&["metadata", "--locked", "--format-version", "1"])
         .output()
         .map_err(|err| format!("cannot read snapshot Cargo metadata: {err}"))?;
     if !output.status.success() {
@@ -227,12 +229,14 @@ fn discard_local_package_outputs(
 pub(crate) fn install_git_hooks_command(args: &[String]) -> Result<()> {
     let (config_root, _) = parse_config_args(args, false)?;
     let hooks_dir = config_root.join(".githooks");
-    let hook_path = hooks_dir.join("pre-commit");
-    if !hook_path.is_file() {
-        return Err(format!(
-            "{}: tracked pre-commit hook is missing",
-            hook_path.display()
-        ));
+    for hook in ["pre-commit", "pre-merge-commit", "pre-push"] {
+        let hook_path = hooks_dir.join(hook);
+        if !hook_path.is_file() {
+            return Err(format!(
+                "{}: tracked {hook} hook is missing",
+                hook_path.display()
+            ));
+        }
     }
     run_git(&config_root, &["config", "core.hooksPath", ".githooks"])?;
     println!(

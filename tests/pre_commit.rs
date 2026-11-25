@@ -160,4 +160,28 @@ fn pre_commit_validates_index_and_preserves_local_changes() {
         String::from_utf8_lossy(&result.stdout)
     );
     assert_eq!(fs::read(&skill).unwrap(), valid);
+
+    // Hosted checks build with --locked, so a manifest staged without its
+    // lockfile must be rejected before it can reach main.
+    git(root, &["add", "skills/surgical-edit/SKILL.md"]);
+    let manifest = root.join("Cargo.toml");
+    let current = fs::read_to_string(&manifest).unwrap();
+    let bumped = current.replacen("version = \"0.1.0\"", "version = \"0.1.1\"", 1);
+    assert_ne!(
+        bumped, current,
+        "fixture manifest must carry the package version"
+    );
+    fs::write(&manifest, bumped).unwrap();
+    git(root, &["add", "Cargo.toml"]);
+    let result = run("pre-commit", root);
+    assert!(
+        !result.status.success(),
+        "a manifest staged without its lockfile must block the commit"
+    );
+    assert!(
+        String::from_utf8_lossy(&result.stderr).contains("--locked"),
+        "{}{}",
+        String::from_utf8_lossy(&result.stderr),
+        String::from_utf8_lossy(&result.stdout)
+    );
 }

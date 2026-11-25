@@ -78,10 +78,15 @@ For discovery checks and TWG refresh instructions, see
 
 ## Change this repository
 
-Enable the Git hook with `cargo run -- install-git-hooks`. Each commit then runs
+Enable the Git hooks with `cargo run -- install-git-hooks`. Each commit then runs
 `cargo run -- pre-commit` against an isolated snapshot of the staged files.
 This checks formatting, compilation, tests, and skill validation. Installation
 drift is checked separately and does not block commits.
+
+Publish with `cargo run -- publish`. It pushes a fast-forward of `origin/main`,
+verifies the remote tip, and fast-forwards the primary checkout. The pre-push
+hook rejects every other push to `origin`, so this repository has no branches
+or pull requests there.
 
 See [Development and verification](docs/development.md) for check commands,
 architecture, and reset benchmarks. For isolated installation verification, see
