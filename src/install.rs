@@ -10,16 +10,31 @@ use std::os::unix::fs as unix_fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// The one source of global agent instructions, relative to the config root.
+const AGENT_INSTRUCTIONS_SOURCE: &str = "instructions/global.md";
+/// Each agent reads its global instructions from its own home path.
+const AGENT_INSTRUCTION_TARGETS: &[(&str, &str)] = &[
+    ("Codex global instructions", ".codex/AGENTS.md"),
+    ("Claude Code global instructions", ".claude/CLAUDE.md"),
+];
+
 pub(crate) fn install_command(args: &[String]) -> Result<()> {
     let (config_root, home_dir) = parse_install_args(args)?;
     let skills_dir = config_root.join("skills");
     let zsh_dir = config_root.join("zsh");
     let ghostty_dir = config_root.join("ghostty");
+    let agent_instructions = config_root.join(AGENT_INSTRUCTIONS_SOURCE);
 
     require_dir(&skills_dir, "config skills directory")?;
     validate_config_skills(&config_root)?;
     require_dir(&zsh_dir, "config zsh directory")?;
     require_dir(&ghostty_dir, "config Ghostty directory")?;
+    if !agent_instructions.is_file() {
+        return Err(format!(
+            "Error: config agent instructions are missing: {}",
+            agent_instructions.display()
+        ));
+    }
     let codex_skill_plan = prepare_codex_skill_links(&skills_dir, &home_dir)?;
     let claude_skill_plan = prepare_claude_skill_links(&skills_dir, &home_dir)?;
     repair_codex_config(&home_dir)?;
@@ -63,6 +78,8 @@ pub(crate) fn install_command(args: &[String]) -> Result<()> {
     })?;
     apply_skill_links(claude_skill_plan)?;
     install_workctl(&home_dir)?;
+    // Last, so an existing hand-written instruction file blocks nothing else.
+    install_agent_instructions(&config_root, &home_dir)?;
 
     println!();
     println!(
@@ -75,7 +92,38 @@ pub(crate) fn install_command(args: &[String]) -> Result<()> {
         "Custom Claude Code skills point at {}.",
         skills_dir.display()
     );
+    println!(
+        "Global agent instructions point at {}.",
+        agent_instructions.display()
+    );
     Ok(())
+}
+
+/// Links every agent's global instruction path to the one shared source.
+/// Attempts every target so one run reports each file that needs adopting.
+fn install_agent_instructions(config_root: &Path, home_dir: &Path) -> Result<()> {
+    let source = config_root.join(AGENT_INSTRUCTIONS_SOURCE);
+    let mut errors = Vec::new();
+    for (label, relative_target) in AGENT_INSTRUCTION_TARGETS {
+        let target = home_dir.join(relative_target);
+        if let Some(parent) = target.parent() {
+            if let Err(err) = fs::create_dir_all(parent) {
+                errors.push(format!(
+                    "{}: cannot create directory for {label}: {err}",
+                    parent.display()
+                ));
+                continue;
+            }
+        }
+        if let Err(err) = link_path(&source, &target, label, config_root) {
+            errors.push(err);
+        }
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("\n"))
+    }
 }
 
 fn cleanup_duplicate_ghostty_app_config(
@@ -307,7 +355,7 @@ fn claude_skill_installation_check(
 }
 
 fn managed_install_link_errors(config_root: &Path, home_dir: &Path) -> Result<Vec<String>> {
-    let managed_links = [
+    let mut managed_links = vec![
         ManagedLink {
             label: "global agents directory",
             source: config_root.join("skills"),
@@ -329,6 +377,15 @@ fn managed_install_link_errors(config_root: &Path, home_dir: &Path) -> Result<Ve
             target: home_dir.join(".config/ghostty/config"),
         },
     ];
+    managed_links.extend(
+        AGENT_INSTRUCTION_TARGETS
+            .iter()
+            .map(|(label, relative_target)| ManagedLink {
+                label,
+                source: config_root.join(AGENT_INSTRUCTIONS_SOURCE),
+                target: home_dir.join(relative_target),
+            }),
+    );
 
     let mut errors = Vec::new();
     for link in managed_links {
@@ -567,6 +624,7 @@ fn install_workctl(home: &Path) -> Result<()> {
     let internal = home.join(".local/bin/config-tools");
     verify_config_tools_binary_target(&source, &internal)?;
     let legacy = owned_legacy(home, &source)?;
+    crate::launchd::pending(home)?;
     let completion = home.join(".local/share/zsh/site-functions/_workctl");
     match fs::symlink_metadata(&completion) {
         Ok(m)
@@ -617,7 +675,7 @@ fn install_workctl(home: &Path) -> Result<()> {
     }
     println!("Installed workctl -> {}", target.display());
     println!("Installed zsh completion -> {}", completion.display());
-    Ok(())
+    crate::launchd::install(home)
 }
 
 fn validate_config_skills(config_root: &Path) -> Result<()> {
@@ -1459,6 +1517,7 @@ pub(crate) fn workctl_diagnostics(home: &Path) -> Result<Vec<String>> {
         Ok(None) => {}
         Err(e) => errors.push(e),
     }
+    errors.extend(crate::launchd::diagnostics(home)?);
     Ok(errors)
 }
 

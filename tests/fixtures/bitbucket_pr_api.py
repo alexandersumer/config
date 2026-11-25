@@ -1,6 +1,7 @@
 """Local HTTPS Bitbucket Cloud contract used by the public workctl CLI tests."""
 import http.server
 import json
+import os
 import pathlib
 import re
 import socket
@@ -20,8 +21,8 @@ approved = {2}
 truncated_page = False
 limits = set()
 cooldown = 0
-# Overlap proof only: generous for a busy machine, under curl's 28 second limit.
-parallel_reads = threading.Barrier(2, timeout=20)
+# Parallel reads arrive late on a busy machine; the wait follows the suite's pace.
+parallel_reads = threading.Barrier(2, timeout=5 * int(os.environ.get('WORKCTL_TEST_PACE', '1')))
 overlap_proven = threading.Event()
 pool_advanced = threading.Event()
 log = (root / "http.jsonl").open("w", buffering=1)
@@ -119,7 +120,7 @@ class Api(http.server.BaseHTTPRequestHandler):
                 workspace, index, user = match.groups()
                 if urllib.parse.unquote(user) != me["uuid"] or query.get("state") != ["OPEN"]:
                     return self.respond(400, {})
-                if index == "00" and not pool_advanced.wait(20):
+                if index == "00" and not pool_advanced.wait(5 * int(os.environ.get('WORKCTL_TEST_PACE', '1'))):
                     return self.respond(409, {})
                 if index == "01" and index not in limits:
                     limits.add(index)

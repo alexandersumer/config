@@ -1,9 +1,9 @@
 # workctl
 
-`workctl` is a Rust CLI for work credentials, Git checkouts, and linked worktrees.
+`workctl` is a Rust CLI for work credentials, Git checkouts, linked worktrees, and local Docker images.
 
 [Install](#install) · [Commands](#commands) · [Authentication](#authentication) ·
-[Git operations](#git-operations) · [Workspace maintenance](#workspace-maintenance) · [Output](#output) · [Exit status](#exit-status)
+[Git operations](#git-operations) · [Workspace maintenance](#workspace-maintenance) · [Docker images](#docker-images) · [Output](#output) · [Exit status](#exit-status)
 
 ## Install
 
@@ -20,6 +20,7 @@ zsh configuration already does this. Open a fresh shell after installation.
 
 Git operations require Git 2.36 or later. Authentication uses the installed `bb`,
 `twg`, and `atlas` provider CLIs; each provider keeps its own credentials.
+Docker image cleanup uses the installed `docker` CLI.
 `workctl doctor` checks runtime prerequisites without repairs. Use `--profile code` to inspect required client executables without provider calls,
 and `--managed` (or `--home PATH`) to compare managed binaries and completions
 with the running executable. Service credentials still require `auth preflight --check`;
@@ -35,6 +36,7 @@ The installer updates these managed files:
 | `~/.local/bin/workctl` | Public CLI |
 | `~/.local/bin/config-tools` | Configuration installer and repository checks |
 | `~/.local/share/zsh/site-functions/_workctl` | Generated zsh completions |
+| `~/Library/LaunchAgents/io.github.alexandersumer.workctl.docker-image-clean.plist` | Hourly [Docker image cleanup](#scheduled-cleanup) on macOS |
 
 Binary replacement is atomic. The installer checks managed-file ownership before
 replacing files and creates completion directories with permissions accepted by
@@ -60,6 +62,7 @@ and functions and refreshes command hashes when loaded.
 | `workctl git reset [PATH ...]` | Reset primary checkouts to a verified remote branch |
 | `workctl git worktree clean [PATH ...]` | Preview linked-worktree removal; `--apply` removes eligible worktrees |
 | `workctl git worktree inventory [PATH ...]` | Inspect worktrees, age evidence, local work, operations, and orphans |
+| `workctl docker image clean --max-used-space SIZE` | Preview unused-image removal to a size budget; `--apply` removes the selection |
 | `workctl history [RUN_ID] --unsuccessful` | List runs or inspect unsuccessful targets |
 | `workctl doctor` | Check Git, executable, temporary storage, process groups, and locks |
 | `workctl completions SHELL` | Generate shell completions |
@@ -438,6 +441,69 @@ prerequisites, and optional managed installation drift; it never installs, logs 
 tokens, or repairs files. Executable presence does not prove version compatibility or
 resource authorization; credential checks remain explicit.
 
+## Docker images
+
+Docker never removes unused images on its own, and `docker image prune --filter until=`
+compares an image's build date. `docker image clean` instead holds the local image
+store to a size budget by when each image reached this machine. Preview first, then apply:
+
+```sh
+workctl docker image clean --max-used-space 80GB
+workctl docker image clean --max-used-space 80GB --older-than 2h --apply
+```
+
+When the store is within `--max-used-space`, nothing is inspected or removed. Otherwise
+the command selects images that no container uses, oldest arrival first, until their
+unique sizes cover the excess. Arrival is the last time Docker pulled, built, or tagged
+the image here; images with an unknown arrival are kept. `--older-than` also keeps
+images that arrived at or after one invocation cutoff, so a fresh build is not removed
+before its container starts. Sizes are whole numbers with `B`, `kB`, `MB`, `GB`, or `TB`.
+`--heartbeat` requires `--apply` and serves the [scheduled cleanup](#scheduled-cleanup).
+
+`--apply` removes images without force, so Docker itself refuses any image that a
+running or stopped container uses. Those refusals are reported as `in_use` and remain
+successful; other refusals fail the run. Images named by several repositories are
+removed one reference at a time. Docker reports rounded sizes, so an applied run
+measures the store again after each batch and continues with the next oldest images
+until it fits or nothing removable remains. A store held above budget by protected
+images is reported, not treated as a failure. Removed images are not recoverable
+here: pull or rebuild them. Order follows arrival, not use, so a long-held image that
+containers use only briefly can be removed before a newer one.
+
+`--json` reports `started_unix_seconds`, `used_bytes`, `used_bytes_after` for applied
+runs, `within_budget`, a `summary` of counts, and each selected image with its
+`references`, `arrived` timestamp, `unique_bytes` estimate, `status`, and `error`.
+
+### Scheduled cleanup
+
+On macOS, installation writes a launchd agent and loads it for the current login
+session. At the start of every hour it runs:
+
+```sh
+workctl docker image clean --max-used-space 80GB --older-than 2h --apply --heartbeat --json
+```
+
+The agent uses calendar times rather than an interval: launchd skips interval
+firings that fall while the machine sleeps, but runs a missed calendar time once on
+wake. Each run appends its JSON result to `~/Library/Logs/workctl-docker-image-clean.log`;
+a run that finds the store within budget costs one Docker query. The agent is a
+generated regular file, replaced whenever it differs from the installing executable.
+Installing into another home with `--home PATH` writes the file without loading it.
+
+A stopped schedule is reported, not assumed. `--heartbeat` records each successful
+applied run in `~/.local/state/workctl/docker-image-clean.succeeded`; a failed or
+interrupted run records nothing. `workctl doctor --managed` fails when the agent is
+missing, changed, not loaded, or has not succeeded for three hours, and the managed
+zsh configuration prints a warning in interactive shells for the same three hours.
+Both wait 90 minutes after a restart so the agent gets its first turn. Docker being
+stopped counts as not succeeding. To prove the launchd path at any time, start the
+agent through launchd and read its result:
+
+```sh
+launchctl kickstart -p gui/$(id -u)/io.github.alexandersumer.workctl.docker-image-clean
+tail -n 1 ~/Library/Logs/workctl-docker-image-clean.log
+```
+
 ## Output
 
 Results go to stdout. Progress and diagnostics go to stderr. Git operations show
@@ -459,6 +525,7 @@ to the relevant command's reference.
 | `pull-request print-review-request` | 1; review request text in `message` |
 | `git worktree clean` | 2 |
 | `git worktree inventory` | 1 |
+| `docker image clean` | 1 |
 | `history` (listing or stored run) | 1 |
 | `doctor` | 1 |
 | `completions` | 1; generated script is in `script` |
@@ -470,8 +537,8 @@ Help, version, and usage errors follow normal CLI conventions even with `--json`
 
 | Code | Meaning |
 | --- | --- |
-| `0` | Success, including cleanup that protects active local work |
-| `1` | Failed operation, blocked authentication, or cleanup safety blocker |
+| `0` | Success, including cleanup that protects active local work or images in use |
+| `1` | Failed operation, blocked authentication, cleanup safety blocker, or unavailable Docker |
 | `2` | Invalid usage |
 | `130` | Interrupted |
 

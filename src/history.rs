@@ -35,6 +35,10 @@ fn root() -> Result<PathBuf, String> {
     Ok(root)
 }
 use std::os::unix::fs::DirBuilderExt;
+/// A named file beside the run records; listing only reads `run-` directories.
+pub(crate) fn state_file(name: &str) -> Result<PathBuf, String> {
+    Ok(root()?.join(name))
+}
 pub(crate) fn target(path: &Path, common: &Path) -> Value {
     target_with_identity(
         path,

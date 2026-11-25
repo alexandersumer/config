@@ -59,12 +59,12 @@ rendering and JSON conventions. `src/git_domain/` owns topology, common-director
 publication, and separate reset/cleanup policies. `src/workspace.rs` shares root,
 exclusion, and creation-age selection; `src/history.rs` publishes private durable
 intent/outcome records and supports focused recovery. `src/storage.rs` owns bounded
-allocation estimates. Completion scripts are generated from the same Clap hierarchy
+allocation estimates. `src/docker.rs` owns image retention through the Docker CLI. Completion scripts are generated from the same Clap hierarchy
 at installation, rather than checked-in copies. No plugin registry or command DSL
 is involved.
 
 ```sh
-cargo test --locked --lib --test reset_cli --test reset_e2e --test workctl --test auth_cli
+cargo test --locked --lib --test reset_cli --test reset_e2e --test workctl --test auth_cli --test docker_cli
 # Real protocol E2E only (requires Git and loopback networking):
 cargo test --locked --test reset_e2e
 cargo run -- check
@@ -96,6 +96,8 @@ provider refresh, historical approvals, rerun behavior, read-back after a lost
 response, and partial failures. It requires Python 3, curl, OpenSSL, and loopback
 networking. Five explicit live-auth tests remain separate from simulator-backed
 CI proof.
+Docker image contracts run the public CLI against a scripted `docker` executable
+that replays Docker's report formats, so no daemon is required.
 The CI workflow runs the public CLI
 contracts on Linux and macOS; configured CI is distinct from a completed hosted run.
 
@@ -135,7 +137,7 @@ also runs doctests. The hosted Linux/macOS workflow uses the same runner with it
 existing explicit target list, plus a regression test for the runner itself:
 
 ```sh
-cargo run --locked -- test-parallel --locked --lib --test reset_cli --test reset_e2e --test workctl --test auth_cli --test validation --test publish
+cargo run --locked -- test-parallel --locked --lib --test reset_cli --test reset_e2e --test workctl --test auth_cli --test docker_cli --test validation --test publish
 ```
 
 Cargo remains responsible for compilation and dependency invalidation. No test
@@ -166,6 +168,12 @@ diagnostics; logs are replayed and failure logs remain under
 removes its temporary files after replaying the complete output. Hosted logs
 live in the existing runtime artifact directory, so timeout diagnostics can be uploaded by the always-run
 artifact step. Tests retain their existing assertions and time limits.
+
+Time budgets in the Git suites are written for an idle machine. `tests/common/mod.rs`
+measures how slowly the machine starts Git as a suite runs and multiplies every wait,
+product deadline, simulated hang, and polling limit in a scenario by that pace, which
+only rises during a run. An idle machine runs the written values. A busy one runs the
+same scenarios more slowly instead of reading a late subprocess as a hang.
 
 Hosted jobs cache dependency build outputs by OS, architecture, exact Rust
 compiler identity, manifest, lockfile, and Cargo configuration. There are no

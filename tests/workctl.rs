@@ -9,6 +9,7 @@ const BIN: &str = env!("CARGO_BIN_EXE_workctl");
 fn env(cmd: &mut Command) -> &mut Command {
     cmd.env("GIT_CONFIG_NOSYSTEM", "1")
         .env("WORKCTL_STATE_DIR", common::state_dir())
+        .env(common::PACE, common::pace().to_string())
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_AUTHOR_NAME", "Test")
         .env("GIT_AUTHOR_EMAIL", "test@example.com")
@@ -131,7 +132,8 @@ impl Fixture {
         fs::write(
             bin.join("git"),
             format!(
-                "#!/bin/sh\n{script}\nexec '{}' \"$@\"\n",
+                "#!/bin/sh\n{}\n{script}\nexec '{}' \"$@\"\n",
+                common::PACED_SHELL,
                 String::from_utf8_lossy(&real.stdout).trim()
             ),
         )
@@ -242,15 +244,23 @@ fn special_coordination_files_refuse_promptly_in_reset_and_cleanup() {
         assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
         let mut cmd = Command::new(BIN);
         env(&mut cmd);
+        let timeout = common::secs(1).to_string();
         cmd.args(if cleanup {
-            vec!["git", "worktree", "clean", "--json", "--timeout", "1"]
+            vec![
+                "git",
+                "worktree",
+                "clean",
+                "--json",
+                "--timeout",
+                timeout.as_str(),
+            ]
         } else {
             vec![
                 "git",
                 "reset",
                 "--json",
                 "--timeout",
-                "1",
+                timeout.as_str(),
                 "--attempts",
                 "1",
             ]
@@ -260,7 +270,7 @@ fn special_coordination_files_refuse_promptly_in_reset_and_cleanup() {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         let mut child = cmd.spawn().unwrap();
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + common::time(5);
         loop {
             if child.try_wait().unwrap().is_some() {
                 break;
@@ -412,7 +422,7 @@ fn with_shim(cmd: &mut Command, bin: &Path) {
     );
 }
 fn wait(path: &Path) {
-    let until = Instant::now() + Duration::from_secs(60);
+    let until = Instant::now() + common::time(10);
     while !path.exists() {
         assert!(Instant::now() < until);
         std::thread::sleep(Duration::from_millis(10));
@@ -698,7 +708,8 @@ fn deadline_and_cancellation_terminate_groups_without_retrying_cleanup() {
         // Release the sentinel only after shutdown; a slow concurrent check must not
         // make it fire while the subprocess is legitimately still running.
         let bin=f.shim(&format!("for arg in \"$@\"; do if [ \"$arg\" = fetch ]; then echo attempt >> '{}'; (touch '{}'; while [ ! -e '{}' ]; do sleep 0.05; done; touch '{}') & sleep 30; fi; done",count.display(),started.display(),release.display(),escaped.display()));
-        let mut cmd = f.command(&["--apply", "--timeout", if cancel { "30" } else { "4" }]);
+        let timeout = common::secs(if cancel { 30 } else { 4 }).to_string();
+        let mut cmd = f.command(&["--apply", "--timeout", timeout.as_str()]);
         cmd.arg(&f.worktree);
         with_shim(&mut cmd, &bin);
         let child = cmd
@@ -729,7 +740,7 @@ fn deadline_and_cancellation_terminate_groups_without_retrying_cleanup() {
         }
         let out = child.wait_with_output().unwrap();
         assert!(
-            execution.elapsed() < Duration::from_secs(8),
+            execution.elapsed() < common::time(8),
             "shutdown exceeded its bounded budget: {}",
             text(&out)
         );
@@ -742,7 +753,7 @@ fn deadline_and_cancellation_terminate_groups_without_retrying_cleanup() {
         assert_eq!(fs::read_to_string(count).unwrap(), "attempt\n");
         assert!(!escaped.exists(), "sentinel must wait for explicit release");
         fs::write(release, "release\n").unwrap();
-        std::thread::sleep(Duration::from_secs(3));
+        std::thread::sleep(common::time(3));
         assert!(!escaped.exists());
         f.unchanged();
     }
@@ -942,6 +953,148 @@ fn atomic_install_migrates_owned_files_preserves_foreign_files_and_works_in_fres
         fs::read_link(bin.join("workctl")).unwrap(),
         PathBuf::from("foreign")
     );
+}
+#[test]
+fn interactive_shells_warn_only_when_the_scheduled_docker_cleanup_is_overdue() {
+    let home = tempfile::tempdir().unwrap();
+    let config =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("zsh/zshrc")).unwrap();
+    let section = config
+        .split_once("# Docker image cleanup (scheduled)\n")
+        .unwrap()
+        .1
+        .split_once("# Tool initialization (lazy loading)")
+        .unwrap()
+        .0;
+    let script = home.path().join("docker-cleanup-warning.zsh");
+    fs::write(&script, section).unwrap();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    // The boot time comes from a scripted sysctl so fresh CI machines behave like long-running ones.
+    let bin = home.path().join("bin");
+    fs::create_dir(&bin).unwrap();
+    fs::write(
+        bin.join("sysctl"),
+        "#!/bin/sh\necho \"{ sec = $FAKE_BOOT, usec = 0 } Thu Jan  1 00:00:00 1970\"\n",
+    )
+    .unwrap();
+    fs::set_permissions(bin.join("sysctl"), fs::Permissions::from_mode(0o755)).unwrap();
+    let warns = |interactive: bool, booted: u64| {
+        let mut shell = Command::new("zsh");
+        shell.arg("-f");
+        if interactive {
+            shell.arg("-i");
+        }
+        let out = shell
+            .args(["-c", "source \"$1\"", "verification"])
+            .arg(&script)
+            .env("HOME", home.path())
+            .env("FAKE_BOOT", booted.to_string())
+            .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        text(&out).contains("scheduled Docker image cleanup has not succeeded")
+    };
+    let long_ago = now - 7 * 86_400;
+    let agents = home.path().join("Library/LaunchAgents");
+    let stamp = home
+        .path()
+        .join(".local/state/workctl/docker-image-clean.succeeded");
+    fs::create_dir_all(stamp.parent().unwrap()).unwrap();
+
+    assert!(
+        !warns(true, long_ago),
+        "no agent installed, nothing to watch"
+    );
+    fs::create_dir_all(&agents).unwrap();
+    fs::write(
+        agents.join("io.github.alexandersumer.workctl.docker-image-clean.plist"),
+        "",
+    )
+    .unwrap();
+    assert!(warns(true, long_ago), "an agent that never succeeded");
+    assert!(!warns(false, long_ago), "scripts stay quiet");
+    assert!(
+        !warns(true, now - 600),
+        "a restart gets its first hourly turn"
+    );
+
+    fs::write(&stamp, (now - 3600).to_string()).unwrap();
+    assert!(!warns(true, long_ago), "a recent success");
+    fs::write(&stamp, (now - 4 * 3600).to_string()).unwrap();
+    assert!(warns(true, long_ago), "three missed hours");
+    fs::write(&stamp, "garbage").unwrap();
+    assert!(
+        warns(true, long_ago),
+        "an unreadable heartbeat is not a success"
+    );
+}
+#[cfg(target_os = "macos")]
+#[test]
+fn install_manages_the_docker_cleanup_launch_agent_and_never_loads_an_isolated_home() {
+    let home = tempfile::tempdir().unwrap();
+    let install = || {
+        Command::new(env!("CARGO_BIN_EXE_config-tools"))
+            .args(["install-workctl", "--home"])
+            .arg(home.path())
+            .output()
+            .unwrap()
+    };
+    // The installed executable compares managed files with itself.
+    let drift = || {
+        let out = Command::new(home.path().join(".local/bin/workctl"))
+            .args(["doctor", "--json", "--home"])
+            .arg(home.path())
+            .output()
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        value["checks"]["managed_installation"]["errors"].clone()
+    };
+    let out = install();
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(text(&out).contains("Installed launch agent"));
+    assert!(
+        !text(&out).contains("Loaded launch agent"),
+        "{}",
+        text(&out)
+    );
+    let agent = home
+        .path()
+        .join("Library/LaunchAgents/io.github.alexandersumer.workctl.docker-image-clean.plist");
+    let plist = fs::read_to_string(&agent).unwrap();
+    assert!(plist.contains("/.local/bin/workctl</string>\n    <string>docker</string>"));
+    assert_eq!(
+        fs::metadata(&agent).unwrap().permissions().mode() & 0o777,
+        0o644
+    );
+    let lint = Command::new("/usr/bin/plutil")
+        .arg("-lint")
+        .arg(&agent)
+        .output()
+        .unwrap();
+    assert!(lint.status.success(), "{}", text(&lint));
+    assert_eq!(drift(), serde_json::json!([]));
+
+    let out = install();
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(!text(&out).contains("Installed launch agent"));
+
+    fs::write(&agent, "edited").unwrap();
+    assert!(drift()[0].as_str().unwrap().contains("launch agent"));
+    assert!(install().status.success());
+    assert_eq!(fs::read_to_string(&agent).unwrap(), plist);
+
+    fs::remove_file(&agent).unwrap();
+    fs::create_dir(&agent).unwrap();
+    let out = install();
+    assert!(!out.status.success());
+    assert!(text(&out).contains("launch agent is not a regular file"));
+    assert!(agent.is_dir());
+    // Ownership is settled before any managed file changes.
+    assert!(!text(&out).contains("Installed workctl"));
 }
 #[test]
 fn reset_json_is_one_document_and_success_leaves_no_diagnostics() {
@@ -1869,7 +2022,8 @@ fn cancellation_after_native_removal_reports_unverified_and_releases_lock() {
     sleep 30
     exit 0;;
 esac"#);
-    let mut cmd = f.command(&["--apply", "--timeout", "30"]);
+    let timeout = common::secs(30).to_string();
+    let mut cmd = f.command(&["--apply", "--timeout", timeout.as_str()]);
     cmd.arg(&f.worktree)
         .env("REAL_GIT", git_program())
         .env("PROBE_ATTEMPTS", &attempts)
@@ -1884,8 +2038,8 @@ esac"#);
         .spawn()
         .unwrap();
     // Reaching removal is setup, bounded by the existing command timeout.
-    // Cancellation responsiveness gets its own ten-second budget below.
-    let deadline = Instant::now() + Duration::from_secs(30);
+    // Cancellation responsiveness gets its own budget below.
+    let deadline = Instant::now() + common::time(30);
     while !started.exists() && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(10));
     }
@@ -1893,7 +2047,7 @@ esac"#);
     unsafe {
         libc::kill(child.id() as i32, libc::SIGINT);
     }
-    let deadline = Instant::now() + Duration::from_secs(60);
+    let deadline = Instant::now() + common::time(10);
     while child.try_wait().unwrap().is_none() && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(10));
     }
@@ -1934,7 +2088,7 @@ esac"#);
     );
     assert_eq!(fs::read_to_string(attempts).unwrap(), "attempted\n");
     fs::write(release, "release\n").unwrap();
-    std::thread::sleep(Duration::from_secs(3));
+    std::thread::sleep(common::time(3));
     assert!(
         !escaped.exists(),
         "removal descendants must not survive cancellation"
@@ -2053,7 +2207,7 @@ fn discovery_is_visible_before_git_finishes_and_counts_toward_elapsed() {
             .stderr(fs::File::create(&stderr).unwrap())
             .spawn()
             .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(60);
+        let deadline = Instant::now() + common::time(10);
         while !sentinel.exists() && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(10));
         }
@@ -2089,7 +2243,7 @@ fn cancellation_during_discovery_reports_interruption_without_starting_mutation(
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(60);
+        let deadline = Instant::now() + common::time(10);
         while !sentinel.exists() && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(10));
         }
@@ -2097,7 +2251,7 @@ fn cancellation_during_discovery_reports_interruption_without_starting_mutation(
         unsafe {
             libc::kill(child.id() as i32, libc::SIGINT);
         }
-        let deadline = Instant::now() + Duration::from_secs(60);
+        let deadline = Instant::now() + common::time(10);
         while child.try_wait().unwrap().is_none() && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(10));
         }
@@ -3149,6 +3303,7 @@ fn pragmatic_recovery_deadlines_and_cancellation_preserve_work_and_release_locks
         let started = f.temp.path().join("recovery-started");
         let count = f.temp.path().join("attempts");
         let shim = f.shim("case \" $* \" in *' update-ref '*) echo attempt >> \"$PROBE_COUNT\"; touch \"$PROBE_STARTED\"; sleep 30;; esac");
+        let timeout = common::secs(if cancel { 30 } else { 8 }).to_string();
         let mut c = Command::new(BIN);
         env(&mut c);
         c.args([
@@ -3158,7 +3313,7 @@ fn pragmatic_recovery_deadlines_and_cancellation_preserve_work_and_release_locks
             "--apply",
             "--json",
             "--timeout",
-            if cancel { "30" } else { "8" },
+            timeout.as_str(),
         ])
         .arg(&f.worktree)
         .env("PROBE_STARTED", &started)
@@ -3170,7 +3325,7 @@ fn pragmatic_recovery_deadlines_and_cancellation_preserve_work_and_release_locks
         let mut child = c.spawn().unwrap();
         // Allow real preflight under concurrent suite load, then exercise the
         // hung recovery command. The public deadline and its reason stay asserted.
-        let startup_deadline = launched + Duration::from_secs(10);
+        let startup_deadline = launched + common::time(10);
         while !started.exists() {
             if child.try_wait().unwrap().is_some() {
                 panic!(
@@ -3196,7 +3351,7 @@ fn pragmatic_recovery_deadlines_and_cancellation_preserve_work_and_release_locks
         }
         let out = child.wait_with_output().unwrap();
         assert!(
-            launched.elapsed() < Duration::from_secs(15),
+            launched.elapsed() < common::time(15),
             "cleanup did not honor its bounded deadline"
         );
         assert!(
@@ -3622,7 +3777,7 @@ esac
         impl Drop for HookCleanup {
             fn drop(&mut self) {
                 let _ = fs::write(&self.release, "release");
-                for _ in 0..200 {
+                for _ in 0..200 * common::pace() {
                     if self.done.exists() {
                         return;
                     }
@@ -3656,7 +3811,7 @@ if trigger and not os.path.exists(os.environ['PROBE_READY']):
         os.closerange(3, 65536)
         with open(os.environ['PROBE_DONE'], 'w') as f: f.write('done')
         os._exit(0)
-    deadline = time.monotonic() + 5
+    deadline = time.monotonic() + 5 * int(os.environ.get('WORKCTL_TEST_PACE', '1'))
     while not os.path.exists(os.environ['PROBE_READY']):
         if time.monotonic() > deadline: sys.exit(1)
         time.sleep(0.01)
@@ -3758,7 +3913,7 @@ fn destructive_cleanup_keeps_the_lock_after_its_supervisor_is_killed() {
         env(&mut cmd);
         cmd.args(["git", "worktree", "clean", "--apply", "--json"])
             .arg(&f.worktree)
-            .args(["--timeout", "8"])
+            .args(["--timeout", common::secs(8).to_string().as_str()])
             .env("PROBE_GROUP", &group)
             .env("PROBE_STARTED", &started)
             .stdout(Stdio::piped())
@@ -3786,7 +3941,7 @@ fn destructive_cleanup_keeps_the_lock_after_its_supervisor_is_killed() {
             text(&busy)
         );
         if orphan_deadline {
-            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            let deadline = std::time::Instant::now() + common::time(10);
             while !probe().status.success() {
                 assert!(
                     std::time::Instant::now() < deadline,
@@ -3850,7 +4005,7 @@ maximum = update(1)
 (root / ('ready-' + str(os.getpid()))).write_text(json.dumps({'group': os.getpgrp(), 'owner': os.getppid()}))
 try:
     if maximum > 2: sys.exit(73)
-    until = time.monotonic() + 12
+    until = time.monotonic() + 12 * int(os.environ.get('WORKCTL_TEST_PACE', '1'))
     while not (root / 'release').exists():
         if time.monotonic() > until: sys.exit(74)
         time.sleep(0.01)
@@ -3878,7 +4033,7 @@ finally:
                 "--jobs",
                 "2",
                 "--timeout",
-                "15",
+                common::secs(15).to_string().as_str(),
             ])
             .arg(&f.repo)
             .env("PROBE_GATE", &gate)
@@ -3900,7 +4055,7 @@ finally:
                 })
                 .collect::<Vec<_>>()
         };
-        let until = Instant::now() + Duration::from_secs(60);
+        let until = Instant::now() + common::time(10);
         while ready().len() < 2 {
             assert!(Instant::now() < until, "parallel removal did not start");
             std::thread::sleep(Duration::from_millis(10));
@@ -3944,7 +4099,7 @@ finally:
                 unsafe {
                     libc::kill(-group, libc::SIGKILL);
                 }
-                let until = Instant::now() + Duration::from_secs(5);
+                let until = Instant::now() + common::time(5);
                 while unsafe { libc::kill(owner, 0) } == 0 {
                     assert!(Instant::now() < until, "orphaned owner stayed alive");
                     std::thread::sleep(Duration::from_millis(10));
@@ -4027,7 +4182,7 @@ fn inspection_revalidates_only_owned_registration_races_and_preserves_new_data()
 root = pathlib.Path(os.environ['PROBE_STATE'])
 args = sys.argv[1:]; mode = os.environ['PROBE_MODE']
 def wait(name):
-    deadline = time.monotonic() + 60
+    deadline = time.monotonic() + 10 * int(os.environ.get('WORKCTL_TEST_PACE', '1'))
     while not (root / name).exists():
         if time.monotonic() > deadline: sys.exit(74)
         time.sleep(.01)
@@ -4079,7 +4234,7 @@ esac
                 "--jobs",
                 "2",
                 "--timeout",
-                "15",
+                common::secs(15).to_string().as_str(),
             ])
             .arg(if mode == "idle" { &fast } else { &f.repo })
             .env("PROBE_STATE", &state)
@@ -4093,17 +4248,17 @@ esac
             .spawn()
             .unwrap();
         let injected = state.join("injected");
-        let until = Instant::now() + Duration::from_secs(60);
+        let until = Instant::now() + common::time(10);
         while !injected.exists() && Instant::now() < until {
             std::thread::sleep(Duration::from_millis(10));
         }
         if !injected.exists() {
-            // Preserve the bounded assertion and reap the failed fixture,
+            // Preserve the start assertion and reap the failed fixture,
             // including its diagnostics, after releasing any owned native gate.
             fs::write(&release, "release").unwrap();
             let out = child.wait_with_output().unwrap();
             panic!(
-                "registration fault did not start within sixty seconds ({mode}): {}",
+                "registration fault did not start in time ({mode}): {}",
                 text(&out)
             );
         }
@@ -4195,7 +4350,7 @@ if 'remove' not in args:
 counter(1)
 (root / ('ready-' + str(os.getpid()))).touch()
 try:
-    deadline = time.monotonic() + 60
+    deadline = time.monotonic() + 10 * int(os.environ.get('WORKCTL_TEST_PACE', '1'))
     slow = pathlib.Path(args[-1]).resolve() == pathlib.Path(os.environ['PROBE_SLOW']).resolve()
     if slow: (root / 'slow-started').touch()
     while len(list(root.glob('ready-*'))) < 2 or (slow and not (root / 'release').exists()):
@@ -4227,7 +4382,7 @@ finally:
             "--jobs",
             "2",
             "--timeout",
-            "15",
+            common::secs(15).to_string().as_str(),
         ])
         .arg(&f.repo)
         .env("PROBE_STATE", &state)
@@ -4245,7 +4400,7 @@ finally:
         "slow native removal must still be gated"
     );
     let overlap = state.join("verification-overlapped-removal");
-    let until = Instant::now() + Duration::from_secs(1);
+    let until = Instant::now() + common::time(1);
     while !overlap.exists() && Instant::now() < until {
         std::thread::sleep(Duration::from_millis(10));
     }

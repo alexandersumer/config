@@ -649,8 +649,8 @@ fn check_curl() -> Result<(), String> {
     // Check the transport before any credential refresh or browser interaction.
     let mut curl = Command::new("curl");
     curl.args(["--disable", "--version"]);
-    // Only a hang guard: a busy machine can take seconds to start any process.
-    let (code, version, _) = runtime::capture(curl, Duration::from_secs(REQUEST_SECONDS), true)?;
+    // A busy machine can take seconds to start a process; only a hang should fail here.
+    let (code, version, _) = runtime::capture(curl, Duration::from_secs(30), true)?;
     if code != 0 || !supported_curl(&version) {
         return Err("curl 7.84 or later is required for Bitbucket rate-limit handling".into());
     }

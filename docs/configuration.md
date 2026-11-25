@@ -27,12 +27,12 @@ Command roles:
 - `check`: non-mutating verification for formatting, build, unit tests, skill validation, and regression tests.
 - `check-codex-skills`: non-mutating verification that `~/.agents/skills` resolves to `skills`, legacy managed Codex links are absent, Codex config has no deprecated/disabled skill-discovery flags, and Codex prompt input sees each managed skill exactly once from both this checkout and the home directory.
 - `check-claude-skills`: non-mutating verification that `~/.claude/skills` mirrors custom skills from `skills`, with every managed link resolving to its registry-validated source and no stale managed links left behind.
-- `check-install`: non-mutating verification that all managed home config links, Codex skills/config, Claude Code skills, and binary ownership, and that `workctl` matches the checking executable. Use `workctl doctor --managed` to check generated completion drift too.
+- `check-install`: non-mutating verification that all managed home config links, global agent instructions, Codex skills/config, Claude Code skills, and binary ownership, and that `workctl` matches the checking executable. Use `workctl doctor --managed` to check generated completion drift too.
 - `repair-codex-config`: removes deprecated/disabled Codex feature flags from `~/.codex/config.toml`.
 - `prepare`: runs the same verification as `check`.
 - `pre-commit`: validates an isolated snapshot of the Git index, so unstaged and untracked work cannot affect the commit checks. Outside Git, runs `prepare` on the supplied checkout. No home installation is required.
-- `install`: intentional home-directory mutation for the `~/.agents/skills` symlink and custom `~/.claude/skills` symlinks, migration of old managed links, Codex config flag repair, `~/.local/bin/config-tools` and `~/.local/bin/workctl`. Codex itself is installed and updated through its official distribution; this installer does not create a Codex launcher.
-- `install-workctl`: updates only managed `workctl`, `config-tools`, and generated zsh completion; accepts `--home PATH` for an isolated installation. It does not rewrite shell startup or agent configuration.
+- `install`: intentional home-directory mutation for the `~/.agents/skills` symlink and custom `~/.claude/skills` symlinks, migration of old managed links, Codex config flag repair, `~/.local/bin/config-tools` and `~/.local/bin/workctl`, and the global agent instruction links. Codex itself is installed and updated through its official distribution; this installer does not create a Codex launcher.
+- `install-workctl`: updates only managed `workctl`, `config-tools`, generated zsh completion, and on macOS the hourly Docker image cleanup launch agent; accepts `--home PATH` for an isolated installation. It does not rewrite shell startup or agent configuration.
 - `install-git-hooks`: intentional local Git config mutation for `core.hooksPath`.
 
 ## Custom skills
@@ -63,6 +63,17 @@ Do not add `register_cmd` to skill front matter. Current Codex ignores that lega
 ### Claude Code
 
 Claude Code discovers personal skills from `~/.claude/skills/<name>/SKILL.md`, which is the same `SKILL.md` format the registry already validates (`name`, `description`, `allowed-tools`). Install links custom skills into `~/.claude/skills`, creating the directory if it does not exist. Discoverability is proven deterministically: `check-claude-skills` asserts each `~/.claude/skills/<name>` resolves to its registry-validated source, which is exactly the contract Claude Code's loader requires.
+
+## Global agent instructions
+
+[`instructions/global.md`](../instructions/global.md) is the single source of the rules every agent reads in every repository. Install links each agent's global path to it:
+
+- Codex: `~/.codex/AGENTS.md -> <checkout>/instructions/global.md`
+- Claude Code: `~/.claude/CLAUDE.md -> <checkout>/instructions/global.md`
+
+Keep the file short and agent-neutral: policy that must hold in every session belongs here, procedure belongs in a skill, and rules for one repository belong in that repository's `AGENTS.md`. The source lives outside agent discovery paths, so working in this checkout loads it once, through the home link.
+
+Install links these last, after every other managed path has converged. An existing file with the same contents is replaced by the link. A hand-written file with different contents is preserved and reported: move anything worth keeping into `instructions/global.md`, remove the file, and run `install` again. `check-install` reports a missing link or an unmanaged file as drift.
 
 ## TWG CLI skills
 
@@ -121,9 +132,11 @@ Expected symlink behavior:
 - `~/.config/ghostty/config` links to this config checkout's `ghostty/config` file.
 - `~/Library/Application Support/com.mitchellh.ghostty/config` is absent so Ghostty loads the managed config only once.
 - `~/.local/bin/config-tools` and `~/.local/bin/workctl` are runnable copies of the Rust multicall executable.
+- On macOS, `~/Library/LaunchAgents/io.github.alexandersumer.workctl.docker-image-clean.plist` is a generated regular file that runs the installed `workctl` hourly. It is loaded only when installing into the current account's own home.
 - Codex runs directly from the official Homebrew installation. The shell prefers `/opt/homebrew/bin` over older `/usr/local/bin` tools; no config-repair wrapper is installed.
 - `~/.codex/skills/.system` remains a Codex-owned directory with Codex system skills.
 - Each custom skill is discovered through `~/.agents/skills` and linked individually into `~/.claude/skills`. Old managed `~/.codex/skills/<name>` links are removed.
 - `~/.claude/skills` is created if missing; the directory itself is not symlinked, only the per-skill entries inside it.
 - Hidden skill directories and directories without `SKILL.md` are not linked into Codex or Claude Code.
+- `~/.codex/AGENTS.md` and `~/.claude/CLAUDE.md` link to this config checkout's `instructions/global.md` file.
 - Existing non-empty files/directories or unrelated symlinks are not replaced automatically.

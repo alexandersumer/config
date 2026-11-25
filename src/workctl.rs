@@ -7,10 +7,10 @@ use std::io::Write;
 #[command(
     name = "workctl",
     version,
-    about = "Work credentials, Git maintenance, and Bitbucket Cloud pull requests",
+    about = "Work credentials, Git and Docker maintenance, and Bitbucket Cloud pull requests",
     propagate_version = true,
     args_override_self = true,
-    after_help = "Examples:\n  workctl git reset /path/to/work /path/to/oss\n  workctl git worktree clean /path/to/work\n  workctl auth preflight\n  workctl pull-request approve --author-team TEAM_ID --dry-run workspace/repository\n  workctl doctor\n  workctl completions zsh\n\nExit codes: 0 success, 1 failed or blocked, 2 invalid usage, 130 interrupted."
+    after_help = "Examples:\n  workctl git reset /path/to/work /path/to/oss\n  workctl git worktree clean /path/to/work\n  workctl docker image clean --max-used-space 80GB\n  workctl auth preflight\n  workctl pull-request approve --author-team TEAM_ID --dry-run workspace/repository\n  workctl doctor\n  workctl completions zsh\n\nExit codes: 0 success, 1 failed or blocked, 2 invalid usage, 130 interrupted."
 )]
 struct Cli {
     /// Emit a single schema-versioned JSON result on stdout
@@ -31,6 +31,12 @@ enum Operation {
     Git {
         #[command(subcommand)]
         command: Git,
+    },
+    /// Hold local Docker images to a size budget
+    #[command(after_help = "Example:\n  workctl docker image clean --max-used-space 80GB")]
+    Docker {
+        #[command(subcommand)]
+        command: Docker,
     },
     /// Review actions for Bitbucket Cloud pull requests
     #[command(alias = "pr")]
@@ -82,6 +88,23 @@ enum Auth {
         #[arg(required = true, num_args = 1.., last = true)]
         command: Vec<OsString>,
     },
+}
+#[derive(Subcommand, Debug)]
+enum Docker {
+    /// Inspect and remove unused local images
+    #[command(after_help = "Example:\n  workctl docker image clean --max-used-space 80GB")]
+    Image {
+        #[command(subcommand)]
+        command: Image,
+    },
+}
+#[derive(Subcommand, Debug)]
+enum Image {
+    /// Preview removal; --apply executes the plan without another question
+    #[command(
+        after_long_help = "Docker never removes unused images itself. When the image store exceeds\n--max-used-space, this selects images no container uses, oldest arrival first,\nuntil their unique sizes cover the excess. Arrival is when Docker last pulled,\nbuilt, or tagged the image here, never its build date; unknown arrivals are kept.\n--older-than keeps images that arrived at or after one invocation cutoff.\nPreview never removes images. --apply removes without force, so Docker refuses\nany image a container uses, running or stopped; those skips are successful.\nSizes are Docker's rounded estimates, so applied runs measure again after each\nbatch. Removed images are not recoverable here; pull or rebuild them.\nExit codes: 0 success (including images in use), 1 failed or Docker unavailable, 2 invalid usage, 130 interrupted.\n\nExamples:\n  workctl docker image clean --max-used-space 80GB\n  workctl docker image clean --max-used-space 80GB --older-than 2h --apply"
+    )]
+    Clean(crate::docker::CleanArgs),
 }
 #[derive(Subcommand, Debug)]
 enum PullRequest {
@@ -184,6 +207,11 @@ pub(crate) fn run(args: Vec<OsString>) -> u8 {
         Operation::Auth {
             command: Auth::Exec { options, command },
         } => crate::auth::run(options, cli.json, Some(command)),
+        Operation::Docker {
+            command: Docker::Image {
+                command: Image::Clean(args),
+            },
+        } => crate::docker::run(args, cli.json),
         Operation::PullRequest {
             command: PullRequest::Approve(options),
         } => crate::pull_requests::run(options, cli.json),

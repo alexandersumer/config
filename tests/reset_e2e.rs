@@ -1,4 +1,5 @@
 //! Network E2E: standalone CLI, installed Git, real git-daemon, and persisted state.
+mod common;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::net::TcpListener;
@@ -72,7 +73,7 @@ impl Runtime {
         let mut child = cmd
             .spawn()
             .expect("required E2E executable must be available");
-        let deadline = Instant::now() + Duration::from_secs(20);
+        let deadline = Instant::now() + common::time(20);
         let status = loop {
             if let Some(status) = child.try_wait().unwrap() {
                 break status;
@@ -169,7 +170,7 @@ impl Runtime {
         .process_group(0);
         self.daemon = Some(cmd.spawn().expect("git daemon is required, not optional"));
         let url = format!("git://127.0.0.1:{port}/origin.git");
-        let deadline = Instant::now() + Duration::from_secs(60);
+        let deadline = Instant::now() + common::time(10);
         loop {
             let mut cmd = self.command(self.root(), "git");
             cmd.args(["ls-remote", "--symref", &url, "HEAD"]);

@@ -25,6 +25,7 @@ struct Fixture {
 fn env(cmd: &mut Command) -> &mut Command {
     cmd.env("GIT_CONFIG_NOSYSTEM", "1")
         .env("WORKCTL_STATE_DIR", common::state_dir())
+        .env(common::PACE, common::pace().to_string())
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_AUTHOR_NAME", "Test")
         .env("GIT_AUTHOR_EMAIL", "test@example.com")
@@ -144,7 +145,11 @@ impl Fixture {
         .unwrap();
         fs::write(
             dir.join("git"),
-            format!("#!/bin/sh\n{script}\nexec '{}' \"$@\"\n", real.trim()),
+            format!(
+                "#!/bin/sh\n{}\n{script}\nexec '{}' \"$@\"\n",
+                common::PACED_SHELL,
+                real.trim()
+            ),
         )
         .unwrap();
         fs::set_permissions(dir.join("git"), fs::Permissions::from_mode(0o755)).unwrap();
@@ -191,7 +196,7 @@ fn logs(out: &Output) -> PathBuf {
     )
 }
 fn wait_marker(path: &Path) {
-    let until = Instant::now() + Duration::from_secs(60);
+    let until = Instant::now() + common::time(10);
     while !path.exists() {
         assert!(
             Instant::now() < until,
@@ -201,11 +206,8 @@ fn wait_marker(path: &Path) {
         thread::sleep(Duration::from_millis(10));
     }
 }
-fn wait_child(child: Child) -> Output {
-    wait_child_within(child, Duration::from_secs(60))
-}
-fn wait_child_within(mut child: Child, limit: Duration) -> Output {
-    let until = Instant::now() + limit;
+fn wait_child(mut child: Child) -> Output {
+    let until = Instant::now() + common::time(15);
     loop {
         if child.try_wait().unwrap().is_some() {
             return child.wait_with_output().unwrap();
@@ -389,42 +391,37 @@ fn missing_index_on_an_empty_branch_preserves_noncolliding_local_files() {
 
 #[test]
 fn vacant_clone_reset_timeout_during_initialization_is_not_replayed() {
-    // The deadline must outlast everything before the checkout is initialized,
-    // or an earlier stage times out and is legitimately retried. A busy machine
-    // needs a longer one; a replayed initialization shows more than one attempt
-    // at every scale.
-    let timeouts = ["5", "30", "120"];
-    for timeout in timeouts {
-        let f = Fixture::new();
-        let repo = f.clone_without_checkout();
-        let shim = f.shim(
-            r#"for arg in "$@"; do
+    let f = Fixture::new();
+    let repo = f.clone_without_checkout();
+    let shim = f.shim(
+        r#"for arg in "$@"; do
             if [ "$arg" = read-tree ]; then
                 command -p git "$@" || exit $?
-                sleep 600
+                sleep 30
                 exit 0
             fi
         done"#,
-        );
-        let mut command = f.cli(&repo, &[]);
-        f.with_shim(&mut command, &shim);
-        let out = command
-            .args(["--timeout", timeout, "--attempts", "3", "--json"])
-            .output()
-            .unwrap();
-        assert_eq!(out.status.code(), Some(1), "{}", text(&out));
-        let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-        let result = &report["results"][0];
-        if result["attempts"] != 1 && timeout != timeouts[timeouts.len() - 1] {
-            continue;
-        }
-        assert_eq!(result["failure_kind"], "checkout_unverified", "{result}");
-        assert_eq!(result["attempts"], 1, "{result}");
-        assert_eq!(result["stage"], "initialize checkout", "{result}");
-        assert_eq!(git(&repo, &["rev-parse", "HEAD"]), f.old);
-        assert_eq!(fs::read_to_string(repo.join("file")).unwrap(), "initial\n");
-        return;
-    }
+    );
+    let mut command = f.cli(&repo, &[]);
+    f.with_shim(&mut command, &shim);
+    let out = command
+        .args([
+            "--timeout",
+            common::secs(5).to_string().as_str(),
+            "--attempts",
+            "3",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let result = &report["results"][0];
+    assert_eq!(result["failure_kind"], "checkout_unverified", "{result}");
+    assert_eq!(result["attempts"], 1, "{result}");
+    assert_eq!(result["stage"], "initialize checkout", "{result}");
+    assert_eq!(git(&repo, &["rev-parse", "HEAD"]), f.old);
+    assert_eq!(fs::read_to_string(repo.join("file")).unwrap(), "initial\n");
 }
 
 #[test]
@@ -909,7 +906,7 @@ fn fetch_timeout_cancellation_and_normal_completion_reap_descendants() {
         let _release = Release(release.clone());
         // Exercise a slow target lookup without expiring before the fetch fixture starts.
         let script = format!(
-            "for arg in \"$@\"; do\n if [ \"$arg\" = ls-remote ]; then {} fi\n if [ \"$arg\" = fetch ]; then\n  (n=0; while [ ! -e '{}' ] && [ \"$n\" -lt 400 ]; do sleep 0.05; n=$((n+1)); done; [ ! -e '{}' ] || touch '{}') &\n  echo $! > '{}'\n  echo $$ > '{}'\n  {}\n fi\ndone",
+            "for arg in \"$@\"; do\n if [ \"$arg\" = ls-remote ]; then {} fi\n if [ \"$arg\" = fetch ]; then\n  (n=0; while [ ! -e '{}' ] && [ \"$n\" -lt $((400 * PACE)) ]; do sleep 0.05; n=$((n+1)); done; [ ! -e '{}' ] || touch '{}') &\n  echo $! > '{}'\n  echo $$ > '{}'\n  {}\n fi\ndone",
             if mode == "timeout" { "sleep 2;" } else { ":;" },
             release.display(), release.display(), escaped.display(), descendant.display(),
             marker.display(), match mode {
@@ -919,37 +916,18 @@ fn fetch_timeout_cancellation_and_normal_completion_reap_descendants() {
             }
         );
         let dir = f.shim(&script);
-        // The reset deadline must outlast everything before the fetch, which a
-        // busy machine stretches past any single budget. A run that expires
-        // earlier never starts the fixture, so only one that reached it counts.
-        let mut budgets = if mode == "timeout" {
-            ["8", "40", "200"]
-        } else {
-            ["30", "120", "600"]
-        }
-        .into_iter();
-        let (child, budget) = loop {
-            let timeout = budgets
-                .next()
-                .expect("the fetch fixture never started before the reset deadline");
-            let mut cmd = f.cli(&f.repo, &[OsStr::new("--timeout"), OsStr::new(timeout)]);
-            f.with_shim(&mut cmd, &dir);
-            cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
-            let mut child = cmd.spawn().unwrap();
-            while !marker.exists() && child.try_wait().unwrap().is_none() {
-                thread::sleep(Duration::from_millis(10));
-            }
-            if marker.exists() {
-                break (child, timeout.parse::<u64>().unwrap());
-            }
-            wait_child(child);
-        };
+        let timeout = common::secs(if mode == "timeout" { 8 } else { 30 }).to_string();
+        let mut cmd = f.cli(&f.repo, &[OsStr::new("--timeout"), OsStr::new(&timeout)]);
+        f.with_shim(&mut cmd, &dir);
+        cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+        let child = cmd.spawn().unwrap();
+        wait_marker(&marker);
         if let Some(signal) = signal {
             unsafe {
                 libc::kill(child.id() as i32, signal);
             }
         }
-        let out = wait_child_within(child, Duration::from_secs(budget + 60));
+        let out = wait_child(child);
         if mode == "normal" {
             success(&out);
         } else {
@@ -994,7 +972,7 @@ fn fetch_timeout_cancellation_and_normal_completion_reap_descendants() {
             .trim()
             .parse::<i32>()
             .unwrap();
-        let until = Instant::now() + Duration::from_secs(2);
+        let until = Instant::now() + common::time(2);
         while unsafe { libc::kill(pid, 0) } == 0 {
             assert!(Instant::now() < until, "descendant survived {mode}");
             thread::sleep(Duration::from_millis(10));
@@ -1014,7 +992,7 @@ fn detached_checkout_hook_cannot_keep_a_completed_reset_busy() {
     impl Drop for ReleaseHook {
         fn drop(&mut self) {
             let _ = fs::write(&self.0, "release");
-            let until = Instant::now() + Duration::from_secs(5);
+            let until = Instant::now() + common::time(5);
             while !self.1.exists() && Instant::now() < until {
                 thread::sleep(Duration::from_millis(10));
             }
@@ -1034,13 +1012,13 @@ if not os.path.exists(ready):
         devnull = os.open('/dev/null', os.O_RDWR)
         for fd in (0, 1, 2): os.dup2(devnull, fd)
         with open(ready, 'w') as f: f.write(str(os.getpid()))
-        deadline = time.monotonic() + 30
+        deadline = time.monotonic() + 30 * int(os.environ.get('WORKCTL_TEST_PACE', '1'))
         while not os.path.exists(os.environ['PROBE_RELEASE']) and time.monotonic() < deadline:
             time.sleep(0.01)
         os.closerange(3, 65536)
         with open(os.environ['PROBE_DONE'], 'w') as f: f.write('done')
         os._exit(0)
-    deadline = time.monotonic() + 5
+    deadline = time.monotonic() + 5 * int(os.environ.get('WORKCTL_TEST_PACE', '1'))
     while not os.path.exists(ready):
         if time.monotonic() > deadline: raise RuntimeError('hook did not start')
         time.sleep(0.01)
@@ -1077,7 +1055,7 @@ fn killed_supervisor_leaves_active_worker_holding_repository_lock() {
     let marker = f.temp.path().join("fetch-started");
     let release = f.temp.path().join("fetch-release");
     let dir = f.shim(&format!(
-        "for arg in \"$@\"; do if [ \"$arg\" = fetch ]; then echo $$ > '{}'; n=0; while [ ! -e '{}' ] && [ \"$n\" -lt 600 ]; do sleep 0.05; n=$((n+1)); done; fi; done",
+        "for arg in \"$@\"; do if [ \"$arg\" = fetch ]; then echo $$ > '{}'; n=0; while [ ! -e '{}' ] && [ \"$n\" -lt $((600 * PACE)) ]; do sleep 0.05; n=$((n+1)); done; fi; done",
         marker.display(), release.display()
     ));
     struct ReleaseFetch(PathBuf);
@@ -1110,7 +1088,7 @@ fn killed_supervisor_leaves_active_worker_holding_repository_lock() {
     assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.old);
     fs::write(&release, "release").unwrap();
     let lock = fs::File::open(f.repo.join(".git/repo-batch.lock")).unwrap();
-    let until = Instant::now() + Duration::from_secs(60);
+    let until = Instant::now() + common::time(10);
     loop {
         if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
             break;
@@ -1517,7 +1495,7 @@ fn failure_is_reported_before_a_slower_earlier_repository_finishes() {
         r#"for arg do
             if [ "$arg" = fetch ]; then
                 n=0
-                while [ ! -e '{}' ] && [ "$n" -lt 1000 ]; do
+                while [ ! -e '{}' ] && [ "$n" -lt $((1000 * PACE)) ]; do
                     sleep 0.05; n=$((n + 1))
                 done
                 touch '{}'
@@ -1534,7 +1512,7 @@ fn failure_is_reported_before_a_slower_earlier_repository_finishes() {
         .stderr(fs::File::create(&output).unwrap())
         .spawn()
         .unwrap();
-    let until = Instant::now() + Duration::from_secs(30);
+    let until = Instant::now() + common::time(30);
     loop {
         let text = fs::read_to_string(&output).unwrap();
         if text.contains("Failed:") && text.contains("zz-dirty") {
@@ -1670,7 +1648,7 @@ fn cancellation_interrupts_retry_backoff_and_cancels_queued_repositories() {
         .stderr(fs::File::create(&output).unwrap())
         .spawn()
         .unwrap();
-    let until = Instant::now() + Duration::from_secs(60);
+    let until = Instant::now() + common::time(10);
     loop {
         let text = fs::read_to_string(&output).unwrap();
         if let Some(dir) = text.lines().find_map(|line| line.strip_prefix("Logs: ")) {
@@ -1690,7 +1668,7 @@ fn cancellation_interrupts_retry_backoff_and_cancels_queued_repositories() {
     }
     let out = wait_child(child);
     assert_eq!(out.status.code(), Some(130));
-    assert!(start.elapsed() < Duration::from_secs(2));
+    assert!(start.elapsed() < common::time(2));
     assert_eq!(fs::read_to_string(count).unwrap(), "attempt");
     assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.old);
     let stdout = fs::read_to_string(output).unwrap();
@@ -1802,7 +1780,7 @@ fn output_failure_after_workers_start_cancels_their_process_groups() {
     assert_eq!(out.status.code(), Some(1));
     assert!(!escaped.exists());
     fs::write(release, "release\n").unwrap();
-    thread::sleep(Duration::from_secs(4));
+    thread::sleep(common::time(4));
     assert!(!escaped.exists());
     assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.old);
 }
@@ -1886,7 +1864,7 @@ fn clap_equals_short_flags_and_option_terminator_reach_the_public_runner() {
             "--list",
             "-j2",
             "--attempts=2",
-            "--timeout=30",
+            &format!("--timeout={}", common::secs(30)),
             "--remote=origin",
             "--branch=main",
             "-v",
@@ -1902,7 +1880,7 @@ fn clap_equals_short_flags_and_option_terminator_reach_the_public_runner() {
         &[
             "-j1",
             "--attempts=1",
-            "--timeout=30",
+            &format!("--timeout={}", common::secs(30)),
             "--remote=origin",
             "--branch=main",
         ],
@@ -2070,7 +2048,7 @@ done"#,
         &f.repo,
         &[
             OsStr::new("--attempts=2"),
-            OsStr::new("--timeout=15"),
+            OsStr::new(&format!("--timeout={}", common::secs(15))),
             OsStr::new("--json"),
         ],
     );
@@ -2111,7 +2089,7 @@ fn late_timeout_preserves_local_edits_and_marks_the_checkout_unverified() {
         &f.repo,
         &[
             OsStr::new("--attempts=2"),
-            OsStr::new("--timeout=15"),
+            OsStr::new(&format!("--timeout={}", common::secs(15))),
             OsStr::new("--json"),
         ],
     );
@@ -2156,7 +2134,7 @@ fn recovery_keeps_a_completed_member_and_blocks_replay_of_the_running_member() {
                 if [ "$arg" = ls-remote ]; then
                     touch '{}'
                     n=0
-                    while [ ! -e '{}' ] && [ "$n" -lt 120 ]; do
+                    while [ ! -e '{}' ] && [ "$n" -lt $((120 * PACE)) ]; do
                         sleep 0.05; n=$((n + 1))
                     done
                     exit 1
@@ -2747,7 +2725,7 @@ for arg in "$@"; do
         n=0
         while [ "$(find '{first}' -type f | wc -l)" -lt 6 ]; do
             n=$((n + 1))
-            [ "$n" -le 400 ] || exit 97
+            [ "$n" -le $((400 * PACE)) ] || exit 97
             sleep 0.02
         done
         echo 'fatal: early EOF' >&2
