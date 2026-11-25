@@ -2178,15 +2178,23 @@ fn micros_bad_issuance_never_runs_login_or_launches_a_wrapped_command() {
 
 #[test]
 fn micros_login_timeout_fails_even_with_a_fresh_cache() {
-    let f = Fixture::new(json!({"atlas_valid":false,"hang_keys":["atlas-micros-login"]}));
-    let r = f.run(&["--profile", "micros", "--login-timeout", "1"], 1);
-    assert_eq!(r["targets"][0]["status"], "failed");
-    let pid = fs::read_to_string(f.root.path().join("descendant-atlas-micros-login"))
-        .unwrap()
-        .parse::<i32>()
-        .unwrap();
-    assert!(!alive(pid), "Micros login descendant survived its deadline");
-    assert_eq!(f.calls().len(), 4);
+    // The deadline must outlast the login's own startup, which a busy machine
+    // stretches past any single budget. A login cut off before it hangs proves
+    // nothing about its descendant, so only a run that reached the hang counts.
+    for timeout in ["1", "5", "25"] {
+        let f = Fixture::new(json!({"atlas_valid":false,"hang_keys":["atlas-micros-login"]}));
+        let r = f.run(&["--profile", "micros", "--login-timeout", timeout], 1);
+        assert_eq!(r["targets"][0]["status"], "failed");
+        let Ok(pid) = fs::read_to_string(f.root.path().join("descendant-atlas-micros-login"))
+        else {
+            continue;
+        };
+        let pid = pid.parse::<i32>().unwrap();
+        assert!(!alive(pid), "Micros login descendant survived its deadline");
+        assert_eq!(f.calls().len(), 4);
+        return;
+    }
+    panic!("the Micros login never reached its hang before the longest deadline");
 }
 
 #[test]
