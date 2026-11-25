@@ -452,7 +452,9 @@ workctl docker image clean --max-used-space 80GB
 workctl docker image clean --max-used-space 80GB --older-than 2h --apply
 ```
 
-When the store is within `--max-used-space`, nothing is inspected or removed. Otherwise
+When the store is within `--max-used-space`, nothing is inspected or removed. Docker's
+usage report can fail briefly while a concurrent build changes images, so it is requested
+up to three times before the run fails; removal is never retried. Otherwise
 the command selects images that no container uses, oldest arrival first, until their
 unique sizes cover the excess. Arrival is the last time Docker pulled, built, or tagged
 the image here; images with an unknown arrival are kept. `--older-than` also keeps

@@ -441,3 +441,22 @@ fn heartbeat_records_only_successful_applied_runs() {
     let out = fixture.run(&["--max-used-space", "80GB", "--heartbeat"]);
     assert_eq!(out.status.code(), Some(2), "{}", text(&out));
 }
+
+#[test]
+fn usage_reports_are_asked_again_when_docker_is_briefly_inconsistent() {
+    // A concurrent build can make one report fail while snapshots change under it.
+    let fixture = Fixture::new(&["fail", "fail", "79.9GB"], &crowded());
+    let result = fixture.result(&["--max-used-space", "80GB", "--apply"], 0);
+    assert_eq!(result["status"], "completed");
+    assert_eq!(result["used_bytes"], 79_900_000_000u64);
+    assert_eq!(
+        fixture.calls(),
+        ["system df --format {{json .}}"; 3],
+        "three reports, no removal"
+    );
+
+    let fixture = Fixture::new(&["fail", "fail", "fail", "79.9GB"], &crowded());
+    let result = fixture.result(&["--max-used-space", "80GB", "--apply"], 1);
+    assert_eq!(result["error"], "daemon went away");
+    assert_eq!(fixture.calls().len(), 3, "a persistent failure still fails");
+}

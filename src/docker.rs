@@ -251,8 +251,24 @@ impl Docker {
         }
     }
 
+    /// Docker's usage report can fail while a concurrent build or removal changes
+    /// the snapshots it is measuring. Reports only read, so ask again before
+    /// treating one such moment as a failed run.
+    fn report(&self, args: &[&str]) -> Result<Vec<u8>, String> {
+        let mut attempt = 1;
+        loop {
+            match self.output(args) {
+                Err(_) if attempt < 3 && !runtime::cancelled() => {
+                    attempt += 1;
+                    std::thread::sleep(Duration::from_secs(1));
+                }
+                report => return report,
+            }
+        }
+    }
+
     fn used(&self) -> Result<u64, String> {
-        let report = self.output(&["system", "df", "--format", "{{json .}}"])?;
+        let report = self.report(&["system", "df", "--format", "{{json .}}"])?;
         for line in report.split(|byte| *byte == b'\n') {
             if line.is_empty() {
                 continue;
@@ -268,7 +284,7 @@ impl Docker {
     }
 
     fn images(&self) -> Result<Vec<Image>, String> {
-        let report = self.output(&["system", "df", "--verbose", "--format", "{{json .}}"])?;
+        let report = self.report(&["system", "df", "--verbose", "--format", "{{json .}}"])?;
         let report: Report = serde_json::from_slice(&report)
             .map_err(|_| "Docker returned an unreadable image usage report")?;
         let mut details = BTreeMap::new();
