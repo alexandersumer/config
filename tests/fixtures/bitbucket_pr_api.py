@@ -20,7 +20,8 @@ approved = {2}
 truncated_page = False
 limits = set()
 cooldown = 0
-parallel_reads = threading.Barrier(2, timeout=5)
+# Overlap proof only: generous for a busy machine, under curl's 28 second limit.
+parallel_reads = threading.Barrier(2, timeout=20)
 pool_advanced = threading.Event()
 log = (root / "http.jsonl").open("w", buffering=1)
 
@@ -34,6 +35,11 @@ def author(pr, detail=False):
 
 def candidate(pr, state="OPEN", reviewers=None):
     result = dict(id=pr, state=state, reviewers=[me] if reviewers is None else reviewers)
+    if mode in {"verdicts", "late_verdicts"}:
+        # Only the detail read reveals a verdict that landed after discovery.
+        result["draft"] = pr == 14 and mode == "verdicts"
+        if pr == 13 and mode == "verdicts":
+            result["participants"] = [{"user": me, "approved": False, "state": "changes_requested"}]
     if mode in {"author_team", "author_account"}:
         result["author"] = author(pr)
         if pr == 2:
@@ -98,7 +104,7 @@ class Api(http.server.BaseHTTPRequestHandler):
                 workspace, index, user = match.groups()
                 if urllib.parse.unquote(user) != me["uuid"] or query.get("state") != ["OPEN"]:
                     return self.respond(400, {})
-                if index == "00" and not pool_advanced.wait(5):
+                if index == "00" and not pool_advanced.wait(20):
                     return self.respond(409, {})
                 if index == "01" and index not in limits:
                     limits.add(index)
@@ -124,7 +130,7 @@ class Api(http.server.BaseHTTPRequestHandler):
                 workspace, user = match.groups()
                 if urllib.parse.unquote(user) != me["uuid"] or query.get("state") != ["OPEN"]:
                     return self.respond(400, {})
-                fields = "next,values.id,values.state,values.title,values.queued,values.author.uuid,values.destination.repository.full_name"
+                fields = "next,values.id,values.state,values.title,values.queued,values.draft,values.author.uuid,values.destination.repository.full_name"
                 if query.get("fields") != [fields]:
                     return self.respond(400, {})
                 if mode == "discover_review_requests_empty":
@@ -134,9 +140,9 @@ class Api(http.server.BaseHTTPRequestHandler):
                         parallel_reads.wait()
                     except threading.BrokenBarrierError:
                         return self.respond(500, {})
-                def row(repo, number, title, author=me, state="OPEN", queued=False):
-                    return {"id": number, "title": title, "state": state, "queued": queued, "author": author,
-                            "destination": {"repository": {"full_name": repo}}}
+                def row(repo, number, title, author=me, state="OPEN", queued=False, draft=False):
+                    return {"id": number, "title": title, "state": state, "queued": queued, "draft": draft,
+                            "author": author, "destination": {"repository": {"full_name": repo}}}
                 if workspace == "other-team":
                     return self.respond(200, {"values": [row("other-team/three", 8, "[HIGH-RISK] [noissue] Checks the other workspace")]})
                 first = row("team/one", 8, "[RFC] Preserves the current title")
@@ -145,6 +151,7 @@ class Api(http.server.BaseHTTPRequestHandler):
                         first, row("team/two", 8, "Preserves the second repository [low-risk] [NOISSUE]"),
                         row("team/one", 9, "Closed", state="MERGED"),
                         row("team/one", 11, "Waiting for merge", queued=True),
+                        row("team/one", 12, "Still drafting", draft=True),
                         row("team/one", 10, "Someone else's", author=other),
                     ]})
                 next_page = origin + path + "?state=OPEN&page=2&fields=" + fields
@@ -184,6 +191,11 @@ class Api(http.server.BaseHTTPRequestHandler):
                 limits.add("list")
                 cooldown = time.monotonic() + 1
                 return self.respond(429, {}, 1)
+            if repo == "two" and mode in {"verdicts", "late_verdicts"}:
+                fields = query.get("fields", [""])[0].split(",")
+                if "values.draft" not in fields or "values.participants.state" not in fields:
+                    return self.respond(400, {})
+                return self.respond(200, {"values": [candidate(8), candidate(13), candidate(14)]})
             if repo == "two":
                 return self.respond(200, {"values": [candidate(8)]})
             if query.get("page") == ["2"]:
@@ -210,7 +222,7 @@ class Api(http.server.BaseHTTPRequestHandler):
             return self.respond(200, {"values": values, "next": pagination})
         pr = int(pr)
         if mode == "print_review_request" and suffix is None and self.command == "GET":
-            if query.get("fields") != ["id,state,title,queued"]:
+            if query.get("fields") != ["id,state,title,queued,draft"]:
                 return self.respond(400, {})
             if pr == 404:
                 return self.respond(404, {})
@@ -226,6 +238,8 @@ class Api(http.server.BaseHTTPRequestHandler):
                 return self.respond(200, dict(id=pr, state="OPEN", title="Queue status missing"))
             if pr == 15:
                 return self.respond(200, dict(id=pr, state="OPEN", title="Invalid queue status", queued="false"))
+            if pr == 16:
+                return self.respond(200, dict(id=pr, state="OPEN", title="Still drafting", queued=False, draft=True))
             title = {
                 ("two", 8): " [low-risk] [MEDIUM-RISK] Logs the request and trace IDs [NOISSUE]",
                 ("two", 12): "[no-risk]",
@@ -256,7 +270,7 @@ class Api(http.server.BaseHTTPRequestHandler):
                 if mode == "rate_after_commit":
                     approved.add(pr)
                 return self.respond(429, {}, 1)
-            if pr in approved or pr not in {1, 3, 6, 8, 11}:
+            if pr in approved or pr not in {1, 3, 6, 8, 11, 13, 14}:
                 return self.respond(409, {})
             if mode == "partial" and pr == 1:
                 return self.respond(503, {"message": "AUTH_SECRET_MUST_NEVER_APPEAR"})
@@ -270,6 +284,12 @@ class Api(http.server.BaseHTTPRequestHandler):
             body = candidate(pr, "DECLINED" if pr == 9 else "OPEN",
                              [other] if pr == 7 else [me])
             participant = {"user": me, "approved": pr in approved}
+            if mode in {"verdicts", "late_verdicts"}:
+                if not {"draft", "participants.state"} <= set(query.get("fields", [""])[0].split(",")):
+                    return self.respond(400, {})
+                body["draft"] = pr == 14
+                if pr == 13:
+                    participant["state"] = "changes_requested"
             return self.respond(200, dict(body, author=author(pr, True) if mode in {"author_team", "author_account"} else other,
                                           participants=[participant]))
         return self.respond(405, {})

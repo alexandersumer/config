@@ -10,7 +10,7 @@ const WORKSPACE_WORKERS: usize = 12;
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Options {
-    /// Bitbucket pull request URLs or WORKSPACE/REPOSITORY#ID references (default: all open, unqueued PRs you authored)
+    /// Bitbucket pull request URLs or WORKSPACE/REPOSITORY#ID references (default: all open PRs you authored, except drafts and queued merges)
     #[arg(value_name = "PULL_REQUEST", value_parser = pull_request)]
     pull_requests: Vec<Reference>,
     /// Allow silent OAuth refresh without browser login
@@ -54,6 +54,8 @@ struct Details {
     state: String,
     title: String,
     queued: bool,
+    #[serde(default)]
+    draft: bool,
 }
 
 #[derive(Deserialize)]
@@ -145,7 +147,7 @@ fn append_selected(
         let Reference { repository, id } = reference;
         let details: Details = client
             .request(&format!(
-                "{API}/repositories/{repository}/pullrequests/{id}?fields=id,state,title,queued"
+                "{API}/repositories/{repository}/pullrequests/{id}?fields=id,state,title,queued,draft"
             ))
             .map_err(|error| format!("{repository}#{id}: {error}"))?;
         if details.id != *id {
@@ -155,6 +157,9 @@ fn append_selected(
         }
         if details.state != "OPEN" {
             return Err(format!("{repository}#{id}: pull request is no longer open"));
+        }
+        if details.draft {
+            return Err(format!("{repository}#{id}: pull request is still a draft"));
         }
         if !details.queued {
             append_pull_request(message, reference, &details.title)?;
@@ -243,9 +248,13 @@ fn workspace_titles(client: &Client, workspace: &str, author: &str) -> Result<St
     client
         .any_page(
             &format!("{API}/workspaces/{workspace}/pullrequests/%7B{uuid}%7D"),
-            "state=OPEN&pagelen=50&fields=next,values.id,values.state,values.title,values.queued,values.author.uuid,values.destination.repository.full_name",
+            "state=OPEN&pagelen=50&fields=next,values.id,values.state,values.title,values.queued,values.draft,values.author.uuid,values.destination.repository.full_name",
             |pr: AuthoredPullRequest| {
-                if pr.details.state != "OPEN" || pr.details.queued || pr.author.uuid != author {
+                if pr.details.state != "OPEN"
+                    || pr.details.queued
+                    || pr.details.draft
+                    || pr.author.uuid != author
+                {
                     return Ok(false);
                 }
                 let full_name = pr.destination.repository.full_name;

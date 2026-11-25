@@ -2602,6 +2602,7 @@ fn print_review_request_e2e_refuses_incomplete_messages_and_invalid_references()
         ("team/one#11", "empty pull request title"),
         ("team/one#14", "expected JSON schema"),
         ("team/one#15", "expected JSON schema"),
+        ("team/one#16", "still a draft"),
         ("team/one#404", "HTTP 404"),
     ] {
         let failed = api
@@ -2745,6 +2746,33 @@ fn pr_approve_e2e_refreshes_and_approves_only_assigned_prs_across_pages_and_reru
         .requests()
         .iter()
         .all(|(_, route)| !route.contains("unlisted")));
+}
+
+#[test]
+fn pr_approve_e2e_never_overrides_requested_changes_or_approves_drafts() {
+    // "late_verdicts" hides both states from discovery, so only the read made
+    // immediately before the write can stop the approval.
+    for mode in ["verdicts", "late_verdicts"] {
+        let api = PullRequestApi::new(mode);
+        let fixture = Fixture::new(json!({"bb_valid":true}));
+        let result = approval_result(api.command(&fixture, &["team/two"]).output().unwrap(), 0);
+        let statuses: Vec<_> = result["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| (row["id"].as_u64().unwrap(), row["status"].as_str().unwrap()))
+            .collect();
+        assert_eq!(
+            statuses,
+            [(8, "approved"), (13, "changes_requested"), (14, "draft")],
+            "{mode}"
+        );
+        assert_eq!(
+            api.posts(),
+            ["/2.0/repositories/team/two/pullrequests/8/approve"],
+            "{mode}"
+        );
+    }
 }
 
 #[test]
@@ -3371,7 +3399,12 @@ fn pr_approve_e2e_reports_a_compact_human_summary_and_actionable_errors() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert_eq!(stdout.lines().count(), 1, "{stdout}");
-    assert!(stdout.starts_with("Approval incomplete · 1 approved · 2 prior approvals · 2 no longer eligible · 2 failed · "), "{stdout}");
+    assert!(
+        stdout.starts_with(
+            "Approval incomplete · 1 approved · 2 prior approvals · 2 skipped · 2 failed · "
+        ),
+        "{stdout}"
+    );
     assert!(stderr.contains("Discovering pull requests…"));
     assert!(stderr.contains("Checking 7 pull requests…"));
     assert!(stderr.contains("workctl: team/one #1: Approval could not be verified"));

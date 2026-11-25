@@ -97,6 +97,8 @@ struct Page<T> {
 struct Candidate {
     id: u64,
     state: String,
+    #[serde(default)]
+    draft: bool,
     reviewers: Vec<User>,
 }
 
@@ -144,12 +146,33 @@ impl AuthorScope {
 struct Participant {
     user: User,
     approved: bool,
+    state: Option<String>,
 }
 
 fn approved_by(participants: &[Participant], user: &str) -> bool {
     participants
         .iter()
         .any(|p| p.user.uuid == user && p.approved)
+}
+
+/// A draft is not ready for a verdict, and a bulk run must never replace the
+/// reviewer's own standing approval or change request.
+fn settled(pr: &Candidate, participants: &[Participant], user: &str) -> Option<&'static str> {
+    if pr.draft {
+        return Some("draft");
+    }
+    participants
+        .iter()
+        .filter(|p| p.user.uuid == user)
+        .find_map(|p| {
+            if p.approved {
+                Some("already_approved")
+            } else if p.state.as_deref() == Some("changes_requested") {
+                Some("changes_requested")
+            } else {
+                None
+            }
+        })
 }
 
 #[derive(Deserialize)]
@@ -496,8 +519,8 @@ impl Client {
         collection: &str,
         me: &str,
         scope: &AuthorScope,
-    ) -> Result<BTreeMap<u64, bool>, String> {
-        let mut ids = BTreeMap::new();
+    ) -> Result<BTreeMap<u64, Option<&'static str>>, String> {
+        let mut ids: BTreeMap<u64, Option<&'static str>> = BTreeMap::new();
         let reviewer = format!("reviewers.uuid=\"{me}\"");
         // Keep the URL bounded. Large teams still get the same local author filter.
         let selector = scope
@@ -520,7 +543,7 @@ impl Client {
             ""
         };
         let query = format!(
-            "state=OPEN&sort=id&pagelen=50&fields=next,values.id,values.state,values.reviewers.uuid,values.participants.user.uuid,values.participants.approved{author_fields}&q={encoded}"
+            "state=OPEN&sort=id&pagelen=50&fields=next,values.id,values.state,values.draft,values.reviewers.uuid,values.participants.user.uuid,values.participants.approved,values.participants.state{author_fields}&q={encoded}"
         );
         self.any_page(collection, &query, |listed: ListedPullRequest| {
             let pr = listed.candidate;
@@ -531,10 +554,10 @@ impl Client {
                 && pr.reviewers.iter().any(|user| user.uuid == me)
                 && scope.matches(listed.author.as_ref())
             {
-                let already_approved = approved_by(&listed.participants, me);
+                let settled = settled(&pr, &listed.participants, me);
                 ids.entry(pr.id)
-                    .and_modify(|approved| *approved |= already_approved)
-                    .or_insert(already_approved);
+                    .and_modify(|known| *known = known.or(settled))
+                    .or_insert(settled);
             }
             Ok(false)
         })?;
@@ -549,7 +572,7 @@ impl Client {
         dry_run: bool,
         scope: &AuthorScope,
     ) -> Result<&'static str, String> {
-        let detail = format!("{endpoint}?fields=id,state,author.uuid,author.account_id,reviewers.uuid,participants.user.uuid,participants.approved");
+        let detail = format!("{endpoint}?fields=id,state,draft,author.uuid,author.account_id,reviewers.uuid,participants.user.uuid,participants.approved,participants.state");
         for attempt in 0..MAX_ATTEMPTS {
             let verified_token = self.token()?;
             let approved_before = self.any_page(
@@ -574,8 +597,8 @@ impl Client {
             {
                 return Ok("no_longer_eligible");
             }
-            if approved_by(&pr.participants, me) {
-                return Ok("already_approved");
+            if let Some(status) = settled(&pr.candidate, &pr.participants, me) {
+                return Ok(status);
             }
             if !scope.matches(Some(&pr.author)) {
                 return Ok(match scope {
@@ -626,7 +649,8 @@ fn check_curl() -> Result<(), String> {
     // Check the transport before any credential refresh or browser interaction.
     let mut curl = Command::new("curl");
     curl.args(["--disable", "--version"]);
-    let (code, version, _) = runtime::capture(curl, Duration::from_secs(5), true)?;
+    // Only a hang guard: a busy machine can take seconds to start any process.
+    let (code, version, _) = runtime::capture(curl, Duration::from_secs(REQUEST_SECONDS), true)?;
     if code != 0 || !supported_curl(&version) {
         return Err("curl 7.84 or later is required for Bitbucket rate-limit handling".into());
     }
@@ -717,8 +741,8 @@ fn approve(
                             .map_err(|reason| format!("{repo}: {reason}"))?;
                         Ok::<_, String>(
                             ids.into_iter()
-                                .map(|(id, approved)| {
-                                    (*repo, format!("{collection}/{id}"), id, approved)
+                                .map(|(id, settled)| {
+                                    (*repo, format!("{collection}/{id}"), id, settled)
                                 })
                                 .collect::<Vec<_>>(),
                         )
@@ -764,13 +788,13 @@ fn approve(
                     && !progress_failed.load(Ordering::Relaxed)
                 {
                     let index = next.fetch_add(1, Ordering::Relaxed);
-                    let Some((repo, endpoint, id, already_approved)) = discovered.get(index) else {
+                    let Some((repo, endpoint, id, settled)) = discovered.get(index) else {
                         break;
                     };
                     let mut row =
                         json!({"repository":repo,"id":id,"url":pull_request_url(repo, *id)});
-                    if *already_approved {
-                        row["status"] = json!("already_approved");
+                    if let Some(status) = settled {
+                        row["status"] = json!(status);
                     } else {
                         match client.approval_status(
                             endpoint,
@@ -885,7 +909,7 @@ fn report(
         )?;
     }
     if skipped > 0 {
-        write!(stdout, " · {skipped} no longer eligible")?;
+        write!(stdout, " · {skipped} skipped")?;
     }
     if failed > 0 {
         write!(stdout, " · {failed} failed")?;

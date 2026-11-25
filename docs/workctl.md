@@ -143,8 +143,8 @@ requests, pass their Bitbucket Cloud URLs or quoted `WORKSPACE/REPOSITORY#ID`
 references in the order you want them printed.
 
 Both modes skip pull requests already in the merge queue, even when Bitbucket
-still reports them as open. If none are eligible, the command prints
-`No open pull requests available for review.`
+still reports them as open. Discovery also skips drafts. If none are eligible,
+the command prints `No open pull requests available for review.`
 
 The command prints only the copyable message on success. It starts with
 `Could someone please review these?` and includes one `Title URL` line per pull
@@ -156,8 +156,9 @@ repeated references, makes no Bitbucket writes, and uses no LLM.
 
 The command uses native `bb` OAuth and curl 7.84 or later. Use
 `--non-interactive` to allow silent refresh without browser login. If discovery
-fails, or a specified pull request is closed, inaccessible, or missing its
-title, the command reports the failure without printing a partial message.
+fails, or a specified pull request is closed, still a draft, inaccessible, or
+missing its title, the command reports the failure without printing a partial
+message.
 Any sign-in prompts go to stderr. With `--json`, the completed message is in
 `message`.
 
@@ -182,9 +183,11 @@ only silent refresh.
 
 The command uses the authenticated user's Bitbucket UUID. It skips existing
 approvals and historical approvals visible in Bitbucket's activity log, including
-approvals that were reset or withdrawn. Immediately before posting, it checks
-that the pull request is open, you are still assigned as a reviewer, and you have
-neither authored nor already approved it. Bitbucket does not expose a conditional approval
+approvals that were reset or withdrawn. It also skips drafts and pull requests
+where your current verdict is a change request, so a bulk run never replaces
+it. Immediately before posting, it checks that the pull request is open and
+ready for review, you are still assigned as a reviewer, and you have neither
+authored it nor already given a verdict. Bitbucket does not expose a conditional approval
 endpoint, so an external change can still occur between that check and the POST.
 
 `--dry-run` reads the same eligibility evidence without posting approvals and
