@@ -51,6 +51,7 @@ const REQUIRED_CUSTOM_SKILL_NAMES: &[&str] = &[
     "grill-me",
     "one-clear-sentence",
     "plain-edit",
+    "project",
     "prove-check",
     "e2e-automated-tests",
     "e2e-live-check",

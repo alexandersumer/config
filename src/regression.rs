@@ -563,6 +563,8 @@ pub(crate) fn test_install_command() -> Result<()> {
         "[features].apps must not be forced off",
         "is a stale managed Codex skill symlink",
         "is missing; expected symlink",
+        ".codex/AGENTS.md is missing; expected symlink",
+        ".claude/CLAUDE.md is missing; expected symlink",
     ] {
         if !initial_install_drift.contains(expected) {
             return Err(format!(
@@ -689,6 +691,12 @@ pub(crate) fn test_install_command() -> Result<()> {
         &home.path().join(".config/ghostty/config"),
         &fixture.path().join("ghostty/config"),
     )?;
+    for agent_instructions in [".codex/AGENTS.md", ".claude/CLAUDE.md"] {
+        assert_symlink_resolves_to(
+            &home.path().join(agent_instructions),
+            &fixture.path().join("instructions/global.md"),
+        )?;
+    }
     let duplicate_ghostty_app_config = home
         .path()
         .join("Library/Application Support/com.mitchellh.ghostty/config");
@@ -1049,6 +1057,76 @@ pub(crate) fn test_link_safety() -> Result<()> {
     if !divergent_file_home.path().join(".zshrc").is_file() {
         return Err("install removed divergent home config file".to_string());
     }
+
+    let matching_instructions_fixture = copy_fixture()?;
+    let matching_instructions_home = tempfile::Builder::new()
+        .prefix("tmp_config_install_matching_instructions_")
+        .tempdir()
+        .map_err(|err| format!("cannot create matching instructions home: {err}"))?;
+    create_codex_system_skills(matching_instructions_home.path())?;
+    fs::create_dir_all(matching_instructions_home.path().join(".claude"))
+        .map_err(|err| format!("cannot create matching instructions directory: {err}"))?;
+    fs::copy(
+        matching_instructions_fixture
+            .path()
+            .join("instructions/global.md"),
+        matching_instructions_home.path().join(".claude/CLAUDE.md"),
+    )
+    .map_err(|err| format!("cannot copy matching instructions fixture: {err}"))?;
+    install_command(&[
+        "--config-root".to_string(),
+        matching_instructions_fixture.path().display().to_string(),
+        "--home".to_string(),
+        matching_instructions_home.path().display().to_string(),
+    ])?;
+    assert_symlink_resolves_to(
+        &matching_instructions_home.path().join(".claude/CLAUDE.md"),
+        &matching_instructions_fixture
+            .path()
+            .join("instructions/global.md"),
+    )?;
+
+    let divergent_instructions_fixture = copy_fixture()?;
+    let divergent_instructions_home = tempfile::Builder::new()
+        .prefix("tmp_config_install_divergent_instructions_")
+        .tempdir()
+        .map_err(|err| format!("cannot create divergent instructions home: {err}"))?;
+    create_codex_system_skills(divergent_instructions_home.path())?;
+    fs::create_dir_all(divergent_instructions_home.path().join(".claude"))
+        .map_err(|err| format!("cannot create divergent instructions directory: {err}"))?;
+    let hand_written_instructions = [".codex/AGENTS.md", ".claude/CLAUDE.md"];
+    for relative in hand_written_instructions {
+        fs::write(
+            divergent_instructions_home.path().join(relative),
+            "do not replace\n",
+        )
+        .map_err(|err| format!("cannot write divergent {relative} fixture: {err}"))?;
+    }
+    let divergent_instructions_error = install_command(&[
+        "--config-root".to_string(),
+        divergent_instructions_fixture.path().display().to_string(),
+        "--home".to_string(),
+        divergent_instructions_home.path().display().to_string(),
+    ])
+    .expect_err("install should reject hand-written agent instruction files");
+    for relative in hand_written_instructions {
+        if !divergent_instructions_error.contains(&format!(
+            "{relative} already exists with different contents"
+        )) {
+            return Err(format!(
+                "install did not report hand-written {relative}: {divergent_instructions_error}"
+            ));
+        }
+        let preserved = fs::read_to_string(divergent_instructions_home.path().join(relative))
+            .map_err(|err| format!("cannot read preserved {relative}: {err}"))?;
+        if preserved != "do not replace\n" {
+            return Err(format!("install changed hand-written {relative}"));
+        }
+    }
+    assert_symlink_resolves_to(
+        &divergent_instructions_home.path().join(".zshrc"),
+        &divergent_instructions_fixture.path().join("zsh/zshrc"),
+    )?;
 
     let binary_conflict_fixture = copy_fixture()?;
     let binary_conflict_home = tempfile::Builder::new()
@@ -1502,6 +1580,10 @@ fn copy_fixture() -> Result<TempDir> {
     copy_tree(
         &config_root.join("ghostty"),
         &temp_dir.path().join("ghostty"),
+    )?;
+    copy_tree(
+        &config_root.join("instructions"),
+        &temp_dir.path().join("instructions"),
     )?;
     Ok(temp_dir)
 }

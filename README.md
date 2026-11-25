@@ -76,6 +76,15 @@ $git-publish-to-origin
 For discovery checks and TWG refresh instructions, see
 [Configuration and skills](docs/configuration.md#custom-skills).
 
+## Share global agent instructions
+
+[`instructions/global.md`](instructions/global.md) holds the rules every agent reads in
+every repository. Installation links `~/.codex/AGENTS.md` and `~/.claude/CLAUDE.md` to
+it, so Codex and Claude Code read the same file. Rules for this repository stay in
+[`AGENTS.md`](AGENTS.md). See
+[Configuration and skills](docs/configuration.md#global-agent-instructions) for adopting
+an existing hand-written file.
+
 ## Change this repository
 
 Enable the Git hook with `cargo run -- install-git-hooks`. Each commit then runs
