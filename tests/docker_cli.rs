@@ -355,6 +355,23 @@ fn shared_tags_are_preserved_and_every_docker_call_uses_the_pinned_socket() {
 }
 
 #[test]
+fn pinned_preview_keeps_the_socket_in_the_apply_guidance() {
+    let fixture = Fixture::new(&["100GB"], &crowded());
+    let socket = fixture.state("desktop.sock");
+    let output = fixture.run(&[
+        "--max-used-space",
+        "80GB",
+        "--docker-socket",
+        socket.to_str().unwrap(),
+    ]);
+    let report = text(&output);
+    assert_eq!(output.status.code(), Some(0), "{report}");
+    assert!(report.contains("rerun the same command with --apply"));
+    assert!(!report.contains("Next: workctl"));
+    assert!(fixture.removals().is_empty());
+}
+
+#[test]
 fn images_that_vanish_during_inventory_are_ignored() {
     let images = crowded();
     let fixture = Fixture::new(&["100GB"], &images);

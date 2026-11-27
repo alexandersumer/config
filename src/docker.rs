@@ -624,7 +624,9 @@ pub(crate) fn run(args: CleanArgs, json_output: bool) -> u8 {
                 }
                 if !outcome.records.is_empty() {
                     text.push('\n');
-                    if !args.apply {
+                    if !args.apply && args.docker_socket.is_some() {
+                        text.push_str("\nNext: rerun the same command with --apply to keep the selected Docker socket\n");
+                    } else if !args.apply {
                         text.push_str(&format!(
                             "\nNext: workctl docker image clean --max-used-space {}B{} --apply\n",
                             args.max_used_space,
