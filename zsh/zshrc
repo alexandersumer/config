@@ -227,6 +227,7 @@ __docker_image_clean_overdue() {
   local stamp=~/.local/state/workctl/docker-image-clean.succeeded
   local last=0 boot
   [[ -s "$stamp" ]] && last=$(<"$stamp")
+  last=${last%% *}
   [[ "$last" == <-> ]] || last=0
   (( EPOCHSECONDS - last > 10800 )) || return 1
   # After a restart the agent has not had its hourly turn yet.

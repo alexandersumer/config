@@ -464,8 +464,9 @@ before its container starts. Sizes are whole numbers with `B`, `kB`, `MB`, `GB`,
 
 `--apply` removes images without force, so Docker itself refuses any image that a
 running or stopped container uses. Those refusals are reported as `in_use` and remain
-successful; other refusals fail the run. Images named by several repositories are
-removed one reference at a time. Docker reports rounded sizes, so an applied run
+successful; other refusals fail the run. Removal uses the inspected image ID. Docker refusals for images referenced by
+multiple repositories are reported as `protected`. These images and untagged
+parents are kept. Docker reports rounded sizes, so an applied run
 measures the store again after each batch and continues with the next oldest images
 until it fits or nothing removable remains. A store held above budget by protected
 images is reported, not treated as a failure. Removed images are not recoverable
@@ -475,6 +476,14 @@ containers use only briefly can be removed before a newer one.
 `--json` reports `started_unix_seconds`, `used_bytes`, `used_bytes_after` for applied
 runs, `within_budget`, a `summary` of counts, and each selected image with its
 `references`, `arrived` timestamp, `unique_bytes` estimate, `status`, and `error`.
+
+### Daily container and build-cache cleanup
+
+`scripts/docker-disk-hygiene` is the source for the local daily LaunchAgent's
+`~/.local/bin/docker-disk-hygiene` executable. It uses the Docker Desktop socket
+and reports a failure if Docker is unavailable or either prune fails. The
+container filter uses creation age. Run the script with `--check` to verify the
+local connection without pruning.
 
 ### Scheduled cleanup
 
@@ -487,16 +496,18 @@ workctl docker image clean --max-used-space 80GB --older-than 2h --apply --heart
 
 The agent uses calendar times rather than an interval: launchd skips interval
 firings that fall while the machine sleeps, but runs a missed calendar time once on
-wake. Each run appends its JSON result to `~/Library/Logs/workctl-docker-image-clean.log`;
-a run that finds the store within budget costs one Docker query. The agent is a
+wake. The agent pins `~/.docker/run/docker.sock` and appends its JSON result to
+`~/Library/Logs/workctl-docker-image-clean.log`. Standard error goes to
+`~/Library/Logs/workctl-docker-image-clean.err.log`. A run within budget costs one Docker query. The agent is a
 generated regular file, replaced whenever it differs from the installing executable.
 Installing into another home with `--home PATH` writes the file without loading it.
 
 A stopped schedule is reported, not assumed. `--heartbeat` records each successful
 applied run in `~/.local/state/workctl/docker-image-clean.succeeded`; a failed or
 interrupted run records nothing. `workctl doctor --managed` fails when the agent is
-missing, changed, not loaded, or has not succeeded for three hours, and the managed
-zsh configuration prints a warning in interactive shells for the same three hours.
+missing, changed, not loaded, overdue by three hours, or ran and left the store
+over budget. The managed zsh configuration prints the overdue warning on
+interactive shell startup.
 Both wait 90 minutes after a restart so the agent gets its first turn. Docker being
 stopped counts as not succeeding. To prove the launchd path at any time, start the
 agent through launchd and read its result:

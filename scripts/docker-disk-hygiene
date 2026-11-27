@@ -1,0 +1,31 @@
+#!/bin/sh
+# Daily Docker cleanup on this Mac's Docker Desktop daemon.
+PATH="$HOME/.docker/bin:${PATH:-/usr/bin:/bin}:/usr/local/bin:/opt/homebrew/bin"
+unset DOCKER_HOST DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH
+
+docker_local() {
+  docker --host "unix://$HOME/.docker/run/docker.sock" "$@"
+}
+
+case "$#:$*" in
+  0:|1:--check) ;;
+  *) printf 'usage: %s [--check]\n' "$0" >&2; exit 2 ;;
+esac
+
+date
+if ! docker_local info --format '{{.Name}}'; then
+  printf '%s\n' 'Docker Desktop is unavailable. Cleanup did not run.' >&2
+  exit 1
+fi
+[ "$#" -eq 0 ] || exit 0
+
+status=0
+if ! docker_local container prune -f --filter until=72h; then
+  printf '%s\n' 'Docker container cleanup failed.' >&2
+  status=1
+fi
+if ! docker_local builder prune -f --filter until=168h; then
+  printf '%s\n' 'Docker build cache cleanup failed.' >&2
+  status=1
+fi
+exit "$status"

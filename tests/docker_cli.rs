@@ -10,6 +10,12 @@ const BIN: &str = env!("CARGO_BIN_EXE_workctl");
 /// Replays Docker's documented report formats and records every invocation.
 const DOCKER: &str = r#"#!/bin/sh
 state=$FAKE_DOCKER
+if [ "$1" = --host ]; then
+  [ "$2" = "unix://$state/desktop.sock" ] || exit 61
+  [ -z "${DOCKER_HOST+x}${DOCKER_CONTEXT+x}${DOCKER_TLS_VERIFY+x}${DOCKER_CERT_PATH+x}" ] || exit 62
+  printf '%s\n' "$2" >>"$state/sockets"
+  shift 2
+fi
 printf '%s\n' "$*" >>"$state/calls"
 if [ -e "$state/unavailable" ]; then
   echo 'Cannot connect to the Docker daemon' >&2
@@ -31,9 +37,14 @@ case "$1 $2 $3" in
   cat "$state/inspect.json"
   [ ! -e "$state/vanished" ]
   ;;
-'image rm '*)
-  if grep -qxF "$3" "$state/refused" 2>/dev/null; then
-    echo "Error response from daemon: conflict: unable to delete $3" >&2
+'image rm --no-prune')
+  target=$4
+  if grep -qxF "$target" "$state/multi_repository" 2>/dev/null; then
+    echo "Error response from daemon: conflict: unable to delete $target (must be forced) - image is referenced in multiple repositories" >&2
+    exit 1
+  fi
+  if grep -qxF "$target" "$state/refused" 2>/dev/null; then
+    echo "Error response from daemon: conflict: unable to delete $target" >&2
     exit 1
   fi
   ;;
@@ -110,6 +121,10 @@ impl Fixture {
             .args(["docker", "image", "clean"])
             .args(args)
             .env("FAKE_DOCKER", self.temp.path())
+            .env("DOCKER_HOST", "unix:///incorrect.sock")
+            .env("DOCKER_CONTEXT", "incorrect")
+            .env("DOCKER_TLS_VERIFY", "1")
+            .env("DOCKER_CERT_PATH", "/incorrect")
             .env("WORKCTL_STATE_DIR", self.state("state"))
             .env(
                 "PATH",
@@ -135,7 +150,7 @@ impl Fixture {
     fn removals(&self) -> Vec<String> {
         self.calls()
             .into_iter()
-            .filter_map(|call| call.strip_prefix("image rm ").map(str::to_owned))
+            .filter_map(|call| call.strip_prefix("image rm --no-prune ").map(str::to_owned))
             .collect()
     }
 }
@@ -300,21 +315,39 @@ fn images_a_container_now_uses_are_kept_while_other_refusals_fail() {
 }
 
 #[test]
-fn images_named_by_several_repositories_are_removed_by_reference() {
+fn shared_tags_are_preserved_and_every_docker_call_uses_the_pinned_socket() {
     let shared = Image {
         tags: &["app:1", "registry.example/team/app:1"],
         digests: &["app@sha256:digest"],
         ..image("sha256:shared", "2020-01-01T00:00:00Z", "30GB")
     };
-    let fixture = Fixture::new(&["100GB", "70GB"], &[shared]);
-    // Removing the last tag takes the digest reference with it.
-    fixture.write("refused", "app@sha256:digest\n");
-    let result = fixture.result(&["--max-used-space", "80GB", "--apply"], 0);
-    assert_eq!(
-        fixture.removals(),
-        ["app:1", "registry.example/team/app:1", "app@sha256:digest"]
+    let fixture = Fixture::new(&["100GB"], &[shared]);
+    fixture.write("multi_repository", "sha256:shared\n");
+    let socket = fixture.state("desktop.sock");
+    let result = fixture.result(
+        &[
+            "--max-used-space",
+            "80GB",
+            "--apply",
+            "--docker-socket",
+            socket.to_str().unwrap(),
+        ],
+        0,
     );
-    assert_eq!(result["images"][0]["status"], "removed");
+    assert_eq!(fixture.removals(), ["sha256:shared"]);
+    let calls = fixture.calls();
+    assert_eq!(
+        calls
+            .iter()
+            .filter(|call| call.starts_with("image rm "))
+            .count(),
+        1
+    );
+    let endpoints = fs::read_to_string(fixture.state("sockets")).unwrap();
+    assert_eq!(endpoints.lines().count(), calls.len());
+    assert_eq!(result["images"][0]["status"], "protected");
+    assert_eq!(result["summary"]["skipped"], 1);
+    assert_eq!(result["within_budget"], false);
     assert_eq!(
         result["images"][0]["references"],
         json!(["app:1", "registry.example/team/app:1", "app@sha256:digest"])
@@ -438,6 +471,19 @@ fn heartbeat_records_only_successful_applied_runs() {
 
     fixture.result(&["--max-used-space", "80GB", "--apply"], 0);
     assert_eq!(fs::read_to_string(&stamp).unwrap(), recorded.to_string());
+
+    let protected = [Image {
+        containers: "1",
+        ..image("sha256:protected", "2020-01-01T00:00:00Z", "95GB")
+    }];
+    let fixture = Fixture::new(&["95GB"], &protected);
+    let result = fixture.result(&args, 0);
+    assert_eq!(result["within_budget"], false);
+    let stamp = fs::read_to_string(fixture.state("state/docker-image-clean.succeeded")).unwrap();
+    assert_eq!(
+        stamp,
+        format!("{} over-budget", result["started_unix_seconds"])
+    );
     let out = fixture.run(&["--max-used-space", "80GB", "--heartbeat"]);
     assert_eq!(out.status.code(), Some(2), "{}", text(&out));
 }

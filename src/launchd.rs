@@ -50,7 +50,9 @@ fn render(home: &Path) -> Result<String> {
   <key>ProgramArguments</key>
   <array>
     <string>{home}/.local/bin/workctl</string>
-{arguments}  </array>
+{arguments}    <string>--docker-socket</string>
+    <string>{home}/.docker/run/docker.sock</string>
+  </array>
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
@@ -65,6 +67,8 @@ fn render(home: &Path) -> Result<String> {
   <string>Background</string>
   <key>StandardOutPath</key>
   <string>{home}/Library/Logs/workctl-docker-image-clean.log</string>
+  <key>StandardErrorPath</key>
+  <string>{home}/Library/Logs/workctl-docker-image-clean.err.log</string>
 </dict>
 </plist>
 "#
@@ -208,8 +212,14 @@ pub(crate) fn diagnostics(home: &Path) -> Result<Vec<String>> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |elapsed| elapsed.as_secs());
-        if let Some(problem) = overdue(now, crate::docker::last_success(), booted()) {
+        let last = crate::docker::last_success();
+        if let Some(problem) = overdue(now, last.map(|(started, _)| started), booted()) {
             return Ok(vec![problem]);
+        }
+        if last.is_some_and(|(_, over_budget)| over_budget) {
+            return Ok(vec![
+                "scheduled Docker image cleanup ran but the image store remains over budget; see ~/Library/Logs/workctl-docker-image-clean.log".into(),
+            ]);
         }
     }
     Ok(Vec::new())
@@ -266,10 +276,11 @@ mod tests {
         let plist = render(Path::new("/Users/a&b")).unwrap();
         for expected in [
             "<string>io.github.alexandersumer.workctl.docker-image-clean</string>",
-            "<string>/Users/a&amp;b/.local/bin/workctl</string>\n    <string>docker</string>\n    <string>image</string>\n    <string>clean</string>\n    <string>--max-used-space</string>\n    <string>80GB</string>\n    <string>--older-than</string>\n    <string>2h</string>\n    <string>--apply</string>\n    <string>--heartbeat</string>\n    <string>--json</string>\n  </array>",
+            "<string>/Users/a&amp;b/.local/bin/workctl</string>\n    <string>docker</string>\n    <string>image</string>\n    <string>clean</string>\n    <string>--max-used-space</string>\n    <string>80GB</string>\n    <string>--older-than</string>\n    <string>2h</string>\n    <string>--apply</string>\n    <string>--heartbeat</string>\n    <string>--json</string>\n    <string>--docker-socket</string>\n    <string>/Users/a&amp;b/.docker/run/docker.sock</string>\n  </array>",
             "<string>/Users/a&amp;b/.docker/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>",
             "<key>StartCalendarInterval</key>\n  <dict>\n    <key>Minute</key>\n    <integer>0</integer>\n  </dict>",
             "<string>/Users/a&amp;b/Library/Logs/workctl-docker-image-clean.log</string>",
+            "<key>StandardErrorPath</key>\n  <string>/Users/a&amp;b/Library/Logs/workctl-docker-image-clean.err.log</string>",
         ] {
             assert!(plist.contains(expected), "{expected}\n{plist}");
         }

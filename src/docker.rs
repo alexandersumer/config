@@ -4,7 +4,7 @@
 use crate::{presentation, runtime};
 use serde::Deserialize;
 use serde_json::json;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::io::{self, Write as _};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -22,6 +22,9 @@ pub(crate) struct CleanArgs {
     /// Record a successful run for the overdue checks in `workctl doctor --managed` and the shell
     #[arg(long, requires = "apply")]
     heartbeat: bool,
+    /// Use this local Unix socket instead of the active Docker context
+    #[arg(long, value_name = "PATH")]
+    docker_socket: Option<String>,
     /// Deadline per Docker command (1-86400 seconds); removal never retries
     #[arg(long, default_value_t = 300, value_parser = clap::value_parser!(u32).range(1..=86_400), value_name = "SECONDS")]
     timeout: u32,
@@ -139,19 +142,22 @@ fn unix_seconds(text: &str) -> Option<i64> {
 }
 
 /// When an unattended run last succeeded, in Unix seconds.
-pub(crate) fn last_success() -> Option<u64> {
+pub(crate) fn last_success() -> Option<(u64, bool)> {
     let stamp = crate::history::state_file(HEARTBEAT).ok()?;
-    std::fs::read_to_string(stamp).ok()?.trim().parse().ok()
+    let contents = std::fs::read_to_string(stamp).ok()?;
+    let mut fields = contents.split_ascii_whitespace();
+    let started = fields.next()?.parse().ok()?;
+    Some((started, fields.next() == Some("over-budget")))
 }
 
 const HEARTBEAT: &str = "docker-image-clean.succeeded";
 
-fn record_success(started: u64) -> Result<(), String> {
+fn record_success(started: u64, over_budget: bool) -> Result<(), String> {
     let stamp = crate::history::state_file(HEARTBEAT)?;
     let mut staged = tempfile::NamedTempFile::new_in(stamp.parent().expect("state directory"))
         .map_err(|error| format!("heartbeat: {error}"))?;
-    staged
-        .write_all(started.to_string().as_bytes())
+    let suffix = if over_budget { " over-budget" } else { "" };
+    write!(staged, "{started}{suffix}")
         .and_then(|_| staged.as_file().sync_all())
         .map_err(|error| format!("heartbeat: {error}"))?;
     staged
@@ -167,21 +173,6 @@ fn human(bytes: u64) -> String {
         }
     }
     format!("{bytes} B")
-}
-
-/// Distinct repositories among `name:tag` and `name@digest` references.
-fn repositories(references: &[String]) -> usize {
-    references
-        .iter()
-        .map(|reference| {
-            let name = reference.split('@').next().unwrap_or(reference);
-            match name.rfind(':') {
-                Some(colon) if !name[colon..].contains('/') => &name[..colon],
-                _ => name,
-            }
-        })
-        .collect::<BTreeSet<_>>()
-        .len()
 }
 
 #[derive(Deserialize)]
@@ -233,13 +224,22 @@ struct Image {
     in_use: bool,
 }
 
-struct Docker {
+struct Docker<'a> {
     timeout: Duration,
+    socket: Option<&'a str>,
 }
 
-impl Docker {
+impl Docker<'_> {
     fn run(&self, args: &[&str]) -> Result<(i32, Vec<u8>, Vec<u8>), String> {
         let mut command = std::process::Command::new("docker");
+        if let Some(socket) = self.socket {
+            command
+                .args(["--host", &format!("unix://{socket}")])
+                .env_remove("DOCKER_HOST")
+                .env_remove("DOCKER_CONTEXT")
+                .env_remove("DOCKER_TLS_VERIFY")
+                .env_remove("DOCKER_CERT_PATH");
+        }
         command.args(args);
         runtime::capture(command, self.timeout, true).map_err(|error| format!("docker: {error}"))
     }
@@ -323,26 +323,17 @@ impl Docker {
         Ok(images)
     }
 
-    /// Never forced: Docker itself refuses while a container uses the image.
+    /// Tags can move while a build is running. Delete only the inspected ID.
     fn remove(&self, image: &Image) -> Removal {
-        // Docker removes by ID only when one repository names the image.
-        let targets: Vec<&str> = if repositories(&image.references) > 1 {
-            image.references.iter().map(String::as_str).collect()
-        } else {
-            vec![image.id.as_str()]
+        let refusal = match self.run(&["image", "rm", "--no-prune", &image.id]) {
+            Ok((0, _, _)) => return Removal::Removed,
+            Ok((_, _, stderr)) => failure(&stderr),
+            Err(error) => return Removal::Failed(error),
         };
-        let mut refusal = None;
-        for target in targets {
-            match self.run(&["image", "rm", target]) {
-                Ok((0, _, _)) => {}
-                Ok((_, _, stderr)) => refusal = Some(failure(&stderr)),
-                Err(error) => return Removal::Failed(error),
-            }
+        if refusal.contains("image is referenced in multiple repositories") {
+            return Removal::Protected(refusal);
         }
-        let Some(refusal) = refusal else {
-            return Removal::Removed;
-        };
-        // Removing the last tag also drops the digest references that followed it.
+        // Another client may have removed the image since inventory.
         match self.output(&["image", "ls", "--all", "--quiet", "--no-trunc"]) {
             Ok(remaining)
                 if !String::from_utf8_lossy(&remaining)
@@ -365,6 +356,7 @@ impl Docker {
 enum Removal {
     Removed,
     InUse,
+    Protected(String),
     Failed(String),
 }
 
@@ -409,6 +401,7 @@ struct Outcome {
 fn clean(args: &CleanArgs) -> Result<Outcome, String> {
     let docker = Docker {
         timeout: Duration::from_secs(args.timeout.into()),
+        socket: args.docker_socket.as_deref(),
     };
     let mut outcome = Outcome {
         used: docker.used()?,
@@ -468,6 +461,7 @@ fn clean(args: &CleanArgs) -> Result<Outcome, String> {
             let (status, error) = match docker.remove(&image) {
                 Removal::Removed => ("removed", None),
                 Removal::InUse => ("in_use", None),
+                Removal::Protected(reason) => ("protected", Some(reason)),
                 Removal::Failed(error) => ("failed", Some(error)),
             };
             outcome.records.push((image, status, error));
@@ -506,7 +500,8 @@ pub(crate) fn run(args: CleanArgs, json_output: bool) -> u8 {
     // A heartbeat that cannot be written must not look like a healthy run.
     let outcome = match outcome {
         Ok(outcome) if args.heartbeat && !failed && !runtime::interrupted() => {
-            record_success(started).map(|()| outcome)
+            let over_budget = outcome.used_after.unwrap_or(outcome.used) > args.max_used_space;
+            record_success(started, over_budget).map(|()| outcome)
         }
         outcome => outcome,
     };
@@ -526,9 +521,11 @@ pub(crate) fn run(args: CleanArgs, json_output: bool) -> u8 {
     };
     // A preview projects from estimates; an applied run reports what Docker measured.
     let remaining = |outcome: &Outcome| {
-        outcome
-            .used_after
-            .unwrap_or_else(|| outcome.used.saturating_sub(estimate(outcome)))
+        if args.apply {
+            outcome.used_after.unwrap_or(outcome.used)
+        } else {
+            outcome.used.saturating_sub(estimate(outcome))
+        }
     };
     let output = if json_output {
         let result = match &outcome {
@@ -544,7 +541,7 @@ pub(crate) fn run(args: CleanArgs, json_output: bool) -> u8 {
                     "unknown_arrival": outcome.unknown_arrival,
                     "selected": outcome.records.len(),
                     "removed": count(outcome, "removed"),
-                    "skipped": count(outcome, "in_use"),
+                    "skipped": count(outcome, "in_use") + count(outcome, "protected"),
                     "failed": count(outcome, "failed"),
                     "estimated_bytes": estimate(outcome),
                 },
@@ -589,9 +586,10 @@ pub(crate) fn run(args: CleanArgs, json_output: bool) -> u8 {
                     ));
                     if args.apply {
                         text.push_str(&format!(
-                            "Removed        {}\nIn use         {}\nFailed         {}\nUsed after     {}\n",
+                            "Removed        {}\nIn use         {}\nProtected      {}\nFailed         {}\nUsed after     {}\n",
                             count(outcome, "removed"),
                             count(outcome, "in_use"),
+                            count(outcome, "protected"),
                             count(outcome, "failed"),
                             human(remaining(outcome))
                         ));
@@ -604,7 +602,7 @@ pub(crate) fn run(args: CleanArgs, json_output: bool) -> u8 {
                     }
                     if remaining(outcome) > args.max_used_space {
                         text.push_str(&format!(
-                            "Over budget    about {}; every other image is in use, inside the age limit, or of unknown arrival\n",
+                            "Over budget    about {}\n",
                             human(remaining(outcome) - args.max_used_space)
                         ));
                     }
@@ -733,29 +731,6 @@ mod tests {
         ] {
             assert_eq!(unix_seconds(unknown), None, "{unknown}");
         }
-    }
-
-    #[test]
-    fn references_count_repositories_not_tags_or_registry_ports() {
-        let references = |names: &[&str]| {
-            names
-                .iter()
-                .map(|name| (*name).to_owned())
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(repositories(&references(&[])), 0);
-        assert_eq!(
-            repositories(&references(&["app:1", "app:2", "app@sha256:abc"])),
-            1
-        );
-        assert_eq!(
-            repositories(&references(&["localhost:5000/app:1", "localhost:5000/app"])),
-            1
-        );
-        assert_eq!(
-            repositories(&references(&["app:1", "registry.example/team/app:1"])),
-            2
-        );
     }
 
     #[test]
