@@ -491,15 +491,19 @@ On macOS, installation writes a launchd agent and loads it for the current login
 session. At the start of every hour it runs:
 
 ```sh
-workctl docker image clean --max-used-space 80GB --older-than 2h --apply --heartbeat --json
+workctl docker image clean --max-used-space 80GB --older-than 2h --apply --heartbeat --json \
+  --docker-socket "$HOME/.docker/run/docker.sock"
 ```
 
 The agent uses calendar times rather than an interval: launchd skips interval
 firings that fall while the machine sleeps, but runs a missed calendar time once on
 wake. The agent pins `~/.docker/run/docker.sock` and appends its JSON result to
 `~/Library/Logs/workctl-docker-image-clean.log`. Standard error goes to
-`~/Library/Logs/workctl-docker-image-clean.err.log`. A run within budget costs one Docker query. The agent is a
-generated regular file, replaced whenever it differs from the installing executable.
+`~/Library/Logs/workctl-docker-image-clean.err.log`. A run within budget costs one Docker query.
+The job uses `Nice=10` so it yields CPU to interactive work while retaining
+launchd's standard resource policy.
+The agent is a generated regular file, replaced whenever it differs from the
+installing executable.
 Installing into another home with `--home PATH` writes the file without loading it.
 
 A stopped schedule is reported, not assumed. `--heartbeat` records each successful

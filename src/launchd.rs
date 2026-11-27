@@ -40,6 +40,7 @@ fn render(home: &Path) -> Result<String> {
         .collect();
     // launchd starts agents with a minimal PATH that omits every Docker CLI location.
     // Calendar times, unlike intervals, also fire once on wake for the hours slept through.
+    // The Background class can starve even read-only Docker queries on a busy Mac.
     Ok(format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -63,8 +64,8 @@ fn render(home: &Path) -> Result<String> {
     <key>Minute</key>
     <integer>0</integer>
   </dict>
-  <key>ProcessType</key>
-  <string>Background</string>
+  <key>Nice</key>
+  <integer>10</integer>
   <key>StandardOutPath</key>
   <string>{home}/Library/Logs/workctl-docker-image-clean.log</string>
   <key>StandardErrorPath</key>
@@ -281,6 +282,7 @@ mod tests {
             "<key>StartCalendarInterval</key>\n  <dict>\n    <key>Minute</key>\n    <integer>0</integer>\n  </dict>",
             "<string>/Users/a&amp;b/Library/Logs/workctl-docker-image-clean.log</string>",
             "<key>StandardErrorPath</key>\n  <string>/Users/a&amp;b/Library/Logs/workctl-docker-image-clean.err.log</string>",
+            "<key>Nice</key>\n  <integer>10</integer>",
         ] {
             assert!(plist.contains(expected), "{expected}\n{plist}");
         }
@@ -288,6 +290,7 @@ mod tests {
         // Interval timers skip every firing that falls while the machine sleeps.
         assert!(!plist.contains("StartInterval"));
         assert!(!plist.contains("RunAtLoad"));
+        assert!(!plist.contains("ProcessType"));
     }
 
     #[test]
