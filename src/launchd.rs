@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 const LABEL: &str = "io.github.alexandersumer.workctl.docker-image-clean";
 /// A fresh build has two hours to start its container before it can be removed.
-const ARGUMENTS: [&str; 10] = [
+const ARGUMENTS: [&str; 11] = [
     "docker",
     "image",
     "clean",
@@ -15,6 +15,7 @@ const ARGUMENTS: [&str; 10] = [
     "2h",
     "--apply",
     "--heartbeat",
+    "--start-docker-desktop",
     "--json",
 ];
 /// Three missed hourly runs are a stopped schedule, not a slow one.
@@ -277,7 +278,7 @@ mod tests {
         let plist = render(Path::new("/Users/a&b")).unwrap();
         for expected in [
             "<string>io.github.alexandersumer.workctl.docker-image-clean</string>",
-            "<string>/Users/a&amp;b/.local/bin/workctl</string>\n    <string>docker</string>\n    <string>image</string>\n    <string>clean</string>\n    <string>--max-used-space</string>\n    <string>80GB</string>\n    <string>--older-than</string>\n    <string>2h</string>\n    <string>--apply</string>\n    <string>--heartbeat</string>\n    <string>--json</string>\n    <string>--docker-socket</string>\n    <string>/Users/a&amp;b/.docker/run/docker.sock</string>\n  </array>",
+            "<string>/Users/a&amp;b/.local/bin/workctl</string>\n    <string>docker</string>\n    <string>image</string>\n    <string>clean</string>\n    <string>--max-used-space</string>\n    <string>80GB</string>\n    <string>--older-than</string>\n    <string>2h</string>\n    <string>--apply</string>\n    <string>--heartbeat</string>\n    <string>--start-docker-desktop</string>\n    <string>--json</string>\n    <string>--docker-socket</string>\n    <string>/Users/a&amp;b/.docker/run/docker.sock</string>\n  </array>",
             "<string>/Users/a&amp;b/.docker/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>",
             "<key>StartCalendarInterval</key>\n  <dict>\n    <key>Minute</key>\n    <integer>0</integer>\n  </dict>",
             "<string>/Users/a&amp;b/Library/Logs/workctl-docker-image-clean.log</string>",

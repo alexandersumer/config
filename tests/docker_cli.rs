@@ -17,11 +17,20 @@ if [ "$1" = --host ]; then
   shift 2
 fi
 printf '%s\n' "$*" >>"$state/calls"
+if [ "$1 $2 $3 $4" = 'desktop start --timeout 120' ]; then
+  if [ -e "$state/start-fails" ]; then
+    echo 'Docker Desktop failed to start' >&2
+    exit 1
+  fi
+  rm -f "$state/unavailable"
+  exit 0
+fi
 if [ -e "$state/unavailable" ]; then
   echo 'Cannot connect to the Docker daemon' >&2
   exit 1
 fi
 case "$1 $2 $3" in
+'version --format {{.Server.Version}}') printf '%s\n' '29.1.3' ;;
 'system df --format')
   calls=$(grep -c '^system df --format' "$state/calls")
   size=$(sed -n "${calls}p" "$state/usage")
@@ -503,6 +512,83 @@ fn heartbeat_records_only_successful_applied_runs() {
     );
     let out = fixture.run(&["--max-used-space", "80GB", "--heartbeat"]);
     assert_eq!(out.status.code(), Some(2), "{}", text(&out));
+}
+
+#[test]
+fn scheduled_cleanup_recovers_a_stopped_desktop_before_recording_success() {
+    let fixture = Fixture::new(&["79.9GB"], &crowded());
+    let socket = fixture.state("desktop.sock");
+    let args = [
+        "--max-used-space",
+        "80GB",
+        "--apply",
+        "--heartbeat",
+        "--docker-socket",
+        socket.to_str().unwrap(),
+        "--start-docker-desktop",
+    ];
+    let stamp = fixture.state("state/docker-image-clean.succeeded");
+
+    fixture.write("unavailable", "");
+    fixture.write("start-fails", "");
+    let result = fixture.result(&args, 1);
+    assert_eq!(
+        result["error"],
+        "Could not start Docker Desktop: Docker Desktop failed to start"
+    );
+    assert!(!stamp.exists());
+
+    fs::remove_file(fixture.state("start-fails")).unwrap();
+    let result = fixture.result(&args, 0);
+    assert_eq!(result["status"], "completed");
+    assert_eq!(result["within_budget"], true);
+    assert_eq!(
+        fs::read_to_string(stamp).unwrap(),
+        result["started_unix_seconds"].to_string()
+    );
+    assert!(fixture.removals().is_empty());
+    assert_eq!(
+        fixture
+            .calls()
+            .iter()
+            .filter(|call| call.starts_with("desktop start "))
+            .count(),
+        2,
+        "each run attempts startup once"
+    );
+}
+
+#[test]
+fn scheduled_cleanup_only_starts_desktop_if_the_daemon_is_unreachable() {
+    for (size, expected_code) in [("79.9GB", 0), ("fail", 1)] {
+        let fixture = Fixture::new(&[size], &crowded());
+        let socket = fixture.state("desktop.sock");
+        let result = fixture.result(
+            &[
+                "--max-used-space",
+                "80GB",
+                "--apply",
+                "--docker-socket",
+                socket.to_str().unwrap(),
+                "--start-docker-desktop",
+            ],
+            expected_code,
+        );
+        if expected_code == 0 {
+            assert_eq!(fixture.calls(), ["system df --format {{json .}}"]);
+        } else {
+            assert_eq!(result["error"], "daemon went away");
+            assert_eq!(
+                fixture.calls(),
+                [
+                    "system df --format {{json .}}",
+                    "system df --format {{json .}}",
+                    "system df --format {{json .}}",
+                    "version --format {{.Server.Version}}",
+                ]
+            );
+        }
+    }
 }
 
 #[test]

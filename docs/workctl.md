@@ -491,7 +491,8 @@ On macOS, installation writes a launchd agent and loads it for the current login
 session. At the start of every hour it runs:
 
 ```sh
-workctl docker image clean --max-used-space 80GB --older-than 2h --apply --heartbeat --json \
+workctl docker image clean --max-used-space 80GB --older-than 2h --apply --heartbeat \
+  --start-docker-desktop --json \
   --docker-socket "$HOME/.docker/run/docker.sock"
 ```
 
@@ -499,7 +500,10 @@ The agent uses calendar times rather than an interval: launchd skips interval
 firings that fall while the machine sleeps, but runs a missed calendar time once on
 wake. The agent pins `~/.docker/run/docker.sock` and appends its JSON result to
 `~/Library/Logs/workctl-docker-image-clean.log`. Standard error goes to
-`~/Library/Logs/workctl-docker-image-clean.err.log`. A run within budget costs one Docker query.
+`~/Library/Logs/workctl-docker-image-clean.err.log`. A run within budget on a
+running daemon costs one Docker query. If the initial measurement fails, the agent
+checks whether the daemon is reachable. If it is down, the agent gives Docker
+Desktop up to two minutes to start, then measures the image store again.
 The job uses `Nice=10` so it yields CPU to interactive work while retaining
 launchd's standard resource policy.
 The agent is a generated regular file, replaced whenever it differs from the
@@ -512,9 +516,8 @@ interrupted run records nothing. `workctl doctor --managed` fails when the agent
 missing, changed, not loaded, overdue by three hours, or ran and left the store
 over budget. The managed zsh configuration prints the overdue warning on
 interactive shell startup.
-Both wait 90 minutes after a restart so the agent gets its first turn. Docker being
-stopped counts as not succeeding. To prove the launchd path at any time, start the
-agent through launchd and read its result:
+Both wait 90 minutes after a restart so the agent gets its first turn. To verify
+the job at any time, start it through launchd and read its result:
 
 ```sh
 launchctl kickstart -p gui/$(id -u)/io.github.alexandersumer.workctl.docker-image-clean

@@ -25,6 +25,9 @@ pub(crate) struct CleanArgs {
     /// Use this local Unix socket instead of the active Docker context
     #[arg(long, value_name = "PATH")]
     docker_socket: Option<String>,
+    /// Start Docker Desktop if the local daemon is unreachable before cleanup
+    #[arg(long, requires_all = ["apply", "docker_socket"])]
+    start_docker_desktop: bool,
     /// Deadline per Docker command (1-86400 seconds); removal never retries
     #[arg(long, default_value_t = 300, value_parser = clap::value_parser!(u32).range(1..=86_400), value_name = "SECONDS")]
     timeout: u32,
@@ -283,6 +286,23 @@ impl Docker<'_> {
         Err("Docker's disk usage report has no image total".into())
     }
 
+    fn initial_usage(&self, start_desktop: bool) -> Result<u64, String> {
+        let usage = self.used();
+        if usage.is_ok() || !start_desktop || runtime::cancelled() {
+            return usage;
+        }
+        // A usage report can fail even when the daemon is reachable.
+        if self
+            .output(&["version", "--format", "{{.Server.Version}}"])
+            .is_ok()
+        {
+            return usage;
+        }
+        self.output(&["desktop", "start", "--timeout", "120"])
+            .map_err(|error| format!("Could not start Docker Desktop: {error}"))?;
+        self.used()
+    }
+
     fn images(&self) -> Result<Vec<Image>, String> {
         let report = self.report(&["system", "df", "--verbose", "--format", "{{json .}}"])?;
         let report: Report = serde_json::from_slice(&report)
@@ -404,7 +424,7 @@ fn clean(args: &CleanArgs) -> Result<Outcome, String> {
         socket: args.docker_socket.as_deref(),
     };
     let mut outcome = Outcome {
-        used: docker.used()?,
+        used: docker.initial_usage(args.start_docker_desktop)?,
         ..Outcome::default()
     };
     if outcome.used <= args.max_used_space {
